@@ -1,0 +1,6 @@
+*.out
+*.mma
+__pycache__
+.vscode
+.DS_Store
+*.png
