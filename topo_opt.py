@@ -2,20 +2,23 @@ import numpy as np
 from scipy import sparse
 from scipy import spatial
 from scipy.sparse import linalg
-from scipy.sparse.linalg import spsolve
 import matplotlib.pylab as plt
 import matplotlib.tri as tri
 from mpi4py import MPI
 from paropt import ParOpt
 import pickle
 import argparse
+import os
+
 
 class NodeFilter:
     """
     A node-based filter for topology optimization
     """
-    def __init__(self, conn, X, r0=1.0, ftype='spatial',
-                 beta=10.0, eta=0.5, projection=False):
+
+    def __init__(
+        self, conn, X, r0=1.0, ftype="spatial", beta=10.0, eta=0.5, projection=False
+    ):
         """
         Create a filter
         """
@@ -33,7 +36,7 @@ class NodeFilter:
         self.F = None
         self.A = None
         self.B = None
-        if ftype == 'spatial':
+        if ftype == "spatial":
             self._initialize_spatial(r0)
         else:
             self._initialize_helmholtz(r0)
@@ -54,11 +57,14 @@ class NodeFilter:
             Fhat = np.zeros(len(indices))
 
             for j, index in enumerate(indices):
-                dist = np.sqrt(np.dot(self.X[i, :] - self.X[index, :],
-                                      self.X[i, :] - self.X[index, :]))
+                dist = np.sqrt(
+                    np.dot(
+                        self.X[i, :] - self.X[index, :], self.X[i, :] - self.X[index, :]
+                    )
+                )
                 Fhat[j] = r0 - dist
 
-            Fhat = Fhat/np.sum(Fhat)
+            Fhat = Fhat / np.sum(Fhat)
             F[i, indices] = Fhat
 
         self.F = F.tocsr()
@@ -80,7 +86,7 @@ class NodeFilter:
         j_index = np.array(j, dtype=int)
 
         # Quadrature points
-        gauss_pts = [-1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         # Assemble all of the the 4 x 4 element stiffness matrices
         Ae = np.zeros((self.nelems, 4, 4))
@@ -99,12 +105,20 @@ class NodeFilter:
             for i in range(2):
                 xi = gauss_pts[i]
                 eta = gauss_pts[j]
-                N = 0.25*np.array([(1.0 - xi)*(1.0 - eta),
-                                   (1.0 + xi)*(1.0 - eta),
-                                   (1.0 + xi)*(1.0 + eta),
-                                   (1.0 - xi)*(1.0 + eta)])
-                Nxi = 0.25*np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
-                Neta = 0.25*np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+                N = 0.25 * np.array(
+                    [
+                        (1.0 - xi) * (1.0 - eta),
+                        (1.0 + xi) * (1.0 - eta),
+                        (1.0 + xi) * (1.0 + eta),
+                        (1.0 - xi) * (1.0 + eta),
+                    ]
+                )
+                Nxi = 0.25 * np.array(
+                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
+                )
+                Neta = 0.25 * np.array(
+                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
+                )
 
                 # Compute the Jacobian transformation at each quadrature points
                 J[:, 0, 0] = np.dot(xe, Nxi)
@@ -113,11 +127,11 @@ class NodeFilter:
                 J[:, 1, 1] = np.dot(ye, Neta)
 
                 # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0]*J[:, 1, 1] - J[:, 0, 1]*J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1]/detJ
-                invJ[:, 0, 1] = -J[:, 0, 1]/detJ
-                invJ[:, 1, 0] = -J[:, 1, 0]/detJ
-                invJ[:, 1, 1] = J[:, 0, 0]/detJ
+                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+                invJ[:, 0, 0] = J[:, 1, 1] / detJ
+                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+                invJ[:, 1, 1] = J[:, 0, 0] / detJ
 
                 # Compute the derivative of the shape functions w.r.t. xi and eta
                 # [Nx, Ny] = [Nxi, Neta]*invJ
@@ -129,8 +143,8 @@ class NodeFilter:
                 Be[:, 0, :] = Nx
                 Be[:, 1, :] = Ny
 
-                Ce += np.einsum('n,nij,nil -> njl', detJ, He, He)
-                Ae += np.einsum('n,nij,nil -> njl', detJ * r0**2, Be, Be)
+                Ce += np.einsum("n,nij,nil -> njl", detJ, He, He)
+                Ae += np.einsum("n,nij,nil -> njl", detJ * r0**2, Be, Be)
 
         # Finish the computation of the Ae matrices
         Ae += Ce
@@ -152,8 +166,12 @@ class NodeFilter:
             rho = self.A(self.B.dot(x))
 
         if self.projection:
-            denom = np.tanh(self.beta*self.eta) + np.tanh(self.beta*(1.0 - self.eta))
-            rho = (np.tanh(self.beta*self.eta) + np.tanh(self.beta*(rho - self.eta)))/denom
+            denom = np.tanh(self.beta * self.eta) + np.tanh(
+                self.beta * (1.0 - self.eta)
+            )
+            rho = (
+                np.tanh(self.beta * self.eta) + np.tanh(self.beta * (rho - self.eta))
+            ) / denom
 
         return rho
 
@@ -164,8 +182,12 @@ class NodeFilter:
             rho = self.A(self.B.dot(x))
 
         if self.projection:
-            denom = np.tanh(self.beta*self.eta) + np.tanh(self.beta*(1.0 - self.eta))
-            grad = g*((self.beta/denom) * 1.0/np.cosh(self.beta*(rho - self.eta))**2)
+            denom = np.tanh(self.beta * self.eta) + np.tanh(
+                self.beta * (1.0 - self.eta)
+            )
+            grad = g * (
+                (self.beta / denom) * 1.0 / np.cosh(self.beta * (rho - self.eta)) ** 2
+            )
         else:
             grad = g
 
@@ -180,59 +202,66 @@ class NodeFilter:
         """
 
         # Create the triangles
-        triangles = np.zeros((2*self.nelems, 3), dtype=int)
-        triangles[:self.nelems, 0] = self.conn[:, 0]
-        triangles[:self.nelems, 1] = self.conn[:, 1]
-        triangles[:self.nelems, 2] = self.conn[:, 2]
+        triangles = np.zeros((2 * self.nelems, 3), dtype=int)
+        triangles[: self.nelems, 0] = self.conn[:, 0]
+        triangles[: self.nelems, 1] = self.conn[:, 1]
+        triangles[: self.nelems, 2] = self.conn[:, 2]
 
-        triangles[self.nelems:, 0] = self.conn[:, 0]
-        triangles[self.nelems:, 1] = self.conn[:, 2]
-        triangles[self.nelems:, 2] = self.conn[:, 3]
+        triangles[self.nelems :, 0] = self.conn[:, 0]
+        triangles[self.nelems :, 1] = self.conn[:, 2]
+        triangles[self.nelems :, 2] = self.conn[:, 3]
 
         # Create the triangulation object
-        tri_obj = tri.Triangulation(self.X[:,0], self.X[:,1], triangles)
+        tri_obj = tri.Triangulation(self.X[:, 0], self.X[:, 1], triangles)
 
         if ax is None:
             fig, ax = plt.subplots()
 
         # Set the aspect ratio equal
-        ax.set_aspect('equal')
+        ax.set_aspect("equal")
 
         # Create the contour plot
         ax.tricontourf(tri_obj, u, **kwargs)
 
         return
 
-class TopologyOptimization(ParOpt.Problem):
-    def __init__(self, fltr, conn, X, bcs, forces={},
-                 E=10.0, nu=0.3, P=3.0, density=1.0, area_fraction=0.4,
-                 draw_history=True):
+
+class TopologyAnalysis:
+    def __init__(
+        self,
+        fltr,
+        conn,
+        X,
+        bcs,
+        forces={},
+        E=10.0,
+        nu=0.3,
+        P=3.0,
+        density=1.0,
+        area_fraction=0.4,
+    ):
 
         self.fltr = fltr
         self.conn = np.array(conn)
         self.X = np.array(X)
         self.P = P
-        self.draw_history = draw_history
         self.density = density
 
         self.nelems = self.conn.shape[0]
         self.nnodes = int(np.max(self.conn)) + 1
-        self.nvars = 2*self.nnodes
-
-        # Set up the topology optimization problem
-        super(TopologyOptimization, self).__init__(MPI.COMM_SELF, self.nnodes, 1)
+        self.nvars = 2 * self.nnodes
 
         # Compute the constitutivve matrix
-        self.C0 = E*np.array([[1.0, nu, 0.0],
-                              [nu, 1.0, 0.0],
-                              [0.0, 0.0, 0.5*(1.0 - nu)]])
-        self.C0 *= 1.0/(1.0 - nu**2)
+        self.C0 = E * np.array(
+            [[1.0, nu, 0.0], [nu, 1.0, 0.0], [0.0, 0.0, 0.5 * (1.0 - nu)]]
+        )
+        self.C0 *= 1.0 / (1.0 - nu**2)
 
         self.reduced = self._compute_reduced_variables(self.nvars, bcs)
         self.f = self._compute_forces(self.nvars, forces)
 
         self.area_gradient = self.eval_area_gradient()
-        self.fixed_area = area_fraction*np.sum(self.area_gradient)
+        self.fixed_area = area_fraction * np.sum(self.area_gradient)
         self.area_gradient_rho = np.zeros(self.nnodes)
 
         for k in range(4):
@@ -242,8 +271,8 @@ class TopologyOptimization(ParOpt.Problem):
         # Set up the i-j indices for the matrix - these are the row
         # and column indices in the stiffness matrix
         self.var = np.zeros((self.conn.shape[0], 8), dtype=int)
-        self.var[:, ::2] = 2*self.conn
-        self.var[:, 1::2] = 2*self.conn + 1
+        self.var[:, ::2] = 2 * self.conn
+        self.var[:, 1::2] = 2 * self.conn + 1
 
         i = []
         j = []
@@ -256,6 +285,7 @@ class TopologyOptimization(ParOpt.Problem):
         # Convert the lists into numpy arrays
         self.i = np.array(i, dtype=int)
         self.j = np.array(j, dtype=int)
+        return
 
     def _compute_reduced_variables(self, nvars, bcs):
         """
@@ -270,7 +300,7 @@ class TopologyOptimization(ParOpt.Problem):
             # For each index in the boundary conditions (corresponding to
             # either a constraint on u and/or constraint on v
             for index in uv_list:
-                var = 2*node + index
+                var = 2 * node + index
                 reduced.remove(var)
 
         return reduced
@@ -282,8 +312,8 @@ class TopologyOptimization(ParOpt.Problem):
         f = np.zeros(nvars)
 
         for node in forces:
-            f[2*node] += forces[node][0]
-            f[2*node+1] += forces[node][1]
+            f[2 * node] += forces[node][0]
+            f[2 * node + 1] += forces[node][1]
 
         return f
 
@@ -293,7 +323,7 @@ class TopologyOptimization(ParOpt.Problem):
         """
 
         # Compute the element stiffness matrix
-        gauss_pts = [-1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         # Assemble all of the the 8 x 8 element stiffness matrix
         Ke = np.zeros((self.nelems, 8, 8))
@@ -310,8 +340,12 @@ class TopologyOptimization(ParOpt.Problem):
             for i in range(2):
                 xi = gauss_pts[i]
                 eta = gauss_pts[j]
-                Nxi = 0.25*np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
-                Neta = 0.25*np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+                Nxi = 0.25 * np.array(
+                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
+                )
+                Neta = 0.25 * np.array(
+                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
+                )
 
                 # Compute the Jacobian transformation at each quadrature points
                 J[:, 0, 0] = np.dot(xe, Nxi)
@@ -320,11 +354,11 @@ class TopologyOptimization(ParOpt.Problem):
                 J[:, 1, 1] = np.dot(ye, Neta)
 
                 # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0]*J[:, 1, 1] - J[:, 0, 1]*J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1]/detJ
-                invJ[:, 0, 1] = -J[:, 0, 1]/detJ
-                invJ[:, 1, 0] = -J[:, 1, 0]/detJ
-                invJ[:, 1, 1] = J[:, 0, 0]/detJ
+                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+                invJ[:, 0, 0] = J[:, 1, 1] / detJ
+                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+                invJ[:, 1, 1] = J[:, 0, 0] / detJ
 
                 # Compute the derivative of the shape functions w.r.t. xi and eta
                 # [Nx, Ny] = [Nxi, Neta]*invJ
@@ -338,7 +372,7 @@ class TopologyOptimization(ParOpt.Problem):
                 Be[:, 2, 1::2] = Nx
 
                 # This is a fancy (and fast) way to compute the element matrices
-                Ke += np.einsum('n,nij,nik,nkl -> njl', detJ, Be, C, Be)
+                Ke += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
 
                 # This is a slower way to compute the element matrices
                 # for k in range(self.nelems):
@@ -356,7 +390,7 @@ class TopologyOptimization(ParOpt.Problem):
         dfdC = np.zeros((self.nelems, 3, 3))
 
         # Compute the element stiffness matrix
-        gauss_pts = [-1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         # Assemble all of the the 8 x 8 element stiffness matrix
         Be = np.zeros((self.nelems, 3, 8))
@@ -372,18 +406,22 @@ class TopologyOptimization(ParOpt.Problem):
         ue = np.zeros((self.nelems, 8))
         psie = np.zeros((self.nelems, 8))
 
-        ue[:, ::2] = u[2*self.conn]
-        ue[:, 1::2] = u[2*self.conn+1]
+        ue[:, ::2] = u[2 * self.conn]
+        ue[:, 1::2] = u[2 * self.conn + 1]
 
-        psie[:, ::2] = psi[2*self.conn]
-        psie[:, 1::2] = psi[2*self.conn+1]
+        psie[:, ::2] = psi[2 * self.conn]
+        psie[:, 1::2] = psi[2 * self.conn + 1]
 
         for j in range(2):
             for i in range(2):
                 xi = gauss_pts[i]
                 eta = gauss_pts[j]
-                Nxi = 0.25*np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
-                Neta = 0.25*np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+                Nxi = 0.25 * np.array(
+                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
+                )
+                Neta = 0.25 * np.array(
+                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
+                )
 
                 # Compute the Jacobian transformation at each quadrature points
                 J[:, 0, 0] = np.dot(xe, Nxi)
@@ -392,11 +430,11 @@ class TopologyOptimization(ParOpt.Problem):
                 J[:, 1, 1] = np.dot(ye, Neta)
 
                 # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0]*J[:, 1, 1] - J[:, 0, 1]*J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1]/detJ
-                invJ[:, 0, 1] = -J[:, 0, 1]/detJ
-                invJ[:, 1, 0] = -J[:, 1, 0]/detJ
-                invJ[:, 1, 1] = J[:, 0, 0]/detJ
+                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+                invJ[:, 0, 0] = J[:, 1, 1] / detJ
+                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+                invJ[:, 1, 1] = J[:, 0, 0] / detJ
 
                 # Compute the derivative of the shape functions w.r.t. xi and eta
                 # [Nx, Ny] = [Nxi, Neta]*invJ
@@ -413,7 +451,7 @@ class TopologyOptimization(ParOpt.Problem):
                     eu = np.dot(Be[k, :], ue[k, :])
                     epsi = np.dot(Be[k, :], psie[k, :])
 
-                    dfdC[k, :, :] += detJ[k]*np.outer(epsi, eu)
+                    dfdC[k, :, :] += detJ[k] * np.outer(epsi, eu)
 
         return dfdC
 
@@ -423,7 +461,7 @@ class TopologyOptimization(ParOpt.Problem):
         """
 
         # Compute the element stiffness matrix
-        gauss_pts = [-1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         # Assemble all of the the 8 x 8 element mass matrices
         Me = np.zeros((self.nelems, 8, 8))
@@ -440,12 +478,20 @@ class TopologyOptimization(ParOpt.Problem):
             for i in range(2):
                 xi = gauss_pts[i]
                 eta = gauss_pts[j]
-                N = 0.25*np.array([(1.0 - xi)*(1.0 - eta),
-                                   (1.0 + xi)*(1.0 - eta),
-                                   (1.0 + xi)*(1.0 + eta),
-                                   (1.0 - xi)*(1.0 + eta)])
-                Nxi = 0.25*np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
-                Neta = 0.25*np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+                N = 0.25 * np.array(
+                    [
+                        (1.0 - xi) * (1.0 - eta),
+                        (1.0 + xi) * (1.0 - eta),
+                        (1.0 + xi) * (1.0 + eta),
+                        (1.0 - xi) * (1.0 + eta),
+                    ]
+                )
+                Nxi = 0.25 * np.array(
+                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
+                )
+                Neta = 0.25 * np.array(
+                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
+                )
 
                 # Compute the Jacobian transformation at each quadrature points
                 J[:, 0, 0] = np.dot(xe, Nxi)
@@ -454,14 +500,14 @@ class TopologyOptimization(ParOpt.Problem):
                 J[:, 1, 1] = np.dot(ye, Neta)
 
                 # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0]*J[:, 1, 1] - J[:, 0, 1]*J[:, 1, 0]
+                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
 
                 # Set the B matrix for each element
                 He[:, 0, ::2] = N
                 He[:, 1, 1::2] = N
 
                 # This is a fancy (and fast) way to compute the element matrices
-                Me += self.density*np.einsum('n,nij,nil -> njl', rhoE*detJ, He, He)
+                Me += self.density * np.einsum("n,nij,nil -> njl", rhoE * detJ, He, He)
 
         M = sparse.coo_matrix((Me.flatten(), (self.i, self.j)))
         M = M.tocsr()
@@ -476,7 +522,7 @@ class TopologyOptimization(ParOpt.Problem):
         dfdrhoE = np.zeros(self.nelems)
 
         # Compute the element stiffness matrix
-        gauss_pts = [-1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         J = np.zeros((self.nelems, 2, 2))
         invJ = np.zeros(J.shape)
@@ -492,22 +538,30 @@ class TopologyOptimization(ParOpt.Problem):
         ue = np.zeros((self.nelems, 8))
         ve = np.zeros((self.nelems, 8))
 
-        ue[:, ::2] = u[2*self.conn]
-        ue[:, 1::2] = u[2*self.conn+1]
+        ue[:, ::2] = u[2 * self.conn]
+        ue[:, 1::2] = u[2 * self.conn + 1]
 
-        ve[:, ::2] = v[2*self.conn]
-        ve[:, 1::2] = v[2*self.conn+1]
+        ve[:, ::2] = v[2 * self.conn]
+        ve[:, 1::2] = v[2 * self.conn + 1]
 
         for j in range(2):
             for i in range(2):
                 xi = gauss_pts[i]
                 eta = gauss_pts[j]
-                N = 0.25*np.array([(1.0 - xi)*(1.0 - eta),
-                                   (1.0 + xi)*(1.0 - eta),
-                                   (1.0 + xi)*(1.0 + eta),
-                                   (1.0 - xi)*(1.0 + eta)])
-                Nxi = 0.25*np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
-                Neta = 0.25*np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+                N = 0.25 * np.array(
+                    [
+                        (1.0 - xi) * (1.0 - eta),
+                        (1.0 + xi) * (1.0 - eta),
+                        (1.0 + xi) * (1.0 + eta),
+                        (1.0 - xi) * (1.0 + eta),
+                    ]
+                )
+                Nxi = 0.25 * np.array(
+                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
+                )
+                Neta = 0.25 * np.array(
+                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
+                )
 
                 # Compute the Jacobian transformation at each quadrature points
                 J[:, 0, 0] = np.dot(xe, Nxi)
@@ -516,7 +570,7 @@ class TopologyOptimization(ParOpt.Problem):
                 J[:, 1, 1] = np.dot(ye, Neta)
 
                 # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0]*J[:, 1, 1] - J[:, 0, 1]*J[:, 1, 0]
+                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
 
                 # Set the B matrix for each element
                 He[:, 0, ::2] = N
@@ -526,7 +580,7 @@ class TopologyOptimization(ParOpt.Problem):
                     eu = np.dot(He[k, :], ue[k, :])
                     ev = np.dot(He[k, :], ve[k, :])
 
-                    dfdrhoE[k] += self.density*detJ[k]*np.dot(ev, eu)
+                    dfdrhoE[k] += self.density * detJ[k] * np.dot(ev, eu)
 
         return dfdrhoE
 
@@ -564,8 +618,12 @@ class TopologyOptimization(ParOpt.Problem):
         self.rho = self.fltr.apply(x)
 
         # Average the density to get the element-wise density
-        self.rhoE = 0.25*(self.rho[self.conn[:, 0]] + self.rho[self.conn[:, 1]] +
-                          self.rho[self.conn[:, 2]] + self.rho[self.conn[:, 3]])
+        self.rhoE = 0.25 * (
+            self.rho[self.conn[:, 0]]
+            + self.rho[self.conn[:, 1]]
+            + self.rho[self.conn[:, 2]]
+            + self.rho[self.conn[:, 3]]
+        )
 
         # Compute the element stiffnesses
         self.C = np.outer(self.rhoE**self.P, self.C0)
@@ -577,14 +635,14 @@ class TopologyOptimization(ParOpt.Problem):
 
     def compliance_gradient(self, x):
         # Compute the gradient of the compliance
-        dfdC = -1.0*self.stiffness_matrix_derivative(self.u, self.u)
+        dfdC = -1.0 * self.stiffness_matrix_derivative(self.u, self.u)
 
         dfdrhoE = np.zeros(self.nelems)
         for i in range(3):
             for j in range(3):
-                dfdrhoE[:] += self.C0[i,j]*dfdC[:,i,j]
+                dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        dfdrhoE[:] *= self.P*(self.rhoE)**(self.P - 1.0)
+        dfdrhoE[:] *= self.P * (self.rhoE) ** (self.P - 1.0)
 
         dfdrho = np.zeros(self.nnodes)
         for i in range(4):
@@ -598,7 +656,7 @@ class TopologyOptimization(ParOpt.Problem):
         dfdrhoE = np.zeros(self.nelems)
 
         # Quadrature points
-        gauss_pts = [-1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         # Jacobian transformation
         J = np.zeros((self.nelems, 2, 2))
@@ -612,8 +670,12 @@ class TopologyOptimization(ParOpt.Problem):
             for i in range(2):
                 xi = gauss_pts[i]
                 eta = gauss_pts[j]
-                Nxi = 0.25*np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
-                Neta = 0.25*np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+                Nxi = 0.25 * np.array(
+                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
+                )
+                Neta = 0.25 * np.array(
+                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
+                )
 
                 # Compute the Jacobian transformation at each quadrature points
                 J[:, 0, 0] = np.dot(xe, Nxi)
@@ -622,7 +684,7 @@ class TopologyOptimization(ParOpt.Problem):
                 J[:, 1, 1] = np.dot(ye, Neta)
 
                 # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0]*J[:, 1, 1] - J[:, 0, 1]*J[:, 1, 0]
+                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
 
                 dfdrhoE[:] += detJ
 
@@ -637,8 +699,12 @@ class TopologyOptimization(ParOpt.Problem):
         self.rho = self.fltr.apply(x)
 
         # Average the density to get the element-wise density
-        self.rhoE = 0.25*(self.rho[self.conn[:, 0]] + self.rho[self.conn[:, 1]] +
-                          self.rho[self.conn[:, 2]] + self.rho[self.conn[:, 3]])
+        self.rhoE = 0.25 * (
+            self.rho[self.conn[:, 0]]
+            + self.rho[self.conn[:, 1]]
+            + self.rho[self.conn[:, 2]]
+            + self.rho[self.conn[:, 3]]
+        )
 
         # Compute the element stiffnesses
         self.C = np.outer(self.rhoE**self.P, self.C0)
@@ -653,7 +719,7 @@ class TopologyOptimization(ParOpt.Problem):
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
-        eigs, ur = sparse.linalg.eigsh(Kr, M=Mr, k=5, sigma=sigma, which='LM', tol=1e-6)
+        eigs, ur = sparse.linalg.eigsh(Kr, M=Mr, k=5, sigma=sigma, which="LM", tol=1e-6)
 
         u = np.zeros((self.nvars, k))
         for i in range(k):
@@ -671,10 +737,10 @@ class TopologyOptimization(ParOpt.Problem):
         self.omega, self.phi = self.frequencies(x, k=k)
 
         c = np.min(self.omega)
-        self.eta = np.exp(-ks_rho*(self.omega - c))
+        self.eta = np.exp(-ks_rho * (self.omega - c))
         a = np.sum(self.eta)
-        ks_min = c - np.log(a)/ks_rho
-        self.eta *= 1.0/a
+        ks_min = c - np.log(a) / ks_rho
+        self.eta *= 1.0 / a
 
         return ks_min
 
@@ -689,18 +755,18 @@ class TopologyOptimization(ParOpt.Problem):
         ks_grad = np.zeros(self.nelems)
         for i in range(len(self.eta)):
             kx = self.stiffness_matrix_derivative(self.phi[:, i], self.phi[:, i])
-            dfdC += (self.eta[i]/(2*self.omega[i]))*kx
+            dfdC += (self.eta[i] / (2 * self.omega[i])) * kx
 
             mx = self.mass_matrix_derivative(self.phi[:, i], self.phi[:, i])
-            dfdrhoM -= (self.omega[i]**2*self.eta[i]/(2*self.omega[i]))*mx
+            dfdrhoM -= (self.omega[i] ** 2 * self.eta[i] / (2 * self.omega[i])) * mx
 
         # Complete the derivative w.r.t. the stiffness matrix
         dfdrhoE = np.zeros(self.nelems)
         for i in range(3):
             for j in range(3):
-                dfdrhoE[:] += self.C0[i,j]*dfdC[:,i,j]
+                dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        dfdrhoE[:] *= self.P*(self.rhoE)**(self.P - 1.0)
+        dfdrhoE[:] *= self.P * (self.rhoE) ** (self.P - 1.0)
 
         # Add the derivative w.r.t. the mass matrix
         dfdrhoE += dfdrhoM
@@ -721,7 +787,7 @@ class TopologyOptimization(ParOpt.Problem):
         strain = np.zeros((self.nelems, 4, 3))
 
         # Compute the element stiffness matrix
-        gauss_pts = [-1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         Be = np.zeros((self.nelems, 3, 8))
         J = np.zeros((self.nelems, 2, 2))
@@ -732,15 +798,19 @@ class TopologyOptimization(ParOpt.Problem):
         ye = self.x[self.conn, 1]
 
         ue = np.zeros((self.nelems, 8))
-        ue[:, ::2] = u[2*self.conn]
-        ue[:, 1::2] = u[2*self.conn+1]
+        ue[:, ::2] = u[2 * self.conn]
+        ue[:, 1::2] = u[2 * self.conn + 1]
 
         for j in range(2):
             for i in range(2):
                 xi = gauss_pts[i]
                 eta = gauss_pts[j]
-                Nxi = 0.25*np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
-                Neta = 0.25*np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+                Nxi = 0.25 * np.array(
+                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
+                )
+                Neta = 0.25 * np.array(
+                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
+                )
 
                 # Compute the Jacobian transformation at each quadrature points
                 J[:, 0, 0] = np.dot(xe, Nxi)
@@ -749,11 +819,11 @@ class TopologyOptimization(ParOpt.Problem):
                 J[:, 1, 1] = np.dot(ye, Neta)
 
                 # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0]*J[:, 1, 1] - J[:, 0, 1]*J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1]/detJ
-                invJ[:, 0, 1] = -J[:, 0, 1]/detJ
-                invJ[:, 1, 0] = -J[:, 1, 0]/detJ
-                invJ[:, 1, 1] = J[:, 0, 0]/detJ
+                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+                invJ[:, 0, 0] = J[:, 1, 1] / detJ
+                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+                invJ[:, 1, 1] = J[:, 0, 0] / detJ
 
                 # Compute the derivative of the shape functions w.r.t. xi and eta
                 # [Nx, Ny] = [Nxi, Neta]*invJ
@@ -766,7 +836,7 @@ class TopologyOptimization(ParOpt.Problem):
                 Be[:, 2, ::2] = Ny
                 Be[:, 2, 1::2] = Nx
 
-                index = i + 2*j
+                index = i + 2 * j
                 for k in range(self.nelems):
                     strain[k, index, :] = np.dot(Be[k], ue[k, :])
 
@@ -778,10 +848,10 @@ class TopologyOptimization(ParOpt.Problem):
         """
 
         # The strain at each quadrature point
-        dfdu = np.zeros(2*self.nnodes)
+        dfdu = np.zeros(2 * self.nnodes)
 
         # Compute the element stiffness matrix
-        gauss_pts = [-1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         Be = np.zeros((self.nelems, 3, 8))
         J = np.zeros((self.nelems, 2, 2))
@@ -795,8 +865,12 @@ class TopologyOptimization(ParOpt.Problem):
             for i in range(2):
                 xi = gauss_pts[i]
                 eta = gauss_pts[j]
-                Nxi = 0.25*np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
-                Neta = 0.25*np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+                Nxi = 0.25 * np.array(
+                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
+                )
+                Neta = 0.25 * np.array(
+                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
+                )
 
                 # Compute the Jacobian transformation at each quadrature points
                 J[:, 0, 0] = np.dot(xe, Nxi)
@@ -805,11 +879,11 @@ class TopologyOptimization(ParOpt.Problem):
                 J[:, 1, 1] = np.dot(ye, Neta)
 
                 # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0]*J[:, 1, 1] - J[:, 0, 1]*J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1]/detJ
-                invJ[:, 0, 1] = -J[:, 0, 1]/detJ
-                invJ[:, 1, 0] = -J[:, 1, 0]/detJ
-                invJ[:, 1, 1] = J[:, 0, 0]/detJ
+                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+                invJ[:, 0, 0] = J[:, 1, 1] / detJ
+                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+                invJ[:, 1, 1] = J[:, 0, 0] / detJ
 
                 # Compute the derivative of the shape functions w.r.t. xi and eta
                 # [Nx, Ny] = [Nxi, Neta]*invJ
@@ -822,14 +896,70 @@ class TopologyOptimization(ParOpt.Problem):
                 Be[:, 2, ::2] = Ny
                 Be[:, 2, 1::2] = Nx
 
-                index = i + 2*j
+                index = i + 2 * j
                 for k in range(self.nelems):
                     dfdue = np.dot(Be[k].T, dfdstrain[k, index, :])
 
-                    dfdu[2*self.conn[k, :]] += dfdue[::2]
-                    dfdu[2*self.conn[k, :]+1] += dfdue[1::2]
+                    dfdu[2 * self.conn[k, :]] += dfdue[::2]
+                    dfdu[2 * self.conn[k, :] + 1] += dfdue[1::2]
 
         return dfdu
+
+    def plot(self, u, ax=None, **kwargs):
+        """
+        Create a plot
+        """
+
+        # Create the triangles
+        triangles = np.zeros((2 * self.nelems, 3), dtype=int)
+        triangles[: self.nelems, 0] = self.conn[:, 0]
+        triangles[: self.nelems, 1] = self.conn[:, 1]
+        triangles[: self.nelems, 2] = self.conn[:, 2]
+
+        triangles[self.nelems :, 0] = self.conn[:, 0]
+        triangles[self.nelems :, 1] = self.conn[:, 2]
+        triangles[self.nelems :, 2] = self.conn[:, 3]
+
+        # Create the triangulation object
+        tri_obj = tri.Triangulation(self.X[:, 0], self.X[:, 1], triangles)
+
+        if ax is None:
+            fig, ax = plt.subplots()
+
+        # Set the aspect ratio equal
+        ax.set_aspect("equal")
+
+        # Create the contour plot
+        ax.tricontourf(tri_obj, u, **kwargs)
+
+        return
+
+
+class OptCompliance(ParOpt.Problem):
+    """
+    Compliance minimization under volume constraint
+    """
+
+    def __init__(
+        self,
+        analysis: TopologyAnalysis,
+        vol_frac=0.4,
+        draw_history=True,
+        draw_every=1,
+        prefix="result",
+    ):
+        self.analysis = analysis
+        self.area_gradient = self.analysis.eval_area_gradient()
+        self.fixed_area = vol_frac * np.sum(self.area_gradient)
+
+        super().__init__(MPI.COMM_SELF, analysis.nnodes, 1)
+
+        self.draw_history = draw_history
+        self.draw_every = draw_every
+        self.prefix = prefix
+
+        self.it_counter = 0
+        return
 
     def getVarsAndBounds(self, x, lb, ub):
         """Get the variable values and bounds"""
@@ -844,15 +974,17 @@ class TopologyOptimization(ParOpt.Problem):
         """
 
         fail = 0
-        obj = self.compliance(x[:])
-        con = [self.fixed_area - self.area_gradient.dot(self.rhoE)]
+        obj = self.analysis.compliance(x[:])
+        con = [self.fixed_area - self.analysis.area_gradient.dot(self.analysis.rhoE)]
 
-        if self.draw_history:
+        if self.draw_history and self.it_counter % self.draw_every == 0:
             fig, ax = plt.subplots()
-            self.plot(self.rho, ax=ax)
-            ax.set_aspect('equal', 'box')
-            plt.savefig('topology_proj.png')
+            self.analysis.plot(self.analysis.rho, ax=ax)
+            ax.set_aspect("equal", "box")
+            plt.savefig(os.path.join(self.prefix, "%d.png" % self.it_counter))
             plt.close()
+
+        self.it_counter += 1
 
         return fail, obj, con
 
@@ -862,46 +994,23 @@ class TopologyOptimization(ParOpt.Problem):
         """
 
         fail = 0
-        g[:] = self.compliance_gradient(x[:])
-        A[0][:] = -self.fltr.applyGradient(self.area_gradient_rho[:],x[:])
+        g[:] = self.analysis.compliance_gradient(x[:])
+        A[0][:] = -self.analysis.fltr.applyGradient(
+            self.analysis.area_gradient_rho[:], x[:]
+        )
 
         return fail
 
-    def plot(self, u, ax=None, **kwargs):
-        """
-        Create a plot
-        """
 
-        # Create the triangles
-        triangles = np.zeros((2*self.nelems, 3), dtype=int)
-        triangles[:self.nelems, 0] = self.conn[:, 0]
-        triangles[:self.nelems, 1] = self.conn[:, 1]
-        triangles[:self.nelems, 2] = self.conn[:, 2]
-
-        triangles[self.nelems:, 0] = self.conn[:, 0]
-        triangles[self.nelems:, 1] = self.conn[:, 2]
-        triangles[self.nelems:, 2] = self.conn[:, 3]
-
-        # Create the triangulation object
-        tri_obj = tri.Triangulation(self.X[:,0], self.X[:,1], triangles)
-
-        if ax is None:
-            fig, ax = plt.subplots()
-
-        # Set the aspect ratio equal
-        ax.set_aspect('equal')
-
-        # Create the contour plot
-        ax.tricontourf(tri_obj, u, **kwargs)
-
-        return
-
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     p = argparse.ArgumentParser()
-    p.add_argument('--case', type=str, default=None,
-                   help='Name of the case file')
+    p.add_argument("--case", type=str, default=None, help="Name of the case file")
     args = p.parse_args()
+
+    prefix = "result"
+    if not os.path.isdir(prefix):
+        os.mkdir(prefix)
 
     if args.case is None:
         # Generate the square domain problem by default
@@ -911,28 +1020,28 @@ if __name__ == '__main__':
         ly = 10
         n = 64
 
-        nelems = m*n
-        nnodes = (m + 1)*(n + 1)
+        nelems = m * n
+        nnodes = (m + 1) * (n + 1)
 
         y = np.linspace(0, ly, n + 1)
         x = np.linspace(0, lx, m + 1)
-        nodes = np.arange(0, (n + 1)*(m + 1)).reshape((n + 1, m + 1))
+        nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
 
         # Set the node locations
         X = np.zeros((nnodes, 2))
         for j in range(n + 1):
             for i in range(m + 1):
-                X[i + j*(m + 1), 0] = x[i]
-                X[i + j*(m + 1), 1] = y[j]
+                X[i + j * (m + 1), 0] = x[i]
+                X[i + j * (m + 1), 1] = y[j]
 
         # Set the connectivity
         conn = np.zeros((nelems, 4), dtype=int)
         for j in range(n):
             for i in range(m):
-                conn[i + j*m, 0] = nodes[j, i]
-                conn[i + j*m, 1] = nodes[j, i + 1]
-                conn[i + j*m, 2] = nodes[j + 1, i + 1]
-                conn[i + j*m, 3] = nodes[j + 1, i]
+                conn[i + j * m, 0] = nodes[j, i]
+                conn[i + j * m, 1] = nodes[j, i + 1]
+                conn[i + j * m, 2] = nodes[j + 1, i + 1]
+                conn[i + j * m, 3] = nodes[j + 1, i]
 
         # Set the constrained degrees of freedom at each node
         bcs = {}
@@ -941,67 +1050,72 @@ if __name__ == '__main__':
 
         P = 10.0
         forces = {}
-        pn = n//10
+        pn = n // 10
         for j in range(pn):
-            forces[nodes[j, -1]] = [0, -P/pn]
+            forces[nodes[j, -1]] = [0, -P / pn]
 
-        r0 = 0.05*np.min((lx, ly))
+        r0 = 0.05 * np.min((lx, ly))
     else:
-        with open(args.case, 'rb') as file:
+        with open(args.case, "rb") as file:
             pkl = pickle.load(file)
 
-        nelems = pkl['nelems']
-        nnodes = pkl['nnodes']
-        X = pkl['X']
-        conn = pkl['conn']
-        bcs = pkl['bcs']
-        forces = pkl['forces']
+        nelems = pkl["nelems"]
+        nnodes = pkl["nnodes"]
+        X = pkl["X"]
+        conn = pkl["conn"]
+        bcs = pkl["bcs"]
+        forces = pkl["forces"]
         r0 = 0.05
 
     # Create the filter
-    fltr = NodeFilter(conn, X, r0, ftype='spatial', projection=False)
-    topo = TopologyOptimization(fltr, conn, X, bcs, forces)
+    fltr = NodeFilter(conn, X, r0, ftype="spatial", projection=False)
+    analysis = TopologyAnalysis(fltr, conn, X, bcs, forces)
+    topo = OptCompliance(analysis, prefix=prefix)
 
     eps = 1e-6
-    x = 0.95*np.ones(nnodes)
+    x = 0.95 * np.ones(nnodes)
     p = np.random.uniform(size=x.shape)
 
-    f0 = topo.ks_eigenvalue(x)
-    grad = topo.ks_eigenvalue_derivative(x)
+    f0 = analysis.ks_eigenvalue(x)
+    grad = analysis.ks_eigenvalue_derivative(x)
 
-    f1 = topo.ks_eigenvalue(x + eps*p)
+    f1 = analysis.ks_eigenvalue(x + eps * p)
 
-    fd = (f1 - f0)/eps
+    fd = (f1 - f0) / eps
     ans = np.dot(grad, p)
 
-    print('Natural frequency derivative check:')
-    print('Finite difference: ', fd)
-    print('Result:            ', ans)
+    print("Natural frequency derivative check:")
+    print("Finite difference: ", fd)
+    print("Result:            ", ans)
 
     topo.checkGradients()
 
     options = {
-        'algorithm': 'tr',
-        'tr_init_size': 0.05,
-        'tr_min_size': 1e-6,
-        'tr_max_size': 10.0,
-        'tr_eta': 0.25,
-        'tr_infeas_tol': 1e-6,
-        'tr_l1_tol': 1e-3,
-        'tr_linfty_tol': 0.0,
-        'tr_adaptive_gamma_update': True,
-        'tr_max_iterations': 1000,
-        'max_major_iters': 100,
-        'penalty_gamma': 1e3,
-        'qn_subspace_size': 10,
-        'qn_type': 'bfgs',
-        'abs_res_tol': 1e-8,
-        'starting_point_strategy': 'affine_step',
-        'barrier_strategy': 'mehrotra_predictor_corrector',
-        'use_line_search': False}
+        "algorithm": "tr",
+        "tr_init_size": 0.05,
+        "tr_min_size": 1e-6,
+        "tr_max_size": 10.0,
+        "tr_eta": 0.25,
+        "tr_infeas_tol": 1e-6,
+        "tr_l1_tol": 1e-3,
+        "tr_linfty_tol": 0.0,
+        "tr_adaptive_gamma_update": True,
+        "tr_max_iterations": 1000,
+        "max_major_iters": 100,
+        "penalty_gamma": 1e3,
+        "qn_subspace_size": 10,
+        "qn_type": "bfgs",
+        "abs_res_tol": 1e-8,
+        "starting_point_strategy": "affine_step",
+        "barrier_strategy": "mehrotra_predictor_corrector",
+        "use_line_search": False,
+    }
 
     options = {
-        'algorithm': 'mma'}
+        "algorithm": "mma",
+        "output_file": os.path.join(prefix, "paropt.out"),
+        "mma_output_file": os.path.join(prefix, "paropt.mma"),
+    }
 
     # Set up the optimizer
     opt = ParOpt.Optimizer(topo, options)
