@@ -1,5 +1,7 @@
 *.out
 *.mma
+*.tr
+*.log
 __pycache__
 .vscode
 .DS_Store
