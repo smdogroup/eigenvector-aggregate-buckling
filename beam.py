@@ -12,7 +12,7 @@ class EulerBeam:
     def __init__(self, L, nelems, ndvs=5, E=1.0, density=1.0):
         self.L = L
         self.nelems = nelems
-        self.ndof = 2 * (self.nelems - 1)
+        self.ndof = 4 * (self.nelems - 1)
         self.ndvs = ndvs
         self.E = E
         self.density = density
@@ -26,27 +26,62 @@ class EulerBeam:
         # Length of one element
         Le = self.L / self.nelems
 
+        # dof are stored by: v, w, theta,y, theta,z
+        # v, theta,z - beam deformation in the y-z plane
+        xydof = [0, 3, 4, 7]
+        # w, theta,y
+        xzdof = [1, 2, 5, 6]
+
+        # Set the transformations for the x-z plane and the x-y plane
+        cxy = np.array([1.0, Le, 1.0, Le])
+        cxz = np.array([1.0, -Le, 1.0, -Le])
+
         # Compute the stiffness matrix
-        self.ke = np.array(
+        k0 = np.array(
             [
-                [12.0, 6.0 * Le, -12.0, 6.0 * Le],
-                [6.0 * Le, 4.0 * Le**2, -6.0 * Le, 2.0 * Le**2],
-                [-12.0, -6.0 * Le, 12.0, -6.0 * Le],
-                [6.0 * Le, 2.0 * Le**2, -6.0 * Le, 4.0 * Le**2],
+                [12.0, -6.0, -12.0, -6.0],
+                [-6.0, 4.0, 6.0, 2.0],
+                [-12.0, 6.0, 12.0, 6.0],
+                [-6.0, 2.0, 6.0, 4.0],
             ]
         )
-        self.ke *= 1.0 / Le**3
+        ky = (k0 / Le**3) * np.outer(cxy, cxy)
+        kz = (k0 / Le**3) * np.outer(cxz, cxz)
+
+        # Set the elements into the stiffness matrix
+        self.ke = np.zeros((8, 8))
+        for ie, i in enumerate(xydof):
+            for je, j in enumerate(xydof):
+                self.ke[i, j] = ky[ie, je]
+
+        for ie, i in enumerate(xzdof):
+            for je, j in enumerate(xzdof):
+                self.ke[i, j] = kz[ie, je]
 
         # Compute the mass matrix
-        self.me = np.array(
-            [
-                [156.0, 22.0 * Le, 54.0, -13.0 * Le],
-                [22.0 * Le, 4 * Le**2, 13.0 * Le, -3.0 * Le**2],
-                [54.0, 13.0 * Le, 156.0, -22.0 * Le],
-                [-13.0 * Le, -3.0 * Le**2, -22.0 * Le, 4.0 * Le**2],
-            ]
+        m0 = (
+            np.array(
+                [
+                    [156.0, 22.0, 54.0, -13.0],
+                    [22.0, 4.0, 13.0, -3.0],
+                    [54.0, 13.0, 156.0, -22.0],
+                    [-13.0, -3.0, -22.0, 4.0],
+                ]
+            )
+            / 420.0
         )
-        self.me *= Le / 420.0
+        my = (m0 * Le) * np.outer(cxy, cxy)
+        mz = (m0 * Le) * np.outer(cxz, cxz)
+
+        # Set the elements into the stiffness matrix
+        self.me = np.zeros((8, 8))
+        for ie, i in enumerate(xzdof):
+            for je, j in enumerate(xzdof):
+                self.me[i, j] = my[ie, je]
+
+        for ie, i in enumerate(xydof):
+            for je, j in enumerate(xydof):
+                self.me[i, j] = mz[ie, je]
 
         return
 
@@ -76,11 +111,14 @@ class EulerBeam:
         Get the global variables for the given element
         """
         if elem == 0:
-            return [-1, -1, 0, 1]
+            return [-1, -1, -1, -1, 0, 1, 2, 3]
         elif elem == self.nelems - 1:
-            return [2 * (elem - 1), 2 * (elem - 1) + 1, -1, -1]
+            i = 4 * (elem - 1)
+            return [i, i + 1, i + 2, i + 3, -1, -1, -1, -1]
         else:
-            return [2 * (elem - 1), 2 * (elem - 1) + 1, 2 * elem, 2 * elem + 1]
+            i = 4 * (elem - 1)
+            j = 4 * elem
+            return [i, i + 1, i + 2, i + 3, j, j + 1, j + 2, j + 3]
 
     def mass_matrix(self, x):
         """
@@ -220,7 +258,7 @@ class EulerBeam:
         for k in range(5):
             u = np.zeros(self.nelems + 1)
             x = np.linspace(0, self.L, self.nelems + 1)
-            u[1:-1] = Q[::2, k]
+            u[1:-1] = Q[::4, k]
             plt.plot(x, u)
 
         plt.show()
