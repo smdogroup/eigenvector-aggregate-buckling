@@ -236,7 +236,7 @@ class TopologyAnalysis:
         forces={},
         E=10.0,
         nu=0.3,
-        P=3.0,
+        ramp=5.0,
         density=1.0,
         area_fraction=0.4,
         K0=None,
@@ -246,7 +246,7 @@ class TopologyAnalysis:
         self.fltr = fltr
         self.conn = np.array(conn)
         self.X = np.array(X)
-        self.P = P
+        self.ramp = ramp
         self.density = density
 
         self.K0 = K0
@@ -639,7 +639,7 @@ class TopologyAnalysis:
         )
 
         # Compute the element stiffnesses
-        self.C = np.outer(self.rhoE**self.P, self.C0)
+        self.C = np.outer(self.rhoE / (1.0 + self.ramp * (1.0 - self.rhoE)), self.C0)
         self.C = self.C.reshape((self.nelems, 3, 3))
 
         self.u = self.solve(self.C)
@@ -655,7 +655,7 @@ class TopologyAnalysis:
             for j in range(3):
                 dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        dfdrhoE[:] *= self.P * (self.rhoE) ** (self.P - 1.0)
+        dfdrhoE[:] *= (1.0 + self.ramp) / (1.0 + self.ramp * (1.0 - self.rhoE)) ** 2
 
         dfdrho = np.zeros(self.nnodes)
         for i in range(4):
@@ -720,7 +720,7 @@ class TopologyAnalysis:
         )
 
         # Compute the element stiffnesses
-        self.C = np.outer(self.rhoE**self.P, self.C0)
+        self.C = np.outer(self.rhoE / (1.0 + self.ramp * (1.0 - self.rhoE)), self.C0)
         self.C = self.C.reshape((self.nelems, 3, 3))
 
         K = self.assemble_stiffness_matrix(self.C)
@@ -728,7 +728,8 @@ class TopologyAnalysis:
             K += self.K0
         Kr = self.reduce_matrix(K)
 
-        M = self.assemble_mass_matrix(self.rhoE)
+        rhoE_m = (self.ramp + 1.0) * self.rhoE / (1 + self.ramp * self.rhoE)
+        M = self.assemble_mass_matrix(rhoE_m)
         if self.M0 is not None:
             M += self.M0
         Mr = self.reduce_matrix(M)
@@ -783,7 +784,8 @@ class TopologyAnalysis:
             for j in range(3):
                 dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        dfdrhoE[:] *= self.P * (self.rhoE) ** (self.P - 1.0)
+        dfdrhoE[:] *= (1.0 + self.ramp) / (1.0 + self.ramp * (1.0 - self.rhoE)) ** 2
+        dfdrhoM[:] *= (1.0 + self.ramp) / (1.0 + self.ramp * self.rhoE) ** 2
 
         # Add the derivative w.r.t. the mass matrix
         dfdrhoE += dfdrhoM
