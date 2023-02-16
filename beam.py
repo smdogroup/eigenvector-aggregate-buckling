@@ -152,7 +152,7 @@ class EulerBeam:
 
         return N
 
-    def get_vars(self, elem):
+    def get_vars(self, elem, u=None):
         """
         Get the global variables for the given element
 
@@ -160,6 +160,8 @@ class EulerBeam:
         ----------
         elem : int
             Element index
+        u : np.ndarray
+            Global variables
 
         Returns
         -------
@@ -167,14 +169,23 @@ class EulerBeam:
             List of length 8 of the associated element variables
         """
         if elem == 0:
-            return [-1, -1, -1, -1, 0, 1, 2, 3]
+            elem_vars = [-1, -1, -1, -1, 0, 1, 2, 3]
         elif elem == self.nelems - 1:
             i = 4 * (elem - 1)
-            return [i, i + 1, i + 2, i + 3, -1, -1, -1, -1]
+            elem_vars = [i, i + 1, i + 2, i + 3, -1, -1, -1, -1]
         else:
             i = 4 * (elem - 1)
             j = 4 * elem
-            return [i, i + 1, i + 2, i + 3, j, j + 1, j + 2, j + 3]
+            elem_vars = [i, i + 1, i + 2, i + 3, j, j + 1, j + 2, j + 3]
+
+        if u is None:
+            return elem_vars
+        else:
+            elem_u = np.zeros(8)
+            for ie, i in enumerate(elem_vars):
+                if i >= 0:
+                    elem_u[ie] = u[i]
+            return elem_u
 
     def get_sectional_mass(self, x):
         """
@@ -629,11 +640,15 @@ class EulerBeam:
             # Get the element variables
             elem_vars = self.get_vars(elem)
 
-            # Compute ky = d^2v/dx^2
-            ky = np.dot(self.By, Qk[elem_vars])
+            ky = 0.0
+            kz = 0.0
+            for ie, i in enumerate(elem_vars):
+                if i >= 0:
+                    # Compute ky = d^2v/dx^2
+                    ky += self.By[ie] * Qk[i]
 
-            # Compute kz = d^2w/dx^2
-            kz = np.dot(self.Bz, Qk[elem_vars])
+                    # Compute kz = d^2w/dx^2
+                    kz += self.Bz[ie] * Qk[i]
 
             # Comute the von-Mises stress squared and sum contributions from
             # the top and
@@ -649,7 +664,7 @@ class EulerBeam:
                         eta_stress[elem]
                         * (self.E * r0)
                         * (sx1 * self.By[ie] + sx2 * self.Bz[ie])
-                    )
+                    ) / allowable**2
 
         return product
 
@@ -660,7 +675,7 @@ class EulerBeam:
         """
 
         # Solve the eigenvalue problem
-        lam, Q = self.solve_eigenvalue_problem(x, N=N)
+        lam, QN = self.solve_eigenvalue_problem(x, N=N)
 
         # Compute the eta values
         lam_min = np.min(lam)
@@ -668,7 +683,7 @@ class EulerBeam:
         eta = eta / np.sum(eta)
 
         # Compute the stresses in the beam
-        stress = self.get_stress_values(x, eta, Q, allowable=allowable, N=N)
+        stress = self.get_stress_values(x, eta, QN, allowable=allowable, N=N)
 
         # Now aggregate over the stress
         max_stress = np.max(stress)
@@ -699,16 +714,6 @@ class EulerBeam:
         dfdx = self.get_stress_values_deriv(
             x, eta_stress, eta, QN, allowable=allowable, N=N
         )
-
-        result = np.dot(eta_stress, stress)
-        result2 = 0.0
-
-        for k in range(N):
-            prod = self.get_stress_product(x, eta_stress, QN[:, k], allowable=allowable)
-            result2 += eta[k] * np.dot(QN[:, k], prod)
-
-        print("result = ", result)
-        print("result2 = ", result2)
 
         for j in range(N):
             # Compute D * QN[:, j]
@@ -888,25 +893,25 @@ elif problem == "stress":
     # Set the design variable values
     x = 0.01 * np.ones(ndvs)
 
-    N = 8
-    rho = 10.0
+    N = 10
+    rho = 100.0
     allowable = 1.0
 
     p = np.random.uniform(size=x.shape)
 
-    dh = 1e-5
+    dh = 1e-6
 
     fd = (
         beam.eigenvector_stress(x + dh * p, rho=rho, allowable=allowable)
-        - beam.eigenvector_stress(x - dh, rho=rho, allowable=allowable)
+        - beam.eigenvector_stress(x - dh * p, rho=rho, allowable=allowable)
     ) / (2.0 * dh)
 
     dfdx = beam.eigenvector_stress_deriv(x, rho=rho, allowable=allowable, N=N)
     ans = np.dot(dfdx, p)
 
-    print(fd)
-    print(ans)
-    print(dfdx)
+    print("fd      = ", fd)
+    print("ans     = ", ans)
+    print("rel err = ", (fd - ans) / fd)
 
 
 elif problem == "optimization":
