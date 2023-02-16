@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import sparse
 from scipy import spatial
-from scipy.sparse import linalg
+from scipy.sparse import linalg, coo_matrix
 import matplotlib.pylab as plt
 import matplotlib.tri as tri
 from mpi4py import MPI
@@ -1032,6 +1032,7 @@ class OptFrequency(ParOpt.Problem):
         draw_history=True,
         draw_every=1,
         prefix="result",
+        dv_mapping=None,  # If provided, optimizer controls reduced design variable xr only
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -1039,6 +1040,7 @@ class OptFrequency(ParOpt.Problem):
         self.xfull[self.non_design_nodes] = 1.0  # Set non-design mass to 0.0
         self.design_nodes = np.ones(len(self.xfull), dtype=bool)
         self.design_nodes[self.non_design_nodes] = False
+        self.dv_mapping = dv_mapping
 
         # Add more non-design constant to matrices
         self.add_mat0(which="M", density=10.0)
@@ -1047,6 +1049,8 @@ class OptFrequency(ParOpt.Problem):
         self.fixed_area = vol_frac * np.sum(self.area_gradient)
 
         self.ndv = np.sum(self.design_nodes)
+        if dv_mapping is not None:
+            self.ndv = dv_mapping.shape[1]
         super().__init__(MPI.COMM_SELF, self.ndv, 1)
 
         self.draw_history = draw_history
@@ -1085,8 +1089,12 @@ class OptFrequency(ParOpt.Problem):
         return
 
     def evalObjCon(self, x):
-        # Populate xfull
-        self.xfull[self.design_nodes] = x[:]
+        # Populate the nodal variable for analysis
+        if self.dv_mapping is not None:
+            self.xfull[:] = self.dv_mapping.dot(x)  # x = E*xr
+            self.xfull[self.non_design_nodes] = 1.0
+        else:
+            self.xfull[self.design_nodes] = x[:]
 
         # Evaluate the maximize natural frequency
         obj = -self.analysis.ks_eigenvalue(self.xfull)
@@ -1108,93 +1116,262 @@ class OptFrequency(ParOpt.Problem):
         return fail, obj, con
 
     def evalObjConGradient(self, x, g, A):
-        # Populate xfull
-        self.xfull[self.design_nodes] = x[:]
+        if self.dv_mapping is not None:
+            # Populate the nodal variable for analysis
+            self.xfull[:] = self.dv_mapping.dot(x)  # x = E*xr
+            self.xfull[self.non_design_nodes] = 1.0
 
-        # Evaluate objective gradient
-        g[:] = -self.analysis.ks_eigenvalue_derivative(self.xfull)[self.design_nodes]
+            # Evaluate objective gradient
+            g[:] = -self.dv_mapping.T.dot(
+                self.analysis.ks_eigenvalue_derivative(self.xfull)
+            )
 
-        # Evaluate constraint gradient
-        A[0][:] = -self.analysis.fltr.applyGradient(
-            self.analysis.area_gradient_rho[:], self.xfull
-        )[self.design_nodes]
+            # Evaluate constraint gradient
+            A[0][:] = -self.dv_mapping.T.dot(
+                self.analysis.fltr.applyGradient(
+                    self.analysis.area_gradient_rho[:], self.xfull
+                )
+            )
+
+        else:
+            # Populate the nodal variable for analysis
+            self.xfull[self.design_nodes] = x[:]
+
+            # Evaluate objective gradient
+            g[:] = -self.analysis.ks_eigenvalue_derivative(self.xfull)[
+                self.design_nodes
+            ]
+
+            # Evaluate constraint gradient
+            A[0][:] = -self.analysis.fltr.applyGradient(
+                self.analysis.area_gradient_rho[:], self.xfull
+            )[self.design_nodes]
 
         return 0
+
+
+try:
+    import mma4py
+
+    class MMAProblem(mma4py.Problem):
+        def __init__(self, prob: OptFrequency) -> None:
+            self.prob = prob
+            super().__init__(MPI.COMM_SELF, prob.ndv, prob.ndv, 1)
+            return
+
+        def getVarsAndBounds(self, x, lb, ub):
+            self.prob.getVarsAndBounds(x, lb, ub)
+            return
+
+        def evalObjCon(self, x, cons) -> float:
+            _fail, _obj, _cons = self.prob.evalObjCon(x)
+            cons[0] = -_cons[0]
+            return _obj
+
+        def evalObjConGrad(self, x, g, gcon):
+            self.prob.evalObjConGradient(x, g, gcon)
+            gcon[0, :] = -gcon[0, :]
+            return
+
+except:
+    MMAProblem = None
+
+
+def create_cantilever_domain(lx=20, ly=10, m=128, n=64):
+    """
+    Args:
+        lx: x-directional length
+        ly: y-directional length
+        m: number of elements along x direction
+        n: number of elements along y direction
+    """
+
+    # Generate the square domain problem by default
+    nelems = m * n
+    nnodes = (m + 1) * (n + 1)
+
+    y = np.linspace(0, ly, n + 1)
+    x = np.linspace(0, lx, m + 1)
+    nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
+
+    # Set the node locations
+    X = np.zeros((nnodes, 2))
+    for j in range(n + 1):
+        for i in range(m + 1):
+            X[i + j * (m + 1), 0] = x[i]
+            X[i + j * (m + 1), 1] = y[j]
+
+    # Set the connectivity
+    conn = np.zeros((nelems, 4), dtype=int)
+    for j in range(n):
+        for i in range(m):
+            conn[i + j * m, 0] = nodes[j, i]
+            conn[i + j * m, 1] = nodes[j, i + 1]
+            conn[i + j * m, 2] = nodes[j + 1, i + 1]
+            conn[i + j * m, 3] = nodes[j + 1, i]
+
+    # Find indices of non-design mass
+    non_design_nodes = []
+    for j in range((n + 1) // 2 - 10, (n + 1) // 2 + 11):
+        for i in range(m + 1 - 10, m + 1):
+            non_design_nodes.append(nodes[j, i])
+
+    # Set the constrained degrees of freedom at each node
+    bcs = {}
+    for j in range(n):
+        bcs[nodes[j, 0]] = [0, 1]
+
+    P = 10.0
+    forces = {}
+    pn = n // 10
+    for j in range(pn):
+        forces[nodes[j, -1]] = [0, -P / pn]
+
+    r0 = 0.05 * np.min((lx, ly))
+    return conn, X, r0, bcs, forces, non_design_nodes
+
+
+def create_square_domain(l=10, npquarter=30):
+    """
+    Args:
+        l: length of the square
+        npquarter: number of elements along each edge
+    """
+
+    # Generate the square domain problem by default
+    lx = l
+    ly = l
+    m = 2 * npquarter - 1  # Number of elements in x direction
+    n = 2 * npquarter - 1  # Number of elements in y direction
+
+    nelems = m * n
+    nnodes = (m + 1) * (n + 1)
+
+    y = np.linspace(0, ly, n + 1)
+    x = np.linspace(0, lx, m + 1)
+    nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
+
+    # Set the node locations
+    X = np.zeros((nnodes, 2))
+    for j in range(n + 1):
+        for i in range(m + 1):
+            X[i + j * (m + 1), 0] = x[i]
+            X[i + j * (m + 1), 1] = y[j]
+
+    # Set the connectivity
+    conn = np.zeros((nelems, 4), dtype=int)
+    for j in range(n):
+        for i in range(m):
+            conn[i + j * m, 0] = nodes[j, i]
+            conn[i + j * m, 1] = nodes[j, i + 1]
+            conn[i + j * m, 2] = nodes[j + 1, i + 1]
+            conn[i + j * m, 3] = nodes[j + 1, i]
+
+    # Find indices of non-design mass
+    non_design_nodes = []
+    offset = int(npquarter / 5)
+    for j in range((n + 1) // 2 - offset, (n + 1) // 2 + offset):
+        for i in range((m + 1) // 2 - offset, (m + 1) // 2 + offset):
+            non_design_nodes.append(nodes[j, i])
+
+    # Constrain all boundaries
+    bcs = {}
+    for j in range(n + 1):
+        bcs[nodes[j, 0]] = [0, 1]
+        bcs[nodes[j, m]] = [0, 1]
+    for i in range(m + 1):
+        bcs[nodes[0, i]] = [0, 1]
+        bcs[nodes[n, i]] = [0, 1]
+
+    P = 10.0
+    forces = {}
+    pn = n // 10
+    for j in range(pn):
+        forces[nodes[j, -1]] = [0, -P / pn]
+
+    r0 = 0.05 * np.min((lx, ly))
+
+    # Create the mapping E such that x = E*xr, where xr is the nodal variable
+    # of a quarter and is controlled by the optimizer, x is the nodal variable
+    # of the entire domain
+    Ei = []
+    Ej = []
+    redu_idx = 0
+    for j in range((n + 1) // 2):
+        for i in range((m + 1) // 2):
+            if nodes[j, i] not in non_design_nodes:
+                Ej.extend(4 * [redu_idx])
+                Ei.extend(
+                    [nodes[j, i], nodes[j, m - i], nodes[n - j, i], nodes[n - j, m - i]]
+                )
+                redu_idx += 1
+
+    Ev = np.ones(len(Ei))
+    dv_mapping = coo_matrix((Ev, (Ei, Ej)))
+
+    return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
+
+
+def visualize_domain(X, bcs, non_design_nodes=None):
+    fig, ax = plt.subplots()
+
+    bc_X = np.array([X[i, :] for i in bcs.keys()])
+    ax.scatter(X[:, 0], X[:, 1], color="black")
+    ax.scatter(bc_X[:, 0], bc_X[:, 1], color="red")
+
+    if non_design_nodes:
+        m0_X = np.array([X[i, :] for i in non_design_nodes])
+        ax.scatter(m0_X[:, 0], m0_X[:, 1], color="blue")
+    plt.show()
+    return
+
+
+def get_paropt_default_options(prefix, algorithm="tr", maxit=1000):
+    options = {
+        "algorithm": algorithm,
+        "tr_init_size": 0.05,
+        "tr_min_size": 1e-6,
+        "tr_max_size": 10.0,
+        "tr_eta": 0.25,
+        "tr_infeas_tol": 1e-6,
+        "tr_l1_tol": 1e-3,
+        "tr_linfty_tol": 0.0,
+        "tr_adaptive_gamma_update": True,
+        "tr_max_iterations": maxit,
+        "mma_max_iterations": maxit,
+        "max_major_iters": 100,
+        "penalty_gamma": 1e3,
+        "qn_subspace_size": 10,
+        "qn_type": "bfgs",
+        "abs_res_tol": 1e-8,
+        "starting_point_strategy": "affine_step",
+        "barrier_strategy": "mehrotra_predictor_corrector",
+        "use_line_search": False,
+        "output_file": os.path.join(prefix, "paropt.out"),
+        "tr_output_file": os.path.join(prefix, "paropt.tr"),
+        "mma_output_file": os.path.join(prefix, "paropt.mma"),
+    }
+    return options
 
 
 if __name__ == "__main__":
 
     p = argparse.ArgumentParser()
-    p.add_argument("--case", type=str, default=None, help="Name of the case file")
+    p.add_argument("--optimizer", default="mma4py", choices=["pmma", "mma4py", "tr"])
     p.add_argument(
-        "--optimizer", default="pmma", choices=["pmma", "mma4py", "tr", "snopt"]
+        "--npquarter", default=48, type=int, help="number of nodes for half-edge"
     )
+    p.add_argument("--maxit", default=1000, type=int)
+    p.add_argument("--prefix", default="result", type=str)
     args = p.parse_args()
 
-    prefix = "result"
-    if not os.path.isdir(prefix):
-        os.mkdir(prefix)
+    if not os.path.isdir(args.prefix):
+        os.mkdir(args.prefix)
 
-    if args.case is None:
-        # Generate the square domain problem by default
-        lx = 20
-        m = 128
-
-        ly = 10
-        n = 64
-
-        nelems = m * n
-        nnodes = (m + 1) * (n + 1)
-
-        y = np.linspace(0, ly, n + 1)
-        x = np.linspace(0, lx, m + 1)
-        nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
-
-        # Set the node locations
-        X = np.zeros((nnodes, 2))
-        for j in range(n + 1):
-            for i in range(m + 1):
-                X[i + j * (m + 1), 0] = x[i]
-                X[i + j * (m + 1), 1] = y[j]
-
-        # Set the connectivity
-        conn = np.zeros((nelems, 4), dtype=int)
-        for j in range(n):
-            for i in range(m):
-                conn[i + j * m, 0] = nodes[j, i]
-                conn[i + j * m, 1] = nodes[j, i + 1]
-                conn[i + j * m, 2] = nodes[j + 1, i + 1]
-                conn[i + j * m, 3] = nodes[j + 1, i]
-
-        # Find indices of non-design mass
-        non_design_nodes = []
-        for j in range((n + 1) // 2 - 10, (n + 1) // 2 + 11):
-            for i in range(m + 1 - 10, m + 1):
-                non_design_nodes.append(nodes[j, i])
-
-        # Set the constrained degrees of freedom at each node
-        bcs = {}
-        for j in range(n):
-            bcs[nodes[j, 0]] = [0, 1]
-
-        P = 10.0
-        forces = {}
-        pn = n // 10
-        for j in range(pn):
-            forces[nodes[j, -1]] = [0, -P / pn]
-
-        r0 = 0.05 * np.min((lx, ly))
-    else:
-        with open(args.case, "rb") as file:
-            pkl = pickle.load(file)
-
-        nelems = pkl["nelems"]
-        nnodes = pkl["nnodes"]
-        X = pkl["X"]
-        conn = pkl["conn"]
-        bcs = pkl["bcs"]
-        forces = pkl["forces"]
-        r0 = 0.05
+    # conn, X, r0, bcs, forces, non_design_nodes = create_cantilever_domain()
+    conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_square_domain(
+        npquarter=args.npquarter
+    )
 
     # Create the filter
     fltr = NodeFilter(conn, X, r0, ftype="spatial", projection=False)
@@ -1203,68 +1380,36 @@ if __name__ == "__main__":
     analysis = TopologyAnalysis(fltr, conn, X, bcs, forces)
 
     # Create optimization problem
-    # topo = OptCompliance(analysis, prefix=prefix)
-    topo = OptFrequency(analysis, non_design_nodes, prefix=prefix)
+    topo = OptFrequency(
+        analysis,
+        non_design_nodes,
+        draw_every=5,
+        prefix=args.prefix,
+        dv_mapping=dv_mapping,
+    )
 
     if args.optimizer == "mma4py":
 
-        import mma4py
-
-        class MMAProblem(mma4py.Problem):
-            def __init__(self, prob: OptFrequency) -> None:
-                self.prob = prob
-                super().__init__(MPI.COMM_SELF, prob.ndv, prob.ndv, 1)
-                return
-
-            def getVarsAndBounds(self, x, lb, ub):
-                self.prob.getVarsAndBounds(x, lb, ub)
-                return
-
-            def evalObjCon(self, x, cons) -> float:
-                _fail, _obj, _cons = self.prob.evalObjCon(x)
-                cons[0] = -_cons[0]
-                return _obj
-
-            def evalObjConGrad(self, x, g, gcon):
-                self.prob.evalObjConGradient(x, g, gcon)
-                gcon[0, :] = -gcon[0, :]
-                return
+        if MMAProblem is None:
+            raise ImportError("Cannot use mma4py, package not found.")
 
         mmaprob = MMAProblem(topo)
-        mmaopt = mma4py.Optimizer(mmaprob, log_name=os.path.join(prefix, "mma4py.log"))
+        mmaopt = mma4py.Optimizer(
+            mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
+        )
         mmaopt.checkGradients()
-        mmaopt.optimize(niter=500, verbose=True)
+        mmaopt.optimize(niter=args.maxit, verbose=True)
 
     else:
         topo.checkGradients()
 
-        options = {
-            "algorithm": "tr",
-            "tr_init_size": 0.05,
-            "tr_min_size": 1e-6,
-            "tr_max_size": 10.0,
-            "tr_eta": 0.25,
-            "tr_infeas_tol": 1e-6,
-            "tr_l1_tol": 1e-3,
-            "tr_linfty_tol": 0.0,
-            "tr_adaptive_gamma_update": True,
-            "tr_max_iterations": 1000,
-            "max_major_iters": 100,
-            "penalty_gamma": 1e3,
-            "qn_subspace_size": 10,
-            "qn_type": "bfgs",
-            "abs_res_tol": 1e-8,
-            "starting_point_strategy": "affine_step",
-            "barrier_strategy": "mehrotra_predictor_corrector",
-            "use_line_search": False,
-            "output_file": os.path.join(prefix, "paropt.out"),
-            "tr_output_file": os.path.join(prefix, "paropt.tr"),
-        }
-
-        options = {
-            # "algorithm": "mma",
-            "mma_output_file": os.path.join(prefix, "paropt.mma"),
-        }
+        if args.optimizer == "pmma":
+            algorithm = "mma"
+        else:
+            algorithm = args.optimizer
+        options = get_paropt_default_options(
+            args.prefix, algorithm=algorithm, maxit=args.maxit
+        )
 
         # Set up the optimizer
         opt = ParOpt.Optimizer(topo, options)
