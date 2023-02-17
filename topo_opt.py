@@ -703,7 +703,7 @@ class TopologyAnalysis:
 
         return dfdrhoE
 
-    def frequencies(self, x, k=5, sigma=0.0):
+    def frequencies(self, x, k=5, sigma=0.0, vtk_path=None):
         """
         Compute the k-th smallest natural frequencies
         """
@@ -743,16 +743,28 @@ class TopologyAnalysis:
         for i in range(k):
             u[self.reduced, i] = ur[:, i]
 
+        # Write the modes to vtk
+        if vtk_path is not None:
+            nodal_sols = []
+
+            nodal_sols.append({"x": np.array(x)})
+            nodal_sols.append({"rho": np.array(self.rho)})
+            for i in range(k):
+                nodal_sols.append({"u%d" % i: u[0::2, i]})
+                nodal_sols.append({"v%d" % i: u[1::2, i]})
+
+            to_vtk(vtk_path, self.conn, self.X, nodal_sols)
+
         return np.sqrt(eigs), u
 
-    def ks_eigenvalue(self, x, ks_rho=100.0, k=5):
+    def ks_eigenvalue(self, x, ks_rho=100.0, k=5, vtk_path=None):
         """
         Compute the ks minimum eigenvalue
         """
         if k > len(self.reduced):
             k = len(self.reduced)
 
-        self.omega, self.phi = self.frequencies(x, k=k)
+        self.omega, self.phi = self.frequencies(x, k=k, vtk_path=vtk_path)
 
         c = np.min(self.omega)
         self.eta = np.exp(-ks_rho * (self.omega - c))
@@ -760,7 +772,7 @@ class TopologyAnalysis:
         ks_min = c - np.log(a) / ks_rho
         self.eta *= 1.0 / a
 
-        return ks_min
+        return ks_min, self.omega
 
     def ks_eigenvalue_derivative(self, x):
         """
@@ -1099,7 +1111,14 @@ class OptFrequency(ParOpt.Problem):
             self.xfull[self.design_nodes] = x[:]
 
         # Evaluate the maximize natural frequency
-        obj = -self.analysis.ks_eigenvalue(self.xfull)
+        vtk_path = None
+        if self.it_counter % self.draw_every == 0:
+            if not os.path.isdir(os.path.join(self.prefix, "vtk")):
+                os.mkdir(os.path.join(self.prefix, "vtk"))
+            vtk_path = os.path.join(self.prefix, "vtk", "%d.vtk" % self.it_counter)
+
+        ks, omega = self.analysis.ks_eigenvalue(self.xfull, vtk_path=vtk_path)
+        obj = -ks
 
         # Compute constraint value
         con = [self.fixed_area - self.analysis.area_gradient.dot(self.analysis.rhoE)]
@@ -1111,6 +1130,23 @@ class OptFrequency(ParOpt.Problem):
             ax.set_aspect("equal", "box")
             plt.savefig(os.path.join(self.prefix, "%d.png" % self.it_counter))
             plt.close()
+
+        # Log eigenvalues
+        with open(os.path.join(self.prefix, "eigenvalues.log"), "a") as f:
+            # header
+            if self.it_counter % 10 == 0:
+                f.write("\n%10s" % "iter")
+                f.write("%15s" % "ks agg.")
+                for i in range(len(omega)):
+                    name = "eigval[%d]" % i
+                    f.write("%15s" % name)
+                f.write("\n")
+
+            f.write("%10d" % self.it_counter)
+            f.write("%15.5e" % ks)
+            for i in range(len(omega)):
+                f.write("%15.5e" % omega[i])
+            f.write("\n")
 
         self.it_counter += 1
 
@@ -1177,6 +1213,56 @@ try:
 
 except:
     MMAProblem = None
+
+
+def to_vtk(vtk_path, conn, X, nodal_sols=[]):
+    """
+    Generate a vtk given conn, X, and optionally list of nodal solutions
+    """
+    # vtk requires a 3-dimensional data point
+    X = np.append(X, np.zeros((X.shape[0], 1)), axis=1)
+
+    nnodes = X.shape[0]
+    nelems = conn.shape[0]
+
+    # Create a empty vtk file and write headers
+    with open(vtk_path, "w") as fh:
+        fh.write("# vtk DataFile Version 3.0\n")
+        fh.write("my example\n")
+        fh.write("ASCII\n")
+        fh.write("DATASET UNSTRUCTURED_GRID\n")
+
+        # Write nodal points
+        fh.write("POINTS {:d} double\n".format(nnodes))
+        for x in X:
+            row = f"{x}"[1:-1]  # Remove square brackets in the string
+            fh.write(f"{row}\n")
+
+        # Write connectivity
+        size = 5 * nelems
+
+        fh.write(f"CELLS {nelems} {size}\n")
+        for c in conn:
+            node_idx = f"{c}"[1:-1]  # remove square bracket [ and ]
+            npts = 4
+            fh.write(f"{npts} {node_idx}\n")
+
+        # Write cell type
+        fh.write(f"CELL_TYPES {nelems}\n")
+        for c in conn:
+            vtk_type = 9
+            fh.write(f"{vtk_type}\n")
+
+        # Write solution
+        if nodal_sols:
+            fh.write(f"POINT_DATA {nnodes}\n")
+            for nodal_sol in nodal_sols:
+                for name, data in nodal_sol.items():
+                    fh.write(f"SCALARS {name} float 1\n")
+                    fh.write("LOOKUP_TABLE default\n")
+                    for val in data:
+                        fh.write(f"{val}\n")
+    return
 
 
 def create_cantilever_domain(lx=20, ly=10, m=128, n=64):
@@ -1400,7 +1486,7 @@ if __name__ == "__main__":
             mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
         )
         mmaopt.checkGradients()
-        mmaopt.optimize(niter=args.maxit, verbose=True)
+        mmaopt.optimize(niter=args.maxit, verbose=False)
 
     else:
         topo.checkGradients()
