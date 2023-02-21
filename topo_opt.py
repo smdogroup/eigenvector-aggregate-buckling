@@ -6,7 +6,6 @@ import matplotlib.pylab as plt
 import matplotlib.tri as tri
 from mpi4py import MPI
 from paropt import ParOpt
-import sys
 import argparse
 import os
 
@@ -1044,6 +1043,7 @@ class OptFrequency(ParOpt.Problem):
         non_design_nodes: list,  # indices for nodes whose density is not controlled by the optimizer
         vol_frac=0.4,
         ks_rho=100,
+        m0=10.0,
         draw_history=True,
         draw_every=1,
         prefix="result",
@@ -1058,7 +1058,7 @@ class OptFrequency(ParOpt.Problem):
         self.dv_mapping = dv_mapping
 
         # Add more non-design constant to matrices
-        self.add_mat0(which="M", density=10.0)
+        self.add_mat0(which="M", density=m0)
 
         self.area_gradient = self.analysis.eval_area_gradient()
         self.fixed_area = vol_frac * np.sum(self.area_gradient)
@@ -1140,16 +1140,16 @@ class OptFrequency(ParOpt.Problem):
             # header
             if self.it_counter % 10 == 0:
                 f.write("\n%10s" % "iter")
-                f.write("%15s" % "ks agg.")
+                f.write("%25s" % "ks agg.")
                 for i in range(len(omega)):
                     name = "eigval[%d]" % i
-                    f.write("%15s" % name)
+                    f.write("%25s" % name)
                 f.write("\n")
 
             f.write("%10d" % self.it_counter)
-            f.write("%15.5e" % ks)
+            f.write("%25.15e" % ks)
             for i in range(len(omega)):
-                f.write("%15.5e" % omega[i])
+                f.write("%25.15e" % omega[i])
             f.write("\n")
 
         self.it_counter += 1
@@ -1323,7 +1323,7 @@ def create_cantilever_domain(lx=20, ly=10, m=128, n=64):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
-def create_square_domain(l=10, npquarter=30):
+def create_square_domain(l=1.0, npquarter=30):
     """
     Args:
         l: length of the square
@@ -1331,16 +1331,14 @@ def create_square_domain(l=10, npquarter=30):
     """
 
     # Generate the square domain problem by default
-    lx = l
-    ly = l
     m = 2 * npquarter - 1  # Number of elements in x direction
     n = 2 * npquarter - 1  # Number of elements in y direction
 
     nelems = m * n
     nnodes = (m + 1) * (n + 1)
 
-    y = np.linspace(0, ly, n + 1)
-    x = np.linspace(0, lx, m + 1)
+    y = np.linspace(0, l, n + 1)
+    x = np.linspace(0, l, m + 1)
     nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
 
     # Set the node locations
@@ -1381,7 +1379,7 @@ def create_square_domain(l=10, npquarter=30):
     for j in range(pn):
         forces[nodes[j, -1]] = [0, -P / pn]
 
-    r0 = 0.05 * np.min((lx, ly))
+    r0 = 0.05 * l
 
     # Create the mapping E such that x = E*xr, where xr is the nodal variable
     # of a quarter and is controlled by the optimizer, x is the nodal variable
@@ -1389,14 +1387,25 @@ def create_square_domain(l=10, npquarter=30):
     Ei = []
     Ej = []
     redu_idx = 0
-    for j in range((n + 1) // 2):
-        for i in range((m + 1) // 2):
+    for j in range(1, (n + 1) // 2):
+        for i in range(j):
             if nodes[j, i] not in non_design_nodes:
-                Ej.extend(4 * [redu_idx])
+                Ej.extend(8 * [redu_idx])
                 Ei.extend(
                     [nodes[j, i], nodes[j, m - i], nodes[n - j, i], nodes[n - j, m - i]]
                 )
+                Ei.extend(
+                    [nodes[i, j], nodes[i, m - j], nodes[n - i, j], nodes[n - i, m - j]]
+                )
                 redu_idx += 1
+
+    for i in range((n + 1) // 2):
+        if nodes[i, i] not in non_design_nodes:
+            Ej.extend(4 * [redu_idx])
+            Ei.extend(
+                [nodes[i, i], nodes[i, m - i], nodes[n - i, i], nodes[n - i, m - i]]
+            )
+            redu_idx += 1
 
     Ev = np.ones(len(Ei))
     dv_mapping = coo_matrix((Ev, (Ei, Ej)))
@@ -1456,6 +1465,7 @@ if __name__ == "__main__":
     p.add_argument("--maxit", default=1000, type=int)
     p.add_argument("--prefix", default="result", type=str)
     p.add_argument("--ks-rho", default=10000, type=int)
+    p.add_argument("--m0", default=100.0, type=float)
     args = p.parse_args()
 
     if not os.path.isdir(args.prefix):
@@ -1483,6 +1493,7 @@ if __name__ == "__main__":
         analysis,
         non_design_nodes,
         ks_rho=args.ks_rho,
+        m0=args.m0,
         draw_every=5,
         prefix=args.prefix,
         dv_mapping=dv_mapping,
