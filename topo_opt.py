@@ -6,7 +6,7 @@ import matplotlib.pylab as plt
 import matplotlib.tri as tri
 from mpi4py import MPI
 from paropt import ParOpt
-import pickle
+import sys
 import argparse
 import os
 
@@ -1043,6 +1043,7 @@ class OptFrequency(ParOpt.Problem):
         analysis: TopologyAnalysis,
         non_design_nodes: list,  # indices for nodes whose density is not controlled by the optimizer
         vol_frac=0.4,
+        ks_rho=100,
         draw_history=True,
         draw_every=1,
         prefix="result",
@@ -1061,6 +1062,7 @@ class OptFrequency(ParOpt.Problem):
 
         self.area_gradient = self.analysis.eval_area_gradient()
         self.fixed_area = vol_frac * np.sum(self.area_gradient)
+        self.ks_rho = ks_rho
 
         self.ndv = np.sum(self.design_nodes)
         if dv_mapping is not None:
@@ -1117,7 +1119,9 @@ class OptFrequency(ParOpt.Problem):
                 os.mkdir(os.path.join(self.prefix, "vtk"))
             vtk_path = os.path.join(self.prefix, "vtk", "%d.vtk" % self.it_counter)
 
-        ks, omega = self.analysis.ks_eigenvalue(self.xfull, vtk_path=vtk_path)
+        ks, omega = self.analysis.ks_eigenvalue(
+            self.xfull, ks_rho=self.ks_rho, vtk_path=vtk_path
+        )
         obj = -ks
 
         # Compute constraint value
@@ -1451,10 +1455,17 @@ if __name__ == "__main__":
     )
     p.add_argument("--maxit", default=1000, type=int)
     p.add_argument("--prefix", default="result", type=str)
+    p.add_argument("--ks-rho", default=10000, type=int)
     args = p.parse_args()
 
     if not os.path.isdir(args.prefix):
         os.mkdir(args.prefix)
+
+    # Save option values
+    with open(os.path.join(args.prefix, "options.txt"), "w") as f:
+        f.write("Options:\n")
+        for k, v in vars(args).items():
+            f.write(f"{k:<20}{v}\n")
 
     # conn, X, r0, bcs, forces, non_design_nodes = create_cantilever_domain()
     conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_square_domain(
@@ -1471,6 +1482,7 @@ if __name__ == "__main__":
     topo = OptFrequency(
         analysis,
         non_design_nodes,
+        ks_rho=args.ks_rho,
         draw_every=5,
         prefix=args.prefix,
         dv_mapping=dv_mapping,
