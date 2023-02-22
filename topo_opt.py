@@ -235,17 +235,21 @@ class TopologyAnalysis:
         forces={},
         E=10.0,
         nu=0.3,
-        ramp=5.0,
+        ptype="RAMP",
+        p=5.0,
         density=1.0,
         area_fraction=0.4,
         K0=None,
         M0=None,
     ):
 
+        self.ptype = ptype.lower()
+        assert self.ptype == "ramp" or self.ptype == "simp"
+
         self.fltr = fltr
         self.conn = np.array(conn)
         self.X = np.array(X)
-        self.ramp = ramp
+        self.p = p
         self.density = density
 
         self.K0 = K0
@@ -638,7 +642,10 @@ class TopologyAnalysis:
         )
 
         # Compute the element stiffnesses
-        self.C = np.outer(self.rhoE / (1.0 + self.ramp * (1.0 - self.rhoE)), self.C0)
+        if self.ptype == "simp":
+            self.C = np.outer(self.rhoE**self.p, self.C0)
+        else:
+            self.C = np.outer(self.rhoE / (1.0 + self.p * (1.0 - self.rhoE)), self.C0)
         self.C = self.C.reshape((self.nelems, 3, 3))
 
         self.u = self.solve(self.C)
@@ -654,7 +661,10 @@ class TopologyAnalysis:
             for j in range(3):
                 dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        dfdrhoE[:] *= (1.0 + self.ramp) / (1.0 + self.ramp * (1.0 - self.rhoE)) ** 2
+        if self.p == "simp":
+            dfdrhoE[:] *= self.p * self.rhoE ** (self.p - 1.0)
+        else:
+            dfdrhoE[:] *= (1.0 + self.p) / (1.0 + self.p * (1.0 - self.rhoE)) ** 2
 
         dfdrho = np.zeros(self.nnodes)
         for i in range(4):
@@ -719,7 +729,10 @@ class TopologyAnalysis:
         )
 
         # Compute the element stiffnesses
-        self.C = np.outer(self.rhoE / (1.0 + self.ramp * (1.0 - self.rhoE)), self.C0)
+        if self.ptype == "simp":
+            self.C = np.outer(self.rhoE**self.p, self.C0)
+        else:
+            self.C = np.outer(self.rhoE / (1.0 + self.p * (1.0 - self.rhoE)), self.C0)
         self.C = self.C.reshape((self.nelems, 3, 3))
 
         K = self.assemble_stiffness_matrix(self.C)
@@ -727,7 +740,10 @@ class TopologyAnalysis:
             K += self.K0
         Kr = self.reduce_matrix(K)
 
-        rhoE_m = (self.ramp + 1.0) * self.rhoE / (1 + self.ramp * self.rhoE)
+        if self.ptype == "simp":
+            rhoE_m = self.rhoE ** (1.0 / self.p)
+        else:
+            rhoE_m = (self.p + 1.0) * self.rhoE / (1 + self.p * self.rhoE)
         M = self.assemble_mass_matrix(rhoE_m)
         if self.M0 is not None:
             M += self.M0
@@ -795,8 +811,12 @@ class TopologyAnalysis:
             for j in range(3):
                 dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        dfdrhoE[:] *= (1.0 + self.ramp) / (1.0 + self.ramp * (1.0 - self.rhoE)) ** 2
-        dfdrhoM[:] *= (1.0 + self.ramp) / (1.0 + self.ramp * self.rhoE) ** 2
+        if self.ptype == "simp":
+            dfdrhoE[:] *= self.p * self.rhoE ** (self.p - 1.0)
+            dfdrhoM[:] *= self.rhoE ** (1.0 / self.p - 1.0) / self.p
+        else:
+            dfdrhoE[:] *= (1.0 + self.p) / (1.0 + self.p * (1.0 - self.rhoE)) ** 2
+            dfdrhoM[:] *= (1.0 + self.p) / (1.0 + self.p * self.rhoE) ** 2
 
         # Add the derivative w.r.t. the mass matrix
         dfdrhoE += dfdrhoM
@@ -1048,6 +1068,7 @@ class OptFrequency(ParOpt.Problem):
         draw_every=1,
         prefix="result",
         dv_mapping=None,  # If provided, optimizer controls reduced design variable xr only
+        lb=1e-3,
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -1056,6 +1077,7 @@ class OptFrequency(ParOpt.Problem):
         self.design_nodes = np.ones(len(self.xfull), dtype=bool)
         self.design_nodes[self.non_design_nodes] = False
         self.dv_mapping = dv_mapping
+        self.lb = lb
 
         # Add more non-design constant to matrices
         self.add_mat0(which="M", density=m0)
@@ -1099,7 +1121,7 @@ class OptFrequency(ParOpt.Problem):
         return
 
     def getVarsAndBounds(self, x, lb, ub):
-        lb[:] = 1e-3
+        lb[:] = self.lb
         ub[:] = 1.0
         x[:] = 0.95
         return
@@ -1462,9 +1484,16 @@ if __name__ == "__main__":
     p.add_argument(
         "--npquarter", default=48, type=int, help="number of nodes for half-edge"
     )
-    p.add_argument("--maxit", default=1000, type=int)
+    p.add_argument(
+        "--lb", default=1e-3, type=float, help="lower bound of the design variable"
+    )
+    p.add_argument("--maxit", default=500, type=int)
     p.add_argument("--prefix", default="result", type=str)
     p.add_argument("--ks-rho", default=10000, type=int)
+    p.add_argument("--ptype", default="ramp", choices=["simp", "ramp"])
+    p.add_argument(
+        "--p", default=5.0, type=float, help="material penalization parameter"
+    )
     p.add_argument("--m0", default=100.0, type=float)
     args = p.parse_args()
 
@@ -1486,7 +1515,7 @@ if __name__ == "__main__":
     fltr = NodeFilter(conn, X, r0, ftype="spatial", projection=False)
 
     # Create analysis
-    analysis = TopologyAnalysis(fltr, conn, X, bcs, forces)
+    analysis = TopologyAnalysis(fltr, conn, X, bcs, forces, ptype=args.ptype, p=args.p)
 
     # Create optimization problem
     topo = OptFrequency(
@@ -1497,6 +1526,7 @@ if __name__ == "__main__":
         draw_every=5,
         prefix=args.prefix,
         dv_mapping=dv_mapping,
+        lb=args.lb,
     )
 
     if args.optimizer == "mma4py":
