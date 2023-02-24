@@ -987,7 +987,12 @@ class TopologyAnalysis:
 
         # Get the stiffness and mass matrices
         A = self.assemble_stiffness_matrix(rho)
+        if self.K0 is not None:
+            A += self.K0
+
         B = self.assemble_mass_matrix(rho)
+        if self.M0 is not None:
+            B += self.M0
 
         Ar = self.reduce_matrix(A)
         Br = self.reduce_matrix(B)
