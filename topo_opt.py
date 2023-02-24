@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import sparse
 from scipy import spatial
+from scipy.linalg import eigh
 from scipy.sparse import linalg, coo_matrix
 import matplotlib.pylab as plt
 import matplotlib.tri as tri
@@ -8,6 +9,7 @@ from mpi4py import MPI
 from paropt import ParOpt
 import argparse
 import os
+import mpmath as mp
 
 
 class NodeFilter:
@@ -175,12 +177,12 @@ class NodeFilter:
         return rho
 
     def applyGradient(self, g, x, rho=None):
-        if self.F is not None:
-            rho = self.F.dot(x)
-        else:
-            rho = self.A(self.B.dot(x))
-
         if self.projection:
+            if self.F is not None:
+                rho = self.F.dot(x)
+            else:
+                rho = self.A(self.B.dot(x))
+
             denom = np.tanh(self.beta * self.eta) + np.tanh(
                 self.beta * (1.0 - self.eta)
             )
@@ -250,6 +252,8 @@ class TopologyAnalysis:
         self.X = np.array(X)
         self.p = p
         self.density = density
+
+        self.D_index = 24
 
         self.K0 = K0
         self.M0 = M0
@@ -577,6 +581,7 @@ class TopologyAnalysis:
     def mass_matrix_derivative(self, rho, u, v):
         """
         Compute the derivative of the mass matrix
+
         """
 
         # Average the density to get the element-wise density
@@ -795,7 +800,7 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
-    def sovle_eigenvalue_problem(self, x, k=5, sigma=0.0, vtk_path=None):
+    def solve_eigenvalue_problem(self, x, k=5, sigma=0.0, vtk_path=None):
         """
         Compute the k-th smallest natural frequencies
         """
@@ -819,7 +824,16 @@ class TopologyAnalysis:
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
-        eigs, Qr = sparse.linalg.eigsh(Kr, M=Mr, k=5, sigma=sigma, which="LM", tol=1e-6)
+        # if k == len(self.reduced):
+        #     eigs, Qr = eigh(Kr.todense(), Mr.todense())
+        # else:
+        #     eigs, Qr = sparse.linalg.eigsh(
+        #         Kr, M=Mr, k=k, sigma=sigma, which="LM", tol=1e-10
+        #     )
+
+        eigs, Qr = eigh(Kr.todense(), Mr.todense())
+        eigs = eigs[:k]
+        Qr = Qr[:, :k]
 
         Q = np.zeros((self.nvars, k))
         for i in range(k):
@@ -841,7 +855,7 @@ class TopologyAnalysis:
         self.eigs = eigs
         self.Q = Q
 
-        return eigs, Q
+        return np.sqrt(eigs)
 
     def ks_eigenvalue(self, x, ks_rho=100.0):
         """
@@ -856,7 +870,7 @@ class TopologyAnalysis:
         ks_min = c - np.log(a) / ks_rho
         eta *= 1.0 / a
 
-        return ks_min, omega
+        return ks_min
 
     def ks_eigenvalue_derivative(self, x, ks_rho=100.0):
         """
@@ -887,9 +901,11 @@ class TopologyAnalysis:
 
     def eigenvector_displacement(self, ks_rho=100.0):
 
+        N = len(self.eigs)
         c = np.min(self.eigs)
         eta = np.exp(-ks_rho * (self.eigs - c))
         a = np.sum(eta)
+        eta = eta / a
 
         h = 0.0
         for i in range(N):
@@ -909,14 +925,19 @@ class TopologyAnalysis:
                 )
         return np.float64(val)
 
-    def eigenvector_displacement_deriv(self, x, N=5):
+    def eigenvector_displacement_deriv(self, x, ks_rho=100.0):
         """
         Approximately compute the forward derivative
         """
 
+        # Compute the filtered variables
+        rho = self.fltr.apply(x)
+
+        N = len(self.eigs)
         c = np.min(self.eigs)
         eta = np.exp(-ks_rho * (self.eigs - c))
         a = np.sum(eta)
+        eta = eta / a
 
         # Compute the h values
         h = 0.0
@@ -924,69 +945,179 @@ class TopologyAnalysis:
             h += eta[i] * self.Q[self.D_index, i] ** 2
 
         # Set the value of the derivative
-        dfdrhoE = np.zeros(self.nelems)
+        dfdrho = np.zeros(self.nnodes)
 
         for j in range(N):
-            for i in range(N):
+            for i in range(j + 1):
                 qDq = self.Q[self.D_index, i] * self.Q[self.D_index, j]
                 scalar = qDq
                 if i == j:
                     scalar = qDq - h
 
-                Eij = scalar * self.precise(
-                    self.ksrho, a, c, self.eigs[i], self.eigs[j]
-                )
+                Eij = scalar * self.precise(ks_rho, a, c, self.eigs[i], self.eigs[j])
 
-                # Add to dfdx from A
-                dfdx += Eij * self.stiffness_matrix_deriv(x, QN[:, i], QN[:, j])
+                if i == j:
+                    # Add to dfdx from A
+                    dfdrho += Eij * self.stiffness_matrix_derivative(
+                        rho, self.Q[:, i], self.Q[:, j]
+                    )
 
-                # Add to dfdx from B
-                dfdx -= Eij * lam[i] * self.mass_matrix_deriv(x, QN[:, i], QN[:, j])
+                    # Add to dfdx from B
+                    dfdrho -= (
+                        Eij
+                        * self.eigs[i]
+                        * self.mass_matrix_derivative(rho, self.Q[:, i], self.Q[:, j])
+                    )
+                else:
+                    # Add to dfdx from A
+                    dfdrho += (
+                        2.0
+                        * Eij
+                        * self.stiffness_matrix_derivative(
+                            rho, self.Q[:, i], self.Q[:, j]
+                        )
+                    )
+
+                    # Add to dfdx from B
+                    dfdrho -= (
+                        Eij
+                        * (self.eigs[i] + self.eigs[j])
+                        * self.mass_matrix_derivative(rho, self.Q[:, i], self.Q[:, j])
+                    )
 
         # Get the stiffness and mass matrices
-        A = self.get_stiffness_matrix(x)
-        B = self.get_mass_matrix(x)
+        A = self.assemble_stiffness_matrix(rho)
+        B = self.assemble_mass_matrix(rho)
+
+        Ar = self.reduce_matrix(A)
+        Br = self.reduce_matrix(B)
+        C = B.dot(self.Q)
+
+        nr = len(self.reduced)
+        Cr = np.zeros((nr, N))
+        for k in range(N):
+            Cr[:, k] = self.reduce_vector(C[:, k])
+        Ur, R = np.linalg.qr(Cr)
+
+        Bfact = linalg.factorized(Br)
+
+        # Compute the preconditioner
+        P = Ar - 0.99 * self.eigs[0] * Br
+        Pfactor = linalg.factorized(P)
+
+        def precon(x):
+            y = Pfactor(x)
+            t = np.dot(Ur.T, y)
+            y = y - np.dot(Ur, t)
+            return y
+
+        preop = linalg.LinearOperator((nr, nr), precon)
 
         # Form the augmented linear system of equations
         for k in range(N):
             # Compute B * vk = D * qk
-            bk = np.dot(self.D, QN[:, k])
-            vk = np.linalg.solve(B, -eta[k] * bk)
-            dfdx += self.get_mass_matrix_deriv(x, QN[:, k], vk)
+            bk = np.zeros(self.nvars)
+            bk[self.D_index] = self.Q[self.D_index, k]
+            bkr = -eta[k] * self.reduce_vector(bk)
+
+            vkr = Bfact(bkr)
+            vk = np.zeros(self.nvars)
+            vk[self.reduced] = vkr
+
+            dfdrho += self.mass_matrix_derivative(rho, self.Q[:, k], vk)
 
             # Solve the augmented system of equations for wk
-            Ak = A - lam[k] * B
-            Ck = np.dot(B, QN)
+            Ak = Ar - self.eigs[k] * Br
 
-            # Set up the augmented linear system of equations
-            mat = np.block([[Ak, Ck], [Ck.T, np.zeros((N, N))]])
-            b = np.zeros(mat.shape[0])
+            def mat(x):
+                y = Ak.dot(x)
+                t = np.dot(Ur.T, y)
+                y = y - np.dot(Ur, t)
+                return y
 
-            # Compute the right-hand-side vector
-            b[: self.ndof] = -eta[k] * bk
+            matop = linalg.LinearOperator((nr, nr), mat)
 
-            # Solve the first block linear system of equations
-            sol = np.linalg.solve(mat, b)
-            wk = sol[: self.ndof]
+            t = np.dot(Ur.T, bkr)
+            bkr = bkr - np.dot(Ur, t)
+
+            wkr, info = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
+
+            wk = np.zeros(self.nvars)
+            wk[self.reduced] = wkr
 
             # Compute the contributions from the derivative from Adot
-            dfdx += 2.0 * self.get_stiffness_matrix_deriv(x, QN[:, k], wk)
+            dfdrho += 2.0 * self.stiffness_matrix_derivative(rho, self.Q[:, k], wk)
 
             # Add the contributions to the derivative from Bdot here...
-            dfdx -= lam[k] * self.get_mass_matrix_deriv(x, QN[:, k], wk)
+            dfdrho -= self.eigs[k] * self.mass_matrix_derivative(rho, self.Q[:, k], wk)
 
             # Now, compute the remaining contributions to the derivative from
             # B by solving the second auxiliary system
-            dk = np.dot(A, vk)
-            b[: self.ndof] = dk
+            dkr = Ar.dot(vkr)
 
-            sol = np.linalg.solve(mat, b)
-            uk = sol[: self.ndof]
+            t = np.dot(Ur.T, dkr)
+            dkr = dkr - np.dot(Ur, t)
+
+            ukr, info = linalg.gmres(matop, dkr, M=preop, atol=1e-15, tol=1e-10)
+
+            uk = np.zeros(self.nvars)
+            uk[self.reduced] = ukr
 
             # Compute the contributions from the derivative
-            dfdx -= self.get_mass_matrix_deriv(x, QN[:, k], uk)
+            dfdrho -= self.mass_matrix_derivative(rho, self.Q[:, k], uk)
 
-        return dfdx
+        """
+        self.D = np.zeros((self.nvars, self.nvars))
+        self.D[self.D_index, self.D_index] = 1.0
+
+        # Form the augmented linear system of equations
+        for k in range(N):
+            # Compute B * vk = D * qk
+            bk = np.dot(self.D, self.Q[:, k])
+            bkr = self.reduce_vector(bk)
+            vkr = np.linalg.solve(Br.todense(), -eta[k] * bkr)
+            vk = np.zeros(self.nvars)
+            vk[self.reduced] = vkr
+            dfdrho += self.mass_matrix_derivative(rho, self.Q[:, k], vk)
+
+            # Solve the augmented system of equations for wk
+            Ak = Ar.todense() - self.eigs[k] * Br.todense()
+
+            # Set up the augmented linear system of equations
+            mat = np.block([[Ak, Cr], [Cr.T, np.zeros((N, N))]])
+            b = np.zeros(mat.shape[0])
+
+            # Compute the right-hand-side vector
+            b[: Ak.shape[0]] = -eta[k] * bkr
+
+            # Solve the first block linear system of equations
+            sol = np.linalg.solve(mat, b)
+            wkr = sol[: Ak.shape[0]]
+            wk = np.zeros(self.nvars)
+            wk[self.reduced] = wkr
+
+            # Compute the contributions from the derivative from Adot
+            dfdrho += 2.0 * self.stiffness_matrix_derivative(rho, self.Q[:, k], wk)
+
+            # Add the contributions to the derivative from Bdot here...
+            dfdrho -= self.eigs[k] * self.mass_matrix_derivative(rho, self.Q[:, k], wk)
+
+            # Now, compute the remaining contributions to the derivative from
+            # B by solving the second auxiliary system
+            dkr = np.dot(Ar.todense(), vkr)
+            b[: Ak.shape[0]] = dkr
+
+            sol = np.linalg.solve(mat, b)
+            ukr = sol[: Ak.shape[0]]
+            uk = np.zeros(self.nvars)
+            uk[self.reduced] = ukr
+
+            # Compute the contributions from the derivative
+            dfdrho -= self.mass_matrix_derivative(rho, self.Q[:, k], uk)
+
+        """
+
+        return self.fltr.applyGradient(dfdrho, x)
 
     def compute_strains(self, u):
         """
@@ -1279,7 +1410,7 @@ class OptFrequency(ParOpt.Problem):
     def getVarsAndBounds(self, x, lb, ub):
         lb[:] = self.lb
         ub[:] = 1.0
-        x[:] = 0.95
+        x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
         return
 
     def evalObjCon(self, x):
@@ -1297,9 +1428,15 @@ class OptFrequency(ParOpt.Problem):
                 os.mkdir(os.path.join(self.prefix, "vtk"))
             vtk_path = os.path.join(self.prefix, "vtk", "%d.vtk" % self.it_counter)
 
-        self.analysis.sovle_eigenvalue_problem(self.xfull, vtk_path=vtk_path)
-        ks, omega = self.analysis.ks_eigenvalue(self.xfull, ks_rho=self.ks_rho)
-        obj = -ks
+        # omega = self.analysis.solve_eigenvalue_problem(self.xfull, vtk_path=vtk_path)
+        # ks = self.analysis.ks_eigenvalue(self.xfull, ks_rho=self.ks_rho)
+        # obj = -ks
+
+        omega = self.analysis.solve_eigenvalue_problem(
+            self.xfull, k=6, vtk_path=vtk_path
+        )
+        obj = self.analysis.eigenvector_displacement()
+        ks = obj
 
         # Compute constraint value
         con = [self.fixed_area - self.analysis.eval_area(self.xfull)]
@@ -1342,8 +1479,11 @@ class OptFrequency(ParOpt.Problem):
             self.xfull[self.non_design_nodes] = 1.0
 
             # Evaluate objective gradient
-            g[:] = -self.dv_mapping.T.dot(
-                self.analysis.ks_eigenvalue_derivative(self.xfull)
+            # g[:] = -self.dv_mapping.T.dot(
+            #     self.analysis.ks_eigenvalue_derivative(self.xfull)
+            # )
+            g[:] = self.dv_mapping.T.dot(
+                self.analysis.eigenvector_displacement_deriv(self.xfull)
             )
 
             # Evaluate constraint gradient
@@ -1356,7 +1496,10 @@ class OptFrequency(ParOpt.Problem):
             self.xfull[self.design_nodes] = x[:]
 
             # Evaluate objective gradient
-            g[:] = -self.analysis.ks_eigenvalue_derivative(self.xfull)[
+            # g[:] = -self.analysis.ks_eigenvalue_derivative(self.xfull)[
+            #     self.design_nodes
+            # ]
+            g[:] = self.analysis.eigenvector_displacement_deriv(self.xfull)[
                 self.design_nodes
             ]
 
@@ -1694,7 +1837,10 @@ if __name__ == "__main__":
         mmaopt.optimize(niter=args.maxit, verbose=False)
 
     else:
-        topo.checkGradients()
+        # for dh in [1e-5, 5e-6, 1e-6, 5e-7, 1e-7]:
+        # topo.checkGradients(dh)
+        topo.checkGradients(1e-6)
+        exit(0)
 
         if args.optimizer == "pmma":
             algorithm = "mma"
