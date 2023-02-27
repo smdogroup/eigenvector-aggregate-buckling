@@ -240,6 +240,7 @@ class TopologyAnalysis:
         ptype="RAMP",
         p=5.0,
         density=1.0,
+        epsilon=0.3,
         K0=None,
         M0=None,
     ):
@@ -252,8 +253,9 @@ class TopologyAnalysis:
         self.X = np.array(X)
         self.p = p
         self.density = density
+        self.epsilon = epsilon
 
-        self.D_index = 2351
+        self.D_index = 23
 
         self.K0 = K0
         self.M0 = M0
@@ -261,6 +263,9 @@ class TopologyAnalysis:
         self.nelems = self.conn.shape[0]
         self.nnodes = int(np.max(self.conn)) + 1
         self.nvars = 2 * self.nnodes
+
+        self.Q = None
+        self.eigs = None
 
         # Compute the constitutivve matrix
         self.C0 = E * np.array(
@@ -859,7 +864,7 @@ class TopologyAnalysis:
         self.eigs = eigs
         self.Q = Q
 
-        return np.sqrt(eigs)
+        return np.sqrt(self.eigs)
 
     def ks_eigenvalue(self, x, ks_rho=100.0):
         """
@@ -1068,132 +1073,403 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
-    def compute_strains(self, u):
+    def get_stress_values(self, rho, eta, Q, allowable=1.0):
         """
         Compute the strains at each quadrature point
         """
 
-        # The strain at each quadrature point
-        strain = np.zeros((self.nelems, 4, 3))
+        # Loop over all the eigenvalues
+        stress = np.zeros(self.nelems)
 
-        # Compute the element stiffness matrix
-        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+        # Average the density to get the element-wise density
+        rhoE = 0.25 * (
+            rho[self.conn[:, 0]]
+            + rho[self.conn[:, 1]]
+            + rho[self.conn[:, 2]]
+            + rho[self.conn[:, 3]]
+        )
 
         Be = np.zeros((self.nelems, 3, 8))
         J = np.zeros((self.nelems, 2, 2))
         invJ = np.zeros(J.shape)
 
         # Compute the x and y coordinates of each element
-        xe = self.x[self.conn, 0]
-        ye = self.x[self.conn, 1]
+        xe = self.X[self.conn, 0]
+        ye = self.X[self.conn, 1]
 
-        ue = np.zeros((self.nelems, 8))
-        ue[:, ::2] = u[2 * self.conn]
-        ue[:, 1::2] = u[2 * self.conn + 1]
+        # Compute the stress in the middle of the element
+        xi = 0.0
+        eta_ = 0.0
+        Nxi = 0.25 * np.array(
+            [-(1.0 - eta_), (1.0 - eta_), (1.0 + eta_), -(1.0 + eta_)]
+        )
+        Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
 
-        for j in range(2):
-            for i in range(2):
-                xi = gauss_pts[i]
-                eta = gauss_pts[j]
-                Nxi = 0.25 * np.array(
-                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
-                )
-                Neta = 0.25 * np.array(
-                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
-                )
+        # Compute the Jacobian transformation at each quadrature points
+        J[:, 0, 0] = np.dot(xe, Nxi)
+        J[:, 1, 0] = np.dot(ye, Nxi)
+        J[:, 0, 1] = np.dot(xe, Neta)
+        J[:, 1, 1] = np.dot(ye, Neta)
 
-                # Compute the Jacobian transformation at each quadrature points
-                J[:, 0, 0] = np.dot(xe, Nxi)
-                J[:, 1, 0] = np.dot(ye, Nxi)
-                J[:, 0, 1] = np.dot(xe, Neta)
-                J[:, 1, 1] = np.dot(ye, Neta)
+        # Compute the inverse of the Jacobian
+        detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+        invJ[:, 0, 0] = J[:, 1, 1] / detJ
+        invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+        invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+        invJ[:, 1, 1] = J[:, 0, 0] / detJ
 
-                # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1] / detJ
-                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
-                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
-                invJ[:, 1, 1] = J[:, 0, 0] / detJ
+        # Compute the derivative of the shape functions w.r.t. xi and eta
+        # [Nx, Ny] = [Nxi, Neta]*invJ
+        Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
+        Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
 
-                # Compute the derivative of the shape functions w.r.t. xi and eta
-                # [Nx, Ny] = [Nxi, Neta]*invJ
-                Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
-                Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
+        # Set the B matrix for each element
+        Be[:, 0, ::2] = Nx
+        Be[:, 1, 1::2] = Ny
+        Be[:, 2, ::2] = Ny
+        Be[:, 2, 1::2] = Nx
 
-                # Set the B matrix for each element
-                Be[:, 0, ::2] = Nx
-                Be[:, 1, 1::2] = Ny
-                Be[:, 2, ::2] = Ny
-                Be[:, 2, 1::2] = Nx
+        # Compute the stress relaxation factor
+        relax = rhoE / (rhoE + self.epsilon * (1.0 - rhoE))
 
-                index = i + 2 * j
-                for k in range(self.nelems):
-                    strain[k, index, :] = np.dot(Be[k], ue[k, :])
+        for k in range(len(eta)):
+            qe = np.zeros((self.nelems, 8))
+            qe[:, ::2] = Q[2 * self.conn, k]
+            qe[:, 1::2] = Q[2 * self.conn + 1, k]
 
-        return strain
+            # Compute the stresses in each element
+            s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
 
-    def compute_strain_derivative(self, dfdstrain):
-        """
-        Compute the strains at each quadrature point
-        """
+            # Add the contributions from the von Mises stress
+            stress += (
+                eta[k]
+                * relax
+                * (s[:, 0] ** 2 + s[:, 1] ** 2 - s[:, 0] * s[:, 1] + 3.0 * s[:, 2] ** 2)
+            ) / allowable**2
 
-        # The strain at each quadrature point
-        dfdu = np.zeros(2 * self.nnodes)
+        return stress
 
-        # Compute the element stiffness matrix
-        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+    def eigenvector_stress(self, x, ks_rho=100.0, allowable=1.0):
+
+        # Compute the filtered variables
+        rho = self.fltr.apply(x)
+
+        N = len(self.eigs)
+        c = np.min(self.eigs)
+        eta = np.exp(-ks_rho * (self.eigs - c))
+        a = np.sum(eta)
+        eta = eta / a
+
+        # Compute the stress values
+        stress = self.get_stress_values(rho, eta, self.Q, allowable=allowable)
+
+        # Now aggregate over the stress
+        max_stress = np.max(stress)
+        h = max_stress + np.sum(np.exp(ks_rho * (stress - max_stress))) / ks_rho
+
+        return h
+
+    def eigenvector_stress_derivative(self, x, ks_rho=100.0, allowable=1.0):
+
+        # Compute the filtered variables
+        rho = self.fltr.apply(x)
+
+        N = len(self.eigs)
+        c = np.min(self.eigs)
+        eta = np.exp(-ks_rho * (self.eigs - c))
+        a = np.sum(eta)
+        eta = eta / a
+
+        # Compute the stress values
+        stress = self.get_stress_values(rho, eta, self.Q, allowable=allowable)
+
+        # Now aggregate over the stress
+        max_stress = np.max(stress)
+        eta_stress = np.exp(ks_rho * (stress - max_stress))
+        eta_stress = eta_stress / np.sum(eta_stress)
+
+        # Set the value of the derivative
+        dfdrho = self.get_stress_values_deriv(
+            rho, eta_stress, eta, self.Q, allowable=allowable
+        )
+
+        for j in range(N):
+            # Compute D * Q[:, j]
+            prod = self.get_stress_product(
+                rho, eta_stress, self.Q[:, j], allowable=allowable
+            )
+
+            for i in range(j + 1):
+                qDq = np.dot(self.Q[:, i], prod)
+                scalar = qDq
+                if i == j:
+                    scalar = qDq - np.dot(eta_stress, stress)
+
+                Eij = scalar * self.precise(ks_rho, a, c, self.eigs[i], self.eigs[j])
+
+                if i == j:
+                    # Add to dfdx from A
+                    dfdrho += Eij * self.stiffness_matrix_derivative(
+                        rho, self.Q[:, i], self.Q[:, j]
+                    )
+
+                    # Add to dfdx from B
+                    dfdrho -= (
+                        Eij
+                        * self.eigs[i]
+                        * self.mass_matrix_derivative(rho, self.Q[:, i], self.Q[:, j])
+                    )
+                else:
+                    # Add to dfdx from A
+                    dfdrho += (
+                        2.0
+                        * Eij
+                        * self.stiffness_matrix_derivative(
+                            rho, self.Q[:, i], self.Q[:, j]
+                        )
+                    )
+
+                    # Add to dfdx from B
+                    dfdrho -= (
+                        Eij
+                        * (self.eigs[i] + self.eigs[j])
+                        * self.mass_matrix_derivative(rho, self.Q[:, i], self.Q[:, j])
+                    )
+
+        # Get the stiffness and mass matrices
+        A = self.assemble_stiffness_matrix(rho)
+        B = self.assemble_mass_matrix(rho)
+
+        Ar = self.reduce_matrix(A)
+        Br = self.reduce_matrix(B)
+        C = B.dot(self.Q)
+
+        nr = len(self.reduced)
+        Cr = np.zeros((nr, N))
+        for k in range(N):
+            Cr[:, k] = self.reduce_vector(C[:, k])
+        Ur, R = np.linalg.qr(Cr)
+
+        # Factorize the mass matrix
+        Br = Br.tocsc()
+        Bfact = linalg.factorized(Br)
+
+        # Form a full factorization for the preconditioner
+        factor = 0.99  # Should always be < 1 to ensure P is positive definite.
+        # Make this a parameter we can set??
+        P = Ar - factor * self.eigs[0] * Br
+        P = P.tocsc()
+        Pfactor = linalg.factorized(P)
+
+        def preconditioner(x):
+            y = Pfactor(x)
+            t = np.dot(Ur.T, y)
+            y = y - np.dot(Ur, t)
+            return y
+
+        preop = linalg.LinearOperator((nr, nr), preconditioner)
+
+        # Form the augmented linear system of equations
+        for k in range(N):
+            # Compute B * vk = D * qk
+            bk = self.get_stress_product(rho, eta_stress, self.Q[:, k])
+            bkr = -eta[k] * self.reduce_vector(bk)
+
+            vkr = Bfact(bkr)
+            vk = self.full_vector(vkr)
+            dfdrho += self.mass_matrix_derivative(rho, self.Q[:, k], vk)
+
+            # Form the matrix
+            def matrix(x):
+                y = Ar.dot(x) - self.eigs[k] * Br.dot(x)
+                t = np.dot(Ur.T, y)
+                y = y - np.dot(Ur, t)
+                return y
+
+            matop = linalg.LinearOperator((nr, nr), matrix)
+
+            # Solve the augmented system of equations for wk
+            t = np.dot(Ur.T, bkr)
+            bkr = bkr - np.dot(Ur, t)
+            wkr, info = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
+            wk = self.full_vector(wkr)
+
+            # Compute the contributions from the derivative from Adot
+            dfdrho += 2.0 * self.stiffness_matrix_derivative(rho, self.Q[:, k], wk)
+
+            # Add the contributions to the derivative from Bdot here...
+            dfdrho -= self.eigs[k] * self.mass_matrix_derivative(rho, self.Q[:, k], wk)
+
+            # Now, compute the remaining contributions to the derivative from
+            # B by solving the second auxiliary system
+            dkr = Ar.dot(vkr)
+
+            t = np.dot(Ur.T, dkr)
+            dkr = dkr - np.dot(Ur, t)
+            ukr, info = linalg.gmres(matop, dkr, M=preop, atol=1e-15, tol=1e-10)
+            uk = self.full_vector(ukr)
+
+            # Compute the contributions from the derivative
+            dfdrho -= self.mass_matrix_derivative(rho, self.Q[:, k], uk)
+
+        return self.fltr.applyGradient(dfdrho, x)
+
+    def get_stress_values_deriv(
+        self, rho, eta_stress, eta, Q, ks_row=100.0, allowable=1.0
+    ):
+
+        dfdrhoE = np.zeros(self.nelems)
+
+        # Average the density to get the element-wise density
+        rhoE = 0.25 * (
+            rho[self.conn[:, 0]]
+            + rho[self.conn[:, 1]]
+            + rho[self.conn[:, 2]]
+            + rho[self.conn[:, 3]]
+        )
 
         Be = np.zeros((self.nelems, 3, 8))
         J = np.zeros((self.nelems, 2, 2))
         invJ = np.zeros(J.shape)
 
         # Compute the x and y coordinates of each element
-        xe = self.x[self.conn, 0]
-        ye = self.x[self.conn, 1]
+        xe = self.X[self.conn, 0]
+        ye = self.X[self.conn, 1]
 
-        for j in range(2):
-            for i in range(2):
-                xi = gauss_pts[i]
-                eta = gauss_pts[j]
-                Nxi = 0.25 * np.array(
-                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
-                )
-                Neta = 0.25 * np.array(
-                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
-                )
+        # Compute the stress in the middle of the element
+        xi = 0.0
+        eta_ = 0.0
+        Nxi = 0.25 * np.array(
+            [-(1.0 - eta_), (1.0 - eta_), (1.0 + eta_), -(1.0 + eta_)]
+        )
+        Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
 
-                # Compute the Jacobian transformation at each quadrature points
-                J[:, 0, 0] = np.dot(xe, Nxi)
-                J[:, 1, 0] = np.dot(ye, Nxi)
-                J[:, 0, 1] = np.dot(xe, Neta)
-                J[:, 1, 1] = np.dot(ye, Neta)
+        # Compute the Jacobian transformation at each quadrature points
+        J[:, 0, 0] = np.dot(xe, Nxi)
+        J[:, 1, 0] = np.dot(ye, Nxi)
+        J[:, 0, 1] = np.dot(xe, Neta)
+        J[:, 1, 1] = np.dot(ye, Neta)
 
-                # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1] / detJ
-                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
-                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
-                invJ[:, 1, 1] = J[:, 0, 0] / detJ
+        # Compute the inverse of the Jacobian
+        detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+        invJ[:, 0, 0] = J[:, 1, 1] / detJ
+        invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+        invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+        invJ[:, 1, 1] = J[:, 0, 0] / detJ
 
-                # Compute the derivative of the shape functions w.r.t. xi and eta
-                # [Nx, Ny] = [Nxi, Neta]*invJ
-                Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
-                Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
+        # Compute the derivative of the shape functions w.r.t. xi and eta
+        # [Nx, Ny] = [Nxi, Neta]*invJ
+        Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
+        Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
 
-                # Set the B matrix for each element
-                Be[:, 0, ::2] = Nx
-                Be[:, 1, 1::2] = Ny
-                Be[:, 2, ::2] = Ny
-                Be[:, 2, 1::2] = Nx
+        # Set the B matrix for each element
+        Be[:, 0, ::2] = Nx
+        Be[:, 1, 1::2] = Ny
+        Be[:, 2, ::2] = Ny
+        Be[:, 2, 1::2] = Nx
 
-                index = i + 2 * j
-                for k in range(self.nelems):
-                    dfdue = np.dot(Be[k].T, dfdstrain[k, index, :])
+        for k in range(len(eta)):
+            qe = np.zeros((self.nelems, 8))
+            qe[:, ::2] = Q[2 * self.conn, k]
+            qe[:, 1::2] = Q[2 * self.conn + 1, k]
 
-                    dfdu[2 * self.conn[k, :]] += dfdue[::2]
-                    dfdu[2 * self.conn[k, :] + 1] += dfdue[1::2]
+            # Compute the stress relaxation factor
+            relax_deriv = self.epsilon / (rhoE + self.epsilon * (1.0 - rhoE)) ** 2
 
-        return dfdu
+            # Compute the stresses in each element
+            s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+
+            # Add the contributions from the von Mises stress
+            dfdrhoE += (
+                eta[k]
+                * relax_deriv
+                * eta_stress
+                * (s[:, 0] ** 2 + s[:, 1] ** 2 - s[:, 0] * s[:, 1] + 3.0 * s[:, 2] ** 2)
+            ) / allowable**2
+
+        dfdrho = np.zeros(self.nnodes)
+        for i in range(4):
+            np.add.at(dfdrho, self.conn[:, i], dfdrhoE)
+        dfdrho *= 0.25
+
+        return dfdrho
+
+    def get_stress_product(self, rho, eta_stress, q, allowable=1.0):
+
+        # Loop over all the eigenvalues
+        # Dq = np.zeros(self.nvars)
+
+        # Average the density to get the element-wise density
+        rhoE = 0.25 * (
+            rho[self.conn[:, 0]]
+            + rho[self.conn[:, 1]]
+            + rho[self.conn[:, 2]]
+            + rho[self.conn[:, 3]]
+        )
+
+        Be = np.zeros((self.nelems, 3, 8))
+        J = np.zeros((self.nelems, 2, 2))
+        invJ = np.zeros(J.shape)
+
+        # Compute the x and y coordinates of each element
+        xe = self.X[self.conn, 0]
+        ye = self.X[self.conn, 1]
+
+        # Compute the stress in the middle of the element
+        xi = 0.0
+        eta_ = 0.0
+        Nxi = 0.25 * np.array(
+            [-(1.0 - eta_), (1.0 - eta_), (1.0 + eta_), -(1.0 + eta_)]
+        )
+        Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+
+        # Compute the Jacobian transformation at each quadrature points
+        J[:, 0, 0] = np.dot(xe, Nxi)
+        J[:, 1, 0] = np.dot(ye, Nxi)
+        J[:, 0, 1] = np.dot(xe, Neta)
+        J[:, 1, 1] = np.dot(ye, Neta)
+
+        # Compute the inverse of the Jacobian
+        detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+        invJ[:, 0, 0] = J[:, 1, 1] / detJ
+        invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+        invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+        invJ[:, 1, 1] = J[:, 0, 0] / detJ
+
+        # Compute the derivative of the shape functions w.r.t. xi and eta
+        # [Nx, Ny] = [Nxi, Neta]*invJ
+        Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
+        Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
+
+        # Set the B matrix for each element
+        Be[:, 0, ::2] = Nx
+        Be[:, 1, 1::2] = Ny
+        Be[:, 2, ::2] = Ny
+        Be[:, 2, 1::2] = Nx
+
+        qe = np.zeros((self.nelems, 8))
+        qe[:, ::2] = q[2 * self.conn]
+        qe[:, 1::2] = q[2 * self.conn + 1]
+
+        # Compute the stress relaxation factor
+        relax = rhoE / (rhoE + self.epsilon * (1.0 - rhoE))
+
+        # Compute the stresses in each element
+        s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+
+        ds = np.zeros((self.nelems, 3))
+        ds[:, 0] = eta_stress * relax * (s[:, 0] - 0.5 * s[:, 1]) / allowable**2
+        ds[:, 1] = eta_stress * relax * (s[:, 1] - 0.5 * s[:, 0]) / allowable**2
+        ds[:, 2] = eta_stress * relax * 3.0 * s[:, 2] / allowable**2
+
+        Dqe = np.einsum("ni,ij,njk -> nk", ds, self.C0, Be)
+
+        Dq = np.zeros(self.nvars)
+        for i in range(4):
+            np.add.at(Dq, 2 * self.conn[:, i], Dqe[:, 2 * i])
+            np.add.at(Dq, 2 * self.conn[:, i] + 1, Dqe[:, 2 * i + 1])
+
+        return Dq
 
     def plot(self, u, ax=None, **kwargs):
         """
@@ -1384,7 +1660,8 @@ class OptFrequency(ParOpt.Problem):
         omega = self.analysis.solve_eigenvalue_problem(
             self.xfull, k=6, vtk_path=vtk_path
         )
-        obj = self.analysis.eigenvector_displacement()
+        # obj = self.analysis.eigenvector_displacement()
+        obj = self.analysis.eigenvector_stress(self.xfull)
         ks = obj
 
         # Compute constraint value
@@ -1431,8 +1708,13 @@ class OptFrequency(ParOpt.Problem):
             # g[:] = -self.dv_mapping.T.dot(
             #     self.analysis.ks_eigenvalue_derivative(self.xfull)
             # )
+
+            # g[:] = self.dv_mapping.T.dot(
+            #     self.analysis.eigenvector_displacement_deriv(self.xfull)
+            # )
+
             g[:] = self.dv_mapping.T.dot(
-                self.analysis.eigenvector_displacement_deriv(self.xfull)
+                self.analysis.eigenvector_stress_derivative(self.xfull)
             )
 
             # Evaluate constraint gradient
