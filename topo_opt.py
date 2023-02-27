@@ -1487,6 +1487,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--lb", default=1e-3, type=float, help="lower bound of the design variable"
     )
+    p.add_argument("--filter", choices=["spatial", "helmholtz"])
     p.add_argument("--maxit", default=500, type=int)
     p.add_argument("--prefix", default="result", type=str)
     p.add_argument("--ks-rho", default=10000, type=int)
@@ -1512,7 +1513,7 @@ if __name__ == "__main__":
     )
 
     # Create the filter
-    fltr = NodeFilter(conn, X, r0, ftype="spatial", projection=False)
+    fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=False)
 
     # Create analysis
     analysis = TopologyAnalysis(fltr, conn, X, bcs, forces, ptype=args.ptype, p=args.p)
