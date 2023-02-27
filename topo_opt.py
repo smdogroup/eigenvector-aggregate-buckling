@@ -253,7 +253,7 @@ class TopologyAnalysis:
         self.p = p
         self.density = density
 
-        self.D_index = 24
+        self.D_index = 2351
 
         self.K0 = K0
         self.M0 = M0
@@ -406,6 +406,9 @@ class TopologyAnalysis:
 
         K = sparse.coo_matrix((Ke.flatten(), (self.i, self.j)))
         K = K.tocsr()
+
+        if self.K0 is not None:
+            K += self.K0
 
         return K
 
@@ -576,6 +579,9 @@ class TopologyAnalysis:
         M = sparse.coo_matrix((Me.flatten(), (self.i, self.j)))
         M = M.tocsr()
 
+        if self.M0 is not None:
+            M += self.M0
+
         return M
 
     def mass_matrix_derivative(self, rho, u, v):
@@ -681,6 +687,14 @@ class TopologyAnalysis:
         temp = matrix[self.reduced, :]
         return temp[:, self.reduced]
 
+    def full_vector(self, vec):
+        """
+        Transform from a reduced vector without dirichlet BCs to the full vector
+        """
+        temp = np.zeros(self.nvars)
+        temp[self.reduced] = vec[:]
+        return temp
+
     def solve(self, x):
         """
         Perform a linear static analysis
@@ -694,9 +708,7 @@ class TopologyAnalysis:
         fr = self.reduce_vector(self.f)
 
         ur = sparse.linalg.spsolve(Kr, fr)
-
-        u = np.zeros(self.nvars)
-        u[self.reduced] = ur
+        u = self.full_vector(ur)
 
         return u
 
@@ -812,28 +824,20 @@ class TopologyAnalysis:
         rho = self.fltr.apply(x)
 
         K = self.assemble_stiffness_matrix(rho)
-        if self.K0 is not None:
-            K += self.K0
         Kr = self.reduce_matrix(K)
 
         M = self.assemble_mass_matrix(rho)
-        if self.M0 is not None:
-            M += self.M0
         Mr = self.reduce_matrix(M)
 
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
-        # if k == len(self.reduced):
-        #     eigs, Qr = eigh(Kr.todense(), Mr.todense())
-        # else:
-        #     eigs, Qr = sparse.linalg.eigsh(
-        #         Kr, M=Mr, k=k, sigma=sigma, which="LM", tol=1e-10
-        #     )
-
-        eigs, Qr = eigh(Kr.todense(), Mr.todense())
-        eigs = eigs[:k]
-        Qr = Qr[:, :k]
+        if k == len(self.reduced):
+            eigs, Qr = eigh(Kr.todense(), Mr.todense())
+        else:
+            eigs, Qr = sparse.linalg.eigsh(
+                Kr, M=Mr, k=k, sigma=sigma, which="LM", tol=1e-10
+            )
 
         Q = np.zeros((self.nvars, k))
         for i in range(k):
@@ -987,12 +991,7 @@ class TopologyAnalysis:
 
         # Get the stiffness and mass matrices
         A = self.assemble_stiffness_matrix(rho)
-        if self.K0 is not None:
-            A += self.K0
-
         B = self.assemble_mass_matrix(rho)
-        if self.M0 is not None:
-            B += self.M0
 
         Ar = self.reduce_matrix(A)
         Br = self.reduce_matrix(B)
@@ -1004,19 +1003,24 @@ class TopologyAnalysis:
             Cr[:, k] = self.reduce_vector(C[:, k])
         Ur, R = np.linalg.qr(Cr)
 
+        # Factorize the mass matrix
+        Br = Br.tocsc()
         Bfact = linalg.factorized(Br)
 
-        # Compute the preconditioner
-        P = Ar - 0.99 * self.eigs[0] * Br
+        # Form a full factorization for the preconditioner
+        factor = 0.99  # Should always be < 1 to ensure P is positive definite.
+        # Make this a parameter we can set??
+        P = Ar - factor * self.eigs[0] * Br
+        P = P.tocsc()
         Pfactor = linalg.factorized(P)
 
-        def precon(x):
+        def preconditioner(x):
             y = Pfactor(x)
             t = np.dot(Ur.T, y)
             y = y - np.dot(Ur, t)
             return y
 
-        preop = linalg.LinearOperator((nr, nr), precon)
+        preop = linalg.LinearOperator((nr, nr), preconditioner)
 
         # Form the augmented linear system of equations
         for k in range(N):
@@ -1026,29 +1030,23 @@ class TopologyAnalysis:
             bkr = -eta[k] * self.reduce_vector(bk)
 
             vkr = Bfact(bkr)
-            vk = np.zeros(self.nvars)
-            vk[self.reduced] = vkr
-
+            vk = self.full_vector(vkr)
             dfdrho += self.mass_matrix_derivative(rho, self.Q[:, k], vk)
 
-            # Solve the augmented system of equations for wk
-            Ak = Ar - self.eigs[k] * Br
-
-            def mat(x):
-                y = Ak.dot(x)
+            # Form the matrix
+            def matrix(x):
+                y = Ar.dot(x) - self.eigs[k] * Br.dot(x)
                 t = np.dot(Ur.T, y)
                 y = y - np.dot(Ur, t)
                 return y
 
-            matop = linalg.LinearOperator((nr, nr), mat)
+            matop = linalg.LinearOperator((nr, nr), matrix)
 
+            # Solve the augmented system of equations for wk
             t = np.dot(Ur.T, bkr)
             bkr = bkr - np.dot(Ur, t)
-
             wkr, info = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
-
-            wk = np.zeros(self.nvars)
-            wk[self.reduced] = wkr
+            wk = self.full_vector(wkr)
 
             # Compute the contributions from the derivative from Adot
             dfdrho += 2.0 * self.stiffness_matrix_derivative(rho, self.Q[:, k], wk)
@@ -1062,65 +1060,11 @@ class TopologyAnalysis:
 
             t = np.dot(Ur.T, dkr)
             dkr = dkr - np.dot(Ur, t)
-
             ukr, info = linalg.gmres(matop, dkr, M=preop, atol=1e-15, tol=1e-10)
-
-            uk = np.zeros(self.nvars)
-            uk[self.reduced] = ukr
+            uk = self.full_vector(ukr)
 
             # Compute the contributions from the derivative
             dfdrho -= self.mass_matrix_derivative(rho, self.Q[:, k], uk)
-
-        """
-        self.D = np.zeros((self.nvars, self.nvars))
-        self.D[self.D_index, self.D_index] = 1.0
-
-        # Form the augmented linear system of equations
-        for k in range(N):
-            # Compute B * vk = D * qk
-            bk = np.dot(self.D, self.Q[:, k])
-            bkr = self.reduce_vector(bk)
-            vkr = np.linalg.solve(Br.todense(), -eta[k] * bkr)
-            vk = np.zeros(self.nvars)
-            vk[self.reduced] = vkr
-            dfdrho += self.mass_matrix_derivative(rho, self.Q[:, k], vk)
-
-            # Solve the augmented system of equations for wk
-            Ak = Ar.todense() - self.eigs[k] * Br.todense()
-
-            # Set up the augmented linear system of equations
-            mat = np.block([[Ak, Cr], [Cr.T, np.zeros((N, N))]])
-            b = np.zeros(mat.shape[0])
-
-            # Compute the right-hand-side vector
-            b[: Ak.shape[0]] = -eta[k] * bkr
-
-            # Solve the first block linear system of equations
-            sol = np.linalg.solve(mat, b)
-            wkr = sol[: Ak.shape[0]]
-            wk = np.zeros(self.nvars)
-            wk[self.reduced] = wkr
-
-            # Compute the contributions from the derivative from Adot
-            dfdrho += 2.0 * self.stiffness_matrix_derivative(rho, self.Q[:, k], wk)
-
-            # Add the contributions to the derivative from Bdot here...
-            dfdrho -= self.eigs[k] * self.mass_matrix_derivative(rho, self.Q[:, k], wk)
-
-            # Now, compute the remaining contributions to the derivative from
-            # B by solving the second auxiliary system
-            dkr = np.dot(Ar.todense(), vkr)
-            b[: Ak.shape[0]] = dkr
-
-            sol = np.linalg.solve(mat, b)
-            ukr = sol[: Ak.shape[0]]
-            uk = np.zeros(self.nvars)
-            uk[self.reduced] = ukr
-
-            # Compute the contributions from the derivative
-            dfdrho -= self.mass_matrix_derivative(rho, self.Q[:, k], uk)
-
-        """
 
         return self.fltr.applyGradient(dfdrho, x)
 
