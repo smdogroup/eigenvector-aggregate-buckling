@@ -10,6 +10,8 @@ from paropt import ParOpt
 import argparse
 import os
 import mpmath as mp
+from timeit import default_timer as timer
+from utils import time_this, timer_set_threshold
 
 
 class NodeFilter:
@@ -333,6 +335,7 @@ class TopologyAnalysis:
         self.M0 = M0
         return
 
+    @time_this
     def assemble_stiffness_matrix(self, rho):
         """
         Assemble the stiffness matrix
@@ -405,10 +408,6 @@ class TopologyAnalysis:
                 # This is a fancy (and fast) way to compute the element matrices
                 Ke += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
 
-                # This is a slower way to compute the element matrices
-                # for k in range(self.nelems):
-                #     Ke[k, :, :] += detJ[k]*np.dot(Be[k, :, :].T, np.dot(self.C[k, :, :], Be[k, :, :]))
-
         K = sparse.coo_matrix((Ke.flatten(), (self.i, self.j)))
         K = K.tocsr()
 
@@ -417,6 +416,7 @@ class TopologyAnalysis:
 
         return K
 
+    @time_this
     def stiffness_matrix_derivative(self, rho, psi, u):
         """
         Compute the derivative of the stiffness matrix times the vectors psi and u
@@ -513,6 +513,7 @@ class TopologyAnalysis:
 
         return dfdrho
 
+    @time_this
     def assemble_mass_matrix(self, rho):
         """
         Assemble the mass matrix
@@ -589,6 +590,7 @@ class TopologyAnalysis:
 
         return M
 
+    @time_this
     def mass_matrix_derivative(self, rho, u, v):
         """
         Compute the derivative of the mass matrix
@@ -817,6 +819,7 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
+    @time_this
     def solve_eigenvalue_problem(self, x, k=5, sigma=0.0, vtk_path=None):
         """
         Compute the k-th smallest natural frequencies
@@ -908,6 +911,7 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
+    @time_this
     def eigenvector_displacement(self, ks_rho=100.0):
 
         N = len(self.eigs)
@@ -934,6 +938,7 @@ class TopologyAnalysis:
                 )
         return np.float64(val)
 
+    @time_this
     def eigenvector_displacement_deriv(self, x, ks_rho=100.0):
         """
         Approximately compute the forward derivative
@@ -1073,6 +1078,7 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
+    @time_this
     def get_stress_values(self, rho, eta, Q, allowable=1.0):
         """
         Compute the strains at each quadrature point
@@ -1149,6 +1155,7 @@ class TopologyAnalysis:
 
         return stress
 
+    @time_this
     def eigenvector_stress(self, x, ks_rho=100.0, allowable=1.0):
 
         # Compute the filtered variables
@@ -1169,6 +1176,7 @@ class TopologyAnalysis:
 
         return h
 
+    @time_this
     def eigenvector_stress_derivative(self, x, ks_rho=100.0, allowable=1.0):
 
         # Compute the filtered variables
@@ -1314,9 +1322,8 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
-    def get_stress_values_deriv(
-        self, rho, eta_stress, eta, Q, ks_row=100.0, allowable=1.0
-    ):
+    @time_this
+    def get_stress_values_deriv(self, rho, eta_stress, eta, Q, allowable=1.0):
 
         dfdrhoE = np.zeros(self.nelems)
 
@@ -1394,6 +1401,7 @@ class TopologyAnalysis:
 
         return dfdrho
 
+    @time_this
     def get_stress_product(self, rho, eta_stress, q, allowable=1.0):
 
         # Loop over all the eigenvalues
@@ -1501,75 +1509,6 @@ class TopologyAnalysis:
         return
 
 
-# class OptCompliance(ParOpt.Problem):
-#     """
-#     Compliance minimization under volume constraint
-#     """
-
-#     def __init__(
-#         self,
-#         analysis: TopologyAnalysis,
-#         vol_frac=0.4,
-#         draw_history=True,
-#         draw_every=1,
-#         prefix="result",
-#     ):
-#         self.analysis = analysis
-
-#         x = np.ones(self.analysis.nnodes)
-#         self.area_gradient = self.analysis.eval_area_gradient(x)
-#         self.fixed_area = vol_frac * np.sum(self.area_gradient)
-
-#         super().__init__(MPI.COMM_SELF, analysis.nnodes, 1)
-
-#         self.draw_history = draw_history
-#         self.draw_every = draw_every
-#         self.prefix = prefix
-
-#         self.it_counter = 0
-#         return
-
-#     def getVarsAndBounds(self, x, lb, ub):
-#         """Get the variable values and bounds"""
-#         lb[:] = 1e-3
-#         ub[:] = 1.0
-#         x[:] = 0.95
-#         return
-
-#     def evalObjCon(self, x):
-#         """
-#         Return the objective, constraint and fail flag
-#         """
-
-#         fail = 0
-#         obj = self.analysis.compliance(x[:])
-#         con = [self.fixed_area - self.analysis.area_gradient.dot(self.analysis.rhoE)]
-
-#         if self.draw_history and self.it_counter % self.draw_every == 0:
-#             fig, ax = plt.subplots()
-#             self.analysis.plot(self.analysis.rho, ax=ax)
-#             ax.set_aspect("equal", "box")
-#             plt.savefig(os.path.join(self.prefix, "%d.png" % self.it_counter))
-#             plt.close()
-
-#         self.it_counter += 1
-
-#         return fail, obj, con
-
-#     def evalObjConGradient(self, x, g, A):
-#         """
-#         Return the objective, constraint and fail flag
-#         """
-
-#         fail = 0
-#         g[:] = self.analysis.compliance_gradient(x[:])
-#         A[0][:] = -self.analysis.fltr.applyGradient(
-#             self.analysis.area_gradient_rho[:], x[:]
-#         )
-
-#         return fail
-
-
 class OptFrequency(ParOpt.Problem):
     """
     natural frequency maximization under a volume constraint
@@ -1635,10 +1574,14 @@ class OptFrequency(ParOpt.Problem):
     def getVarsAndBounds(self, x, lb, ub):
         lb[:] = self.lb
         ub[:] = 1.0
-        x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
+        # np.random.seed(0)
+        # x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
+        x[:] = 0.95
         return
 
     def evalObjCon(self, x):
+        t_start = timer()
+
         # Populate the nodal variable for analysis
         if self.dv_mapping is not None:
             self.xfull[:] = self.dv_mapping.dot(x)  # x = E*xr
@@ -1646,7 +1589,7 @@ class OptFrequency(ParOpt.Problem):
         else:
             self.xfull[self.design_nodes] = x[:]
 
-        # Evaluate the maximize natural frequency
+        # Save the design to vtk every certain iterations
         vtk_path = None
         if self.it_counter % self.draw_every == 0:
             if not os.path.isdir(os.path.join(self.prefix, "vtk")):
@@ -1657,17 +1600,18 @@ class OptFrequency(ParOpt.Problem):
         # ks = self.analysis.ks_eigenvalue(self.xfull, ks_rho=self.ks_rho)
         # obj = -ks
 
+        # Solve the genrealized eigenvalue problem
         omega = self.analysis.solve_eigenvalue_problem(
             self.xfull, k=6, vtk_path=vtk_path
         )
+
         # obj = self.analysis.eigenvector_displacement()
         obj = self.analysis.eigenvector_stress(self.xfull)
-        ks = obj
 
-        # Compute constraint value
+        # Compute volumetric constraint
         con = [self.fixed_area - self.analysis.eval_area(self.xfull)]
 
-        # Draw design
+        # Save the design as figure
         if self.draw_history and self.it_counter % self.draw_every == 0:
             fig, ax = plt.subplots()
             rho = self.analysis.fltr.apply(self.xfull)
@@ -1678,27 +1622,29 @@ class OptFrequency(ParOpt.Problem):
 
         # Log eigenvalues
         with open(os.path.join(self.prefix, "eigenvalues.log"), "a") as f:
-            # header
             if self.it_counter % 10 == 0:
                 f.write("\n%10s" % "iter")
-                f.write("%25s" % "ks agg.")
                 for i in range(len(omega)):
                     name = "eigval[%d]" % i
                     f.write("%25s" % name)
                 f.write("\n")
 
             f.write("%10d" % self.it_counter)
-            f.write("%25.15e" % ks)
             for i in range(len(omega)):
                 f.write("%25.15e" % omega[i])
             f.write("\n")
 
-        self.it_counter += 1
+        t_end = timer()
+        elapse_s = t_end - t_start
+        print("[it=%d], t(fun): %6.3f s, " % (self.it_counter, elapse_s), end="")
 
         fail = 0
+        self.it_counter += 1
         return fail, obj, con
 
     def evalObjConGradient(self, x, g, A):
+        t_start = timer()
+
         if self.dv_mapping is not None:
             # Populate the nodal variable for analysis
             self.xfull[:] = self.dv_mapping.dot(x)  # x = E*xr
@@ -1736,6 +1682,10 @@ class OptFrequency(ParOpt.Problem):
 
             # Evaluate constraint gradient
             A[0][:] = -self.analysis.eval_area_gradient(self.xfull)[self.design_nodes]
+
+        t_end = timer()
+        elapse_s = t_end - t_start
+        print("t(grad): %6.3f s" % (elapse_s))
 
         return 0
 
@@ -2003,10 +1953,10 @@ def get_paropt_default_options(prefix, algorithm="tr", maxit=1000):
     return options
 
 
-if __name__ == "__main__":
-
+def parse_cmd_args():
     p = argparse.ArgumentParser()
     p.add_argument("--optimizer", default="mma4py", choices=["pmma", "mma4py", "tr"])
+    p.add_argument("--grad-check", action="store_true")
     p.add_argument(
         "--npquarter", default=48, type=int, help="number of nodes for half-edge"
     )
@@ -2024,6 +1974,14 @@ if __name__ == "__main__":
     p.add_argument("--m0", default=100.0, type=float)
     args = p.parse_args()
 
+    return args
+
+
+if __name__ == "__main__":
+    # Get options from command line
+    args = parse_cmd_args()
+
+    # Create result directory if needed
     if not os.path.isdir(args.prefix):
         os.mkdir(args.prefix)
 
@@ -2033,7 +1991,6 @@ if __name__ == "__main__":
         for k, v in vars(args).items():
             f.write(f"{k:<20}{v}\n")
 
-    # conn, X, r0, bcs, forces, non_design_nodes = create_cantilever_domain()
     conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_square_domain(
         npquarter=args.npquarter
     )
@@ -2056,6 +2013,12 @@ if __name__ == "__main__":
         lb=args.lb,
     )
 
+    # Print info
+    print("=== Problem overview ===")
+    print("num of dof: %d" % analysis.nvars)
+    print("num of dv:  %d" % topo.ndv)
+    print()
+
     if args.optimizer == "mma4py":
 
         if MMAProblem is None:
@@ -2066,13 +2029,17 @@ if __name__ == "__main__":
             mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
         )
         mmaopt.checkGradients()
+        if args.grad_check:
+            exit(0)
+
         mmaopt.optimize(niter=args.maxit, verbose=False)
 
     else:
         # for dh in [1e-5, 5e-6, 1e-6, 5e-7, 1e-7]:
         # topo.checkGradients(dh)
         topo.checkGradients(1e-6)
-        exit(0)
+        if args.grad_check:
+            exit(0)
 
         if args.optimizer == "pmma":
             algorithm = "mma"
