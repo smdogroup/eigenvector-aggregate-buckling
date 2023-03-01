@@ -14,6 +14,143 @@ from timeit import default_timer as timer
 from utils import time_this, timer_set_threshold
 
 
+def _populate_Be(nelems, xi, eta, xe, ye, Be):
+    """
+    Populate B matrices for all elements at a quadrature point
+    """
+    J = np.zeros((nelems, 2, 2))
+    invJ = np.zeros(J.shape)
+
+    Nxi = 0.25 * np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
+    Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+
+    # Compute the Jacobian transformation at each quadrature points
+    J[:, 0, 0] = np.dot(xe, Nxi)
+    J[:, 1, 0] = np.dot(ye, Nxi)
+    J[:, 0, 1] = np.dot(xe, Neta)
+    J[:, 1, 1] = np.dot(ye, Neta)
+
+    # Compute the inverse of the Jacobian
+    detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+    invJ[:, 0, 0] = J[:, 1, 1] / detJ
+    invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+    invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+    invJ[:, 1, 1] = J[:, 0, 0] / detJ
+
+    # Compute the derivative of the shape functions w.r.t. xi and eta
+    # [Nx, Ny] = [Nxi, Neta]*invJ
+    Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
+    Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
+
+    # Set the B matrix for each element
+    Be[:, 0, ::2] = Nx
+    Be[:, 1, 1::2] = Ny
+    Be[:, 2, ::2] = Ny
+    Be[:, 2, 1::2] = Nx
+
+    return detJ
+
+
+def _populate_Be_single(xi, eta, xe, ye, Be):
+    """
+    Populate B matrix for a single element at a quadrature point
+    """
+    J = np.zeros((2, 2))
+    invJ = np.zeros(J.shape)
+
+    Nxi = 0.25 * np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
+    Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+
+    # Compute the Jacobian transformation at each quadrature points
+    J[0, 0] = np.dot(xe, Nxi)
+    J[1, 0] = np.dot(ye, Nxi)
+    J[0, 1] = np.dot(xe, Neta)
+    J[1, 1] = np.dot(ye, Neta)
+
+    # Compute the inverse of the Jacobian
+    detJ = J[0, 0] * J[1, 1] - J[0, 1] * J[1, 0]
+    invJ = np.linalg.inv(J)
+
+    # Compute the derivative of the shape functions w.r.t. xi and eta
+    # [Nx, Ny] = [Nxi, Neta]*invJ
+    Nx = np.outer(invJ[0, 0], Nxi) + np.outer(invJ[1, 0], Neta)
+    Ny = np.outer(invJ[0, 1], Nxi) + np.outer(invJ[1, 1], Neta)
+
+    # Set the B matrix for each element
+    Be[0, ::2] = Nx
+    Be[1, 1::2] = Ny
+    Be[2, ::2] = Ny
+    Be[2, 1::2] = Nx
+
+    return detJ
+
+
+def _populate_He_single(xi, eta, xe, ye, He):
+    """
+    Populate a single H matrix at a quadrature point
+    """
+    J = np.zeros((2, 2))
+
+    N = 0.25 * np.array(
+        [
+            (1.0 - xi) * (1.0 - eta),
+            (1.0 + xi) * (1.0 - eta),
+            (1.0 + xi) * (1.0 + eta),
+            (1.0 - xi) * (1.0 + eta),
+        ]
+    )
+    Nxi = 0.25 * np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
+    Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+
+    # Compute the Jacobian transformation at each quadrature points
+    J[0, 0] = np.dot(xe, Nxi)
+    J[1, 0] = np.dot(ye, Nxi)
+    J[0, 1] = np.dot(xe, Neta)
+    J[1, 1] = np.dot(ye, Neta)
+
+    # Compute the inverse of the Jacobian
+    detJ = J[0, 0] * J[1, 1] - J[0, 1] * J[1, 0]
+
+    # Set the B matrix for each element
+    He[0, ::2] = N
+    He[1, 1::2] = N
+
+    return detJ
+
+
+def _populate_He(nelems, xi, eta, xe, ye, He):
+    """
+    Populate H matrices for all elements at a quadrature point
+    """
+    J = np.zeros((nelems, 2, 2))
+
+    N = 0.25 * np.array(
+        [
+            (1.0 - xi) * (1.0 - eta),
+            (1.0 + xi) * (1.0 - eta),
+            (1.0 + xi) * (1.0 + eta),
+            (1.0 - xi) * (1.0 + eta),
+        ]
+    )
+    Nxi = 0.25 * np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
+    Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+
+    # Compute the Jacobian transformation at each quadrature points
+    J[:, 0, 0] = np.dot(xe, Nxi)
+    J[:, 1, 0] = np.dot(ye, Nxi)
+    J[:, 0, 1] = np.dot(xe, Neta)
+    J[:, 1, 1] = np.dot(ye, Neta)
+
+    # Compute the inverse of the Jacobian
+    detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+
+    # Set the B matrix for each element
+    He[:, 0, ::2] = N
+    He[:, 1, 1::2] = N
+
+    return detJ
+
+
 class NodeFilter:
     """
     A node-based filter for topology optimization
@@ -245,6 +382,7 @@ class TopologyAnalysis:
         epsilon=0.3,
         K0=None,
         M0=None,
+        assume_same_element=False,
     ):
 
         self.ptype = ptype.lower()
@@ -261,6 +399,7 @@ class TopologyAnalysis:
 
         self.K0 = K0
         self.M0 = M0
+        self.assume_same_element = assume_same_element
 
         self.nelems = self.conn.shape[0]
         self.nnodes = int(np.max(self.conn)) + 1
@@ -361,52 +500,38 @@ class TopologyAnalysis:
 
         # Assemble all of the the 8 x 8 element stiffness matrix
         Ke = np.zeros((self.nelems, 8, 8))
-        Be = np.zeros((self.nelems, 3, 8))
 
-        J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
+        if self.assume_same_element:
+            Be_ = np.zeros((3, 8))
 
-        # Compute the x and y coordinates of each element
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
+            # Compute the x and y coordinates of the first element
+            xe_ = self.X[self.conn[0], 0]
+            ye_ = self.X[self.conn[0], 1]
 
-        for j in range(2):
-            for i in range(2):
-                xi = gauss_pts[i]
-                eta = gauss_pts[j]
-                Nxi = 0.25 * np.array(
-                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
-                )
-                Neta = 0.25 * np.array(
-                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
-                )
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_Be_single(xi, eta, xe_, ye_, Be_)
 
-                # Compute the Jacobian transformation at each quadrature points
-                J[:, 0, 0] = np.dot(xe, Nxi)
-                J[:, 1, 0] = np.dot(ye, Nxi)
-                J[:, 0, 1] = np.dot(xe, Neta)
-                J[:, 1, 1] = np.dot(ye, Neta)
+                    # This is a fancy (and fast) way to compute the element matrices
+                    Ke += detJ * np.einsum("ij,nik,kl -> njl", Be_, C, Be_)
 
-                # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1] / detJ
-                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
-                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
-                invJ[:, 1, 1] = J[:, 0, 0] / detJ
+        else:
+            Be = np.zeros((self.nelems, 3, 8))
 
-                # Compute the derivative of the shape functions w.r.t. xi and eta
-                # [Nx, Ny] = [Nxi, Neta]*invJ
-                Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
-                Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
+            # Compute the x and y coordinates of each element
+            xe = self.X[self.conn, 0]
+            ye = self.X[self.conn, 1]
 
-                # Set the B matrix for each element
-                Be[:, 0, ::2] = Nx
-                Be[:, 1, 1::2] = Ny
-                Be[:, 2, ::2] = Ny
-                Be[:, 2, 1::2] = Nx
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_Be(self.nelems, xi, eta, xe, ye, Be)
 
-                # This is a fancy (and fast) way to compute the element matrices
-                Ke += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
+                    # This is a fancy (and fast) way to compute the element matrices
+                    Ke += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
 
         K = sparse.coo_matrix((Ke.flatten(), (self.i, self.j)))
         K = K.tocsr()
@@ -435,16 +560,6 @@ class TopologyAnalysis:
         # Compute the element stiffness matrix
         gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
-        # Assemble all of the the 8 x 8 element stiffness matrix
-        Be = np.zeros((self.nelems, 3, 8))
-
-        J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
-
-        # Compute the x and y coordinates of each element
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
-
         # The element-wise variables
         ue = np.zeros((self.nelems, 8))
         psie = np.zeros((self.nelems, 8))
@@ -455,46 +570,31 @@ class TopologyAnalysis:
         psie[:, ::2] = psi[2 * self.conn]
         psie[:, 1::2] = psi[2 * self.conn + 1]
 
-        for j in range(2):
-            for i in range(2):
-                xi = gauss_pts[i]
-                eta = gauss_pts[j]
-                Nxi = 0.25 * np.array(
-                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
-                )
-                Neta = 0.25 * np.array(
-                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
-                )
+        if self.assume_same_element:
+            Be_ = np.zeros((3, 8))
+            xe_ = self.X[self.conn[0], 0]
+            ye_ = self.X[self.conn[0], 1]
 
-                # Compute the Jacobian transformation at each quadrature points
-                J[:, 0, 0] = np.dot(xe, Nxi)
-                J[:, 1, 0] = np.dot(ye, Nxi)
-                J[:, 0, 1] = np.dot(xe, Neta)
-                J[:, 1, 1] = np.dot(ye, Neta)
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_Be_single(xi, eta, xe_, ye_, Be_)
 
-                # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
-                invJ[:, 0, 0] = J[:, 1, 1] / detJ
-                invJ[:, 0, 1] = -J[:, 0, 1] / detJ
-                invJ[:, 1, 0] = -J[:, 1, 0] / detJ
-                invJ[:, 1, 1] = J[:, 0, 0] / detJ
+                    dfdC += detJ * np.einsum("im,jl,nm,nl -> nij", Be_, Be_, psie, ue)
 
-                # Compute the derivative of the shape functions w.r.t. xi and eta
-                # [Nx, Ny] = [Nxi, Neta]*invJ
-                Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
-                Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
+        else:
+            Be = np.zeros((self.nelems, 3, 8))
+            xe = self.X[self.conn, 0]
+            ye = self.X[self.conn, 1]
 
-                # Set the B matrix for each element
-                Be[:, 0, ::2] = Nx
-                Be[:, 1, 1::2] = Ny
-                Be[:, 2, ::2] = Ny
-                Be[:, 2, 1::2] = Nx
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_Be(self.nelems, xi, eta, xe, ye, Be)
 
-                for k in range(self.nelems):
-                    eu = np.dot(Be[k, :], ue[k, :])
-                    epsi = np.dot(Be[k, :], psie[k, :])
-
-                    dfdC[k, :, :] += detJ[k] * np.outer(epsi, eu)
+                    dfdC += np.einsum("n,nim,njl,nm,nl -> nij", detJ, Be, Be, psie, ue)
 
         dfdrhoE = np.zeros(self.nelems)
         for i in range(3):
@@ -538,49 +638,39 @@ class TopologyAnalysis:
 
         # Assemble all of the the 8 x 8 element mass matrices
         Me = np.zeros((self.nelems, 8, 8))
-        He = np.zeros((self.nelems, 2, 8))
 
-        J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
+        if self.assume_same_element:
+            He_ = np.zeros((2, 8))
 
-        # Compute the x and y coordinates of each element
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
+            # Compute the x and y coordinates of each element
+            xe_ = self.X[self.conn[0], 0]
+            ye_ = self.X[self.conn[0], 1]
 
-        for j in range(2):
-            for i in range(2):
-                xi = gauss_pts[i]
-                eta = gauss_pts[j]
-                N = 0.25 * np.array(
-                    [
-                        (1.0 - xi) * (1.0 - eta),
-                        (1.0 + xi) * (1.0 - eta),
-                        (1.0 + xi) * (1.0 + eta),
-                        (1.0 - xi) * (1.0 + eta),
-                    ]
-                )
-                Nxi = 0.25 * np.array(
-                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
-                )
-                Neta = 0.25 * np.array(
-                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
-                )
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_He_single(xi, eta, xe_, ye_, He_)
 
-                # Compute the Jacobian transformation at each quadrature points
-                J[:, 0, 0] = np.dot(xe, Nxi)
-                J[:, 1, 0] = np.dot(ye, Nxi)
-                J[:, 0, 1] = np.dot(xe, Neta)
-                J[:, 1, 1] = np.dot(ye, Neta)
+                    # This is a fancy (and fast) way to compute the element matrices
+                    Me += np.einsum("n,ij,il -> njl", density * detJ, He_, He_)
 
-                # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+        else:
 
-                # Set the B matrix for each element
-                He[:, 0, ::2] = N
-                He[:, 1, 1::2] = N
+            He = np.zeros((self.nelems, 2, 8))
 
-                # This is a fancy (and fast) way to compute the element matrices
-                Me += np.einsum("n,nij,nil -> njl", density * detJ, He, He)
+            # Compute the x and y coordinates of each element
+            xe = self.X[self.conn, 0]
+            ye = self.X[self.conn, 1]
+
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_He(self.nelems, xi, eta, xe, ye, He)
+
+                    # This is a fancy (and fast) way to compute the element matrices
+                    Me += np.einsum("n,nij,nil -> njl", density * detJ, He, He)
 
         M = sparse.coo_matrix((Me.flatten(), (self.i, self.j)))
         M = M.tocsr()
@@ -611,16 +701,6 @@ class TopologyAnalysis:
         # Compute the element stiffness matrix
         gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
-        J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
-
-        # The interpolation matrix for each element
-        He = np.zeros((self.nelems, 2, 8))
-
-        # Compute the x and y coordinates of each element
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
-
         # The element-wise variables
         ue = np.zeros((self.nelems, 8))
         ve = np.zeros((self.nelems, 8))
@@ -631,43 +711,41 @@ class TopologyAnalysis:
         ve[:, ::2] = v[2 * self.conn]
         ve[:, 1::2] = v[2 * self.conn + 1]
 
-        for j in range(2):
-            for i in range(2):
-                xi = gauss_pts[i]
-                eta = gauss_pts[j]
-                N = 0.25 * np.array(
-                    [
-                        (1.0 - xi) * (1.0 - eta),
-                        (1.0 + xi) * (1.0 - eta),
-                        (1.0 + xi) * (1.0 + eta),
-                        (1.0 - xi) * (1.0 + eta),
-                    ]
-                )
-                Nxi = 0.25 * np.array(
-                    [-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)]
-                )
-                Neta = 0.25 * np.array(
-                    [-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)]
-                )
+        if self.assume_same_element:
+            # The interpolation matrix for each element
+            He_ = np.zeros((2, 8))
 
-                # Compute the Jacobian transformation at each quadrature points
-                J[:, 0, 0] = np.dot(xe, Nxi)
-                J[:, 1, 0] = np.dot(ye, Nxi)
-                J[:, 0, 1] = np.dot(xe, Neta)
-                J[:, 1, 1] = np.dot(ye, Neta)
+            # Compute the x and y coordinates of each element
+            xe_ = self.X[self.conn[0], 0]
+            ye_ = self.X[self.conn[0], 1]
 
-                # Compute the inverse of the Jacobian
-                detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_He_single(xi, eta, xe_, ye_, He_)
 
-                # Set the B matrix for each element
-                He[:, 0, ::2] = N
-                He[:, 1, 1::2] = N
+                    eu_ = np.einsum("ij,nj -> ni", He_, ue)
+                    ev_ = np.einsum("ij,nj -> ni", He_, ve)
+                    dfdrhoE += detJ * np.einsum("ni,ni -> n", eu_, ev_)
 
-                for k in range(self.nelems):
-                    eu = np.dot(He[k, :], ue[k, :])
-                    ev = np.dot(He[k, :], ve[k, :])
+        else:
+            # The interpolation matrix for each element
+            He = np.zeros((self.nelems, 2, 8))
 
-                    dfdrhoE[k] += detJ[k] * np.dot(ev, eu)
+            # Compute the x and y coordinates of each element
+            xe = self.X[self.conn, 0]
+            ye = self.X[self.conn, 1]
+
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_He(self.nelems, xi, eta, xe, ye, He)
+
+                    eu = np.einsum("nij,nj -> ni", He, ue)
+                    ev = np.einsum("nij,nj -> ni", He, ve)
+                    dfdrhoE += np.einsum("n,ni,ni -> n", detJ, eu, ev)
 
         if self.ptype == "simp":
             dfdrhoE[:] *= self.density * rhoE ** (1.0 / self.p - 1.0) / self.p
@@ -744,7 +822,6 @@ class TopologyAnalysis:
 
         # Jacobian transformation
         J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
 
         # Compute the x and y coordinates of each element
         xe = self.X[self.conn, 0]
@@ -784,7 +861,6 @@ class TopologyAnalysis:
 
         # Jacobian transformation
         J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
 
         # Compute the x and y coordinates of each element
         xe = self.X[self.conn, 0]
@@ -869,7 +945,7 @@ class TopologyAnalysis:
 
         return np.sqrt(self.eigs)
 
-    def ks_eigenvalue(self, x, ks_rho=100.0):
+    def ks_eigenvalue(self, ks_rho=100.0):
         """
         Compute the ks minimum eigenvalue
         """
@@ -1095,63 +1171,72 @@ class TopologyAnalysis:
             + rho[self.conn[:, 3]]
         )
 
-        Be = np.zeros((self.nelems, 3, 8))
-        J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
-
-        # Compute the x and y coordinates of each element
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
-
-        # Compute the stress in the middle of the element
-        xi = 0.0
-        eta_ = 0.0
-        Nxi = 0.25 * np.array(
-            [-(1.0 - eta_), (1.0 - eta_), (1.0 + eta_), -(1.0 + eta_)]
-        )
-        Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
-
-        # Compute the Jacobian transformation at each quadrature points
-        J[:, 0, 0] = np.dot(xe, Nxi)
-        J[:, 1, 0] = np.dot(ye, Nxi)
-        J[:, 0, 1] = np.dot(xe, Neta)
-        J[:, 1, 1] = np.dot(ye, Neta)
-
-        # Compute the inverse of the Jacobian
-        detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
-        invJ[:, 0, 0] = J[:, 1, 1] / detJ
-        invJ[:, 0, 1] = -J[:, 0, 1] / detJ
-        invJ[:, 1, 0] = -J[:, 1, 0] / detJ
-        invJ[:, 1, 1] = J[:, 0, 0] / detJ
-
-        # Compute the derivative of the shape functions w.r.t. xi and eta
-        # [Nx, Ny] = [Nxi, Neta]*invJ
-        Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
-        Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
-
-        # Set the B matrix for each element
-        Be[:, 0, ::2] = Nx
-        Be[:, 1, 1::2] = Ny
-        Be[:, 2, ::2] = Ny
-        Be[:, 2, 1::2] = Nx
-
         # Compute the stress relaxation factor
         relax = rhoE / (rhoE + self.epsilon * (1.0 - rhoE))
 
-        for k in range(len(eta)):
-            qe = np.zeros((self.nelems, 8))
-            qe[:, ::2] = Q[2 * self.conn, k]
-            qe[:, 1::2] = Q[2 * self.conn + 1, k]
+        if self.assume_same_element:
+            Be_ = np.zeros((3, 8))
 
-            # Compute the stresses in each element
-            s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+            # Compute the x and y coordinates of each element
+            xe_ = self.X[self.conn[0], 0]
+            ye_ = self.X[self.conn[0], 1]
 
-            # Add the contributions from the von Mises stress
-            stress += (
-                eta[k]
-                * relax
-                * (s[:, 0] ** 2 + s[:, 1] ** 2 - s[:, 0] * s[:, 1] + 3.0 * s[:, 2] ** 2)
-            ) / allowable**2
+            # Compute the stress in the middle of the element
+            xi = 0.0
+            eta_ = 0.0
+            _populate_Be_single(xi, eta_, xe_, ye_, Be_)
+
+            for k in range(len(eta)):
+                qe = np.zeros((self.nelems, 8))
+                qe[:, ::2] = Q[2 * self.conn, k]
+                qe[:, 1::2] = Q[2 * self.conn + 1, k]
+
+                # Compute the stresses in each element
+                s = np.einsum("ij,jk,nk -> ni", self.C0, Be_, qe)
+
+                # Add the contributions from the von Mises stress
+                stress += (
+                    eta[k]
+                    * relax
+                    * (
+                        s[:, 0] ** 2
+                        + s[:, 1] ** 2
+                        - s[:, 0] * s[:, 1]
+                        + 3.0 * s[:, 2] ** 2
+                    )
+                ) / allowable**2
+
+        else:
+            Be = np.zeros((self.nelems, 3, 8))
+
+            # Compute the x and y coordinates of each element
+            xe = self.X[self.conn, 0]
+            ye = self.X[self.conn, 1]
+
+            # Compute the stress in the middle of the element
+            xi = 0.0
+            eta_ = 0.0
+            _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
+
+            for k in range(len(eta)):
+                qe = np.zeros((self.nelems, 8))
+                qe[:, ::2] = Q[2 * self.conn, k]
+                qe[:, 1::2] = Q[2 * self.conn + 1, k]
+
+                # Compute the stresses in each element
+                s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+
+                # Add the contributions from the von Mises stress
+                stress += (
+                    eta[k]
+                    * relax
+                    * (
+                        s[:, 0] ** 2
+                        + s[:, 1] ** 2
+                        - s[:, 0] * s[:, 1]
+                        + 3.0 * s[:, 2] ** 2
+                    )
+                ) / allowable**2
 
         return stress
 
@@ -1335,64 +1420,74 @@ class TopologyAnalysis:
             + rho[self.conn[:, 3]]
         )
 
-        Be = np.zeros((self.nelems, 3, 8))
-        J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
+        # Compute the stress relaxation factor
+        relax_deriv = self.epsilon / (rhoE + self.epsilon * (1.0 - rhoE)) ** 2
 
-        # Compute the x and y coordinates of each element
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
+        if self.assume_same_element:
+            Be_ = np.zeros((3, 8))
 
-        # Compute the stress in the middle of the element
-        xi = 0.0
-        eta_ = 0.0
-        Nxi = 0.25 * np.array(
-            [-(1.0 - eta_), (1.0 - eta_), (1.0 + eta_), -(1.0 + eta_)]
-        )
-        Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+            # Compute the x and y coordinates of each element
+            xe_ = self.X[self.conn[0], 0]
+            ye_ = self.X[self.conn[0], 1]
 
-        # Compute the Jacobian transformation at each quadrature points
-        J[:, 0, 0] = np.dot(xe, Nxi)
-        J[:, 1, 0] = np.dot(ye, Nxi)
-        J[:, 0, 1] = np.dot(xe, Neta)
-        J[:, 1, 1] = np.dot(ye, Neta)
+            # Compute the stress in the middle of the element
+            xi = 0.0
+            eta_ = 0.0
+            _populate_Be_single(xi, eta_, xe_, ye_, Be_)
 
-        # Compute the inverse of the Jacobian
-        detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
-        invJ[:, 0, 0] = J[:, 1, 1] / detJ
-        invJ[:, 0, 1] = -J[:, 0, 1] / detJ
-        invJ[:, 1, 0] = -J[:, 1, 0] / detJ
-        invJ[:, 1, 1] = J[:, 0, 0] / detJ
+            for k in range(len(eta)):
+                qe = np.zeros((self.nelems, 8))
+                qe[:, ::2] = Q[2 * self.conn, k]
+                qe[:, 1::2] = Q[2 * self.conn + 1, k]
 
-        # Compute the derivative of the shape functions w.r.t. xi and eta
-        # [Nx, Ny] = [Nxi, Neta]*invJ
-        Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
-        Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
+                # Compute the stresses in each element
+                s = np.einsum("ij,jk,nk -> ni", self.C0, Be_, qe)
 
-        # Set the B matrix for each element
-        Be[:, 0, ::2] = Nx
-        Be[:, 1, 1::2] = Ny
-        Be[:, 2, ::2] = Ny
-        Be[:, 2, 1::2] = Nx
+                # Add the contributions from the von Mises stress
+                dfdrhoE += (
+                    eta[k]
+                    * relax_deriv
+                    * eta_stress
+                    * (
+                        s[:, 0] ** 2
+                        + s[:, 1] ** 2
+                        - s[:, 0] * s[:, 1]
+                        + 3.0 * s[:, 2] ** 2
+                    )
+                ) / allowable**2
 
-        for k in range(len(eta)):
-            qe = np.zeros((self.nelems, 8))
-            qe[:, ::2] = Q[2 * self.conn, k]
-            qe[:, 1::2] = Q[2 * self.conn + 1, k]
+        else:
+            Be = np.zeros((self.nelems, 3, 8))
 
-            # Compute the stress relaxation factor
-            relax_deriv = self.epsilon / (rhoE + self.epsilon * (1.0 - rhoE)) ** 2
+            # Compute the x and y coordinates of each element
+            xe = self.X[self.conn, 0]
+            ye = self.X[self.conn, 1]
 
-            # Compute the stresses in each element
-            s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+            # Compute the stress in the middle of the element
+            xi = 0.0
+            eta_ = 0.0
+            _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
 
-            # Add the contributions from the von Mises stress
-            dfdrhoE += (
-                eta[k]
-                * relax_deriv
-                * eta_stress
-                * (s[:, 0] ** 2 + s[:, 1] ** 2 - s[:, 0] * s[:, 1] + 3.0 * s[:, 2] ** 2)
-            ) / allowable**2
+            for k in range(len(eta)):
+                qe = np.zeros((self.nelems, 8))
+                qe[:, ::2] = Q[2 * self.conn, k]
+                qe[:, 1::2] = Q[2 * self.conn + 1, k]
+
+                # Compute the stresses in each element
+                s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+
+                # Add the contributions from the von Mises stress
+                dfdrhoE += (
+                    eta[k]
+                    * relax_deriv
+                    * eta_stress
+                    * (
+                        s[:, 0] ** 2
+                        + s[:, 1] ** 2
+                        - s[:, 0] * s[:, 1]
+                        + 3.0 * s[:, 2] ** 2
+                    )
+                ) / allowable**2
 
         dfdrho = np.zeros(self.nnodes)
         for i in range(4):
@@ -1415,62 +1510,60 @@ class TopologyAnalysis:
             + rho[self.conn[:, 3]]
         )
 
-        Be = np.zeros((self.nelems, 3, 8))
-        J = np.zeros((self.nelems, 2, 2))
-        invJ = np.zeros(J.shape)
-
-        # Compute the x and y coordinates of each element
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
-
-        # Compute the stress in the middle of the element
-        xi = 0.0
-        eta_ = 0.0
-        Nxi = 0.25 * np.array(
-            [-(1.0 - eta_), (1.0 - eta_), (1.0 + eta_), -(1.0 + eta_)]
-        )
-        Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
-
-        # Compute the Jacobian transformation at each quadrature points
-        J[:, 0, 0] = np.dot(xe, Nxi)
-        J[:, 1, 0] = np.dot(ye, Nxi)
-        J[:, 0, 1] = np.dot(xe, Neta)
-        J[:, 1, 1] = np.dot(ye, Neta)
-
-        # Compute the inverse of the Jacobian
-        detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
-        invJ[:, 0, 0] = J[:, 1, 1] / detJ
-        invJ[:, 0, 1] = -J[:, 0, 1] / detJ
-        invJ[:, 1, 0] = -J[:, 1, 0] / detJ
-        invJ[:, 1, 1] = J[:, 0, 0] / detJ
-
-        # Compute the derivative of the shape functions w.r.t. xi and eta
-        # [Nx, Ny] = [Nxi, Neta]*invJ
-        Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
-        Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
-
-        # Set the B matrix for each element
-        Be[:, 0, ::2] = Nx
-        Be[:, 1, 1::2] = Ny
-        Be[:, 2, ::2] = Ny
-        Be[:, 2, 1::2] = Nx
-
-        qe = np.zeros((self.nelems, 8))
-        qe[:, ::2] = q[2 * self.conn]
-        qe[:, 1::2] = q[2 * self.conn + 1]
-
         # Compute the stress relaxation factor
         relax = rhoE / (rhoE + self.epsilon * (1.0 - rhoE))
 
-        # Compute the stresses in each element
-        s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+        if self.assume_same_element:
+            Be_ = np.zeros((3, 8))
 
-        ds = np.zeros((self.nelems, 3))
-        ds[:, 0] = eta_stress * relax * (s[:, 0] - 0.5 * s[:, 1]) / allowable**2
-        ds[:, 1] = eta_stress * relax * (s[:, 1] - 0.5 * s[:, 0]) / allowable**2
-        ds[:, 2] = eta_stress * relax * 3.0 * s[:, 2] / allowable**2
+            # Compute the x and y coordinates of each element
+            xe_ = self.X[self.conn[0], 0]
+            ye_ = self.X[self.conn[0], 1]
 
-        Dqe = np.einsum("ni,ij,njk -> nk", ds, self.C0, Be)
+            # Compute the stress in the middle of the element
+            xi = 0.0
+            eta_ = 0.0
+            _populate_Be_single(xi, eta_, xe_, ye_, Be_)
+
+            qe = np.zeros((self.nelems, 8))
+            qe[:, ::2] = q[2 * self.conn]
+            qe[:, 1::2] = q[2 * self.conn + 1]
+
+            # Compute the stresses in each element
+            s = np.einsum("ij,jk,nk -> ni", self.C0, Be_, qe)
+
+            ds = np.zeros((self.nelems, 3))
+            ds[:, 0] = eta_stress * relax * (s[:, 0] - 0.5 * s[:, 1]) / allowable**2
+            ds[:, 1] = eta_stress * relax * (s[:, 1] - 0.5 * s[:, 0]) / allowable**2
+            ds[:, 2] = eta_stress * relax * 3.0 * s[:, 2] / allowable**2
+
+            Dqe = np.einsum("ni,ij,jk -> nk", ds, self.C0, Be_)
+
+        else:
+            Be = np.zeros((self.nelems, 3, 8))
+
+            # Compute the x and y coordinates of each element
+            xe = self.X[self.conn, 0]
+            ye = self.X[self.conn, 1]
+
+            # Compute the stress in the middle of the element
+            xi = 0.0
+            eta_ = 0.0
+            _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
+
+            qe = np.zeros((self.nelems, 8))
+            qe[:, ::2] = q[2 * self.conn]
+            qe[:, 1::2] = q[2 * self.conn + 1]
+
+            # Compute the stresses in each element
+            s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+
+            ds = np.zeros((self.nelems, 3))
+            ds[:, 0] = eta_stress * relax * (s[:, 0] - 0.5 * s[:, 1]) / allowable**2
+            ds[:, 1] = eta_stress * relax * (s[:, 1] - 0.5 * s[:, 0]) / allowable**2
+            ds[:, 2] = eta_stress * relax * 3.0 * s[:, 2] / allowable**2
+
+            Dqe = np.einsum("ni,ij,njk -> nk", ds, self.C0, Be)
 
         Dq = np.zeros(self.nvars)
         for i in range(4):
@@ -1596,16 +1689,17 @@ class OptFrequency(ParOpt.Problem):
                 os.mkdir(os.path.join(self.prefix, "vtk"))
             vtk_path = os.path.join(self.prefix, "vtk", "%d.vtk" % self.it_counter)
 
-        # omega = self.analysis.solve_eigenvalue_problem(self.xfull, vtk_path=vtk_path)
-        # ks = self.analysis.ks_eigenvalue(self.xfull, ks_rho=self.ks_rho)
-        # obj = -ks
-
         # Solve the genrealized eigenvalue problem
         omega = self.analysis.solve_eigenvalue_problem(
             self.xfull, k=6, vtk_path=vtk_path
         )
 
+        # Evaluate the ks approximation of the smallest natural frequency
+        # ks = self.analysis.ks_eigenvalue(ks_rho=self.ks_rho)
+        # obj = -ks
+
         # obj = self.analysis.eigenvector_displacement()
+
         obj = self.analysis.eigenvector_stress(self.xfull)
 
         # Compute volumetric constraint
@@ -1636,7 +1730,7 @@ class OptFrequency(ParOpt.Problem):
 
         t_end = timer()
         elapse_s = t_end - t_start
-        print("[it=%d], t(fun): %6.3f s, " % (self.it_counter, elapse_s), end="")
+        print("[%3d], t(fun): %6.3f s, " % (self.it_counter, elapse_s), end="")
 
         fail = 0
         self.it_counter += 1
@@ -1650,7 +1744,6 @@ class OptFrequency(ParOpt.Problem):
             self.xfull[:] = self.dv_mapping.dot(x)  # x = E*xr
             self.xfull[self.non_design_nodes] = 1.0
 
-            # Evaluate objective gradient
             # g[:] = -self.dv_mapping.T.dot(
             #     self.analysis.ks_eigenvalue_derivative(self.xfull)
             # )
@@ -1672,11 +1765,16 @@ class OptFrequency(ParOpt.Problem):
             # Populate the nodal variable for analysis
             self.xfull[self.design_nodes] = x[:]
 
-            # Evaluate objective gradient
+            # # Evaluate objective gradient
             # g[:] = -self.analysis.ks_eigenvalue_derivative(self.xfull)[
             #     self.design_nodes
             # ]
-            g[:] = self.analysis.eigenvector_displacement_deriv(self.xfull)[
+
+            # g[:] = self.analysis.eigenvector_displacement_deriv(self.xfull)[
+            #     self.design_nodes
+            # ]
+
+            g[:] = self.analysis.eigenvector_stress_derivative(self.xfull)[
                 self.design_nodes
             ]
 
@@ -1957,13 +2055,14 @@ def parse_cmd_args():
     p = argparse.ArgumentParser()
     p.add_argument("--optimizer", default="mma4py", choices=["pmma", "mma4py", "tr"])
     p.add_argument("--grad-check", action="store_true")
+    p.add_argument("--assume-same-element", action="store_true")
     p.add_argument(
         "--npquarter", default=48, type=int, help="number of nodes for half-edge"
     )
     p.add_argument(
         "--lb", default=1e-3, type=float, help="lower bound of the design variable"
     )
-    p.add_argument("--filter", choices=["spatial", "helmholtz"])
+    p.add_argument("--filter", default="spatial", choices=["spatial", "helmholtz"])
     p.add_argument("--maxit", default=500, type=int)
     p.add_argument("--prefix", default="result", type=str)
     p.add_argument("--ks-rho", default=10000, type=int)
@@ -1999,7 +2098,16 @@ if __name__ == "__main__":
     fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=False)
 
     # Create analysis
-    analysis = TopologyAnalysis(fltr, conn, X, bcs, forces, ptype=args.ptype, p=args.p)
+    analysis = TopologyAnalysis(
+        fltr,
+        conn,
+        X,
+        bcs,
+        forces,
+        ptype=args.ptype,
+        p=args.p,
+        assume_same_element=args.assume_same_element,
+    )
 
     # Create optimization problem
     topo = OptFrequency(
