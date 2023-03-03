@@ -17,6 +17,10 @@ class Logger:
     log_name = "stdout.log"
 
     @staticmethod
+    def set_log_path(log_path):
+        Logger.log_name = log_path
+
+    @staticmethod
     def log(txt, end="\n"):
         with open(Logger.log_name, "a") as f:
             f.write("%s%s" % (txt, end))
@@ -2230,6 +2234,9 @@ if __name__ == "__main__":
     # Get options from command line
     args = parse_cmd_args()
 
+    # Set up logger
+    Logger.set_log_path(os.path.join(args.prefix, "stdout.log"))
+
     # Create result directory if needed
     if not os.path.isdir(args.prefix):
         os.mkdir(args.prefix)
@@ -2283,7 +2290,7 @@ if __name__ == "__main__":
     Logger.log(f"constraints: {args.confs}")
     Logger.log("num of dof:  %d" % analysis.nvars)
     Logger.log("num of dv:   %d" % topo.ndv)
-    Logger.log()
+    Logger.log("")
 
     if args.optimizer == "mma4py":
 
