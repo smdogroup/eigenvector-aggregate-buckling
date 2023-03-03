@@ -2247,6 +2247,7 @@ if __name__ == "__main__":
         lb=args.lb,
         objf=args.objf,
         confs=args.confs,
+        omega_lb=args.omega_lb,
     )
 
     # Print info
