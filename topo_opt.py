@@ -5,7 +5,6 @@ from scipy.linalg import eigh
 from scipy.sparse import linalg, coo_matrix
 import matplotlib.pylab as plt
 import matplotlib.tri as tri
-from mpi4py import MPI
 from paropt import ParOpt
 import argparse
 import os
@@ -1603,7 +1602,7 @@ class TopologyAnalysis:
         return
 
 
-class TopOptProb(ParOpt.Problem):
+class TopOptProb:
     """
     natural frequency maximization under a volume constraint
     """
@@ -1651,7 +1650,6 @@ class TopOptProb(ParOpt.Problem):
         self.ncon = 1
         if isinstance(confs, list):
             self.ncon = len(confs)
-        super().__init__(MPI.COMM_SELF, self.ndv, self.ncon)
 
         self.draw_history = draw_history
         self.draw_every = draw_every
@@ -1843,7 +1841,7 @@ try:
         def __init__(self, prob: TopOptProb) -> None:
             self.prob = prob
             self.ncon = prob.ncon
-            super().__init__(MPI.COMM_SELF, prob.ndv, prob.ndv, prob.ncon)
+            super().__init__(prob.ndv, prob.ndv, prob.ncon)
             return
 
         def getVarsAndBounds(self, x, lb, ub):
@@ -1864,6 +1862,22 @@ try:
 
 except:
     MMAProblem = None
+
+
+class ParOptProblem(ParOpt.Problem):
+    def __init__(self, comm, prob: TopOptProb) -> None:
+        self.prob = prob
+        super().__init__(comm, prob.ndv, prob.ncon)
+        return
+
+    def getVarsAndBounds(self, x, lb, ub):
+        return self.prob.getVarsAndBounds(x, lb, ub)
+
+    def evalObjCon(self, x):
+        return self.prob.evalObjCon(x)
+
+    def evalObjConGradient(self, x, g, A):
+        return self.prob.evalObjConGradient(x, g, A)
 
 
 def to_vtk(vtk_path, conn, X, nodal_sols={}, cell_sols={}):
@@ -2274,7 +2288,10 @@ if __name__ == "__main__":
         mmaopt.optimize(niter=args.maxit, verbose=False)
 
     else:
-        topo.checkGradients(1e-6)
+        from mpi4py import MPI
+
+        paroptprob = ParOptProblem(MPI.COMM_SELF, topo)
+        paroptprob.checkGradients(1e-6)
         if args.grad_check:
             exit(0)
 
@@ -2287,7 +2304,7 @@ if __name__ == "__main__":
         )
 
         # Set up the optimizer
-        opt = ParOpt.Optimizer(topo, options)
+        opt = ParOpt.Optimizer(paroptprob, options)
 
         # Set a new starting point
         opt.optimize()
