@@ -13,6 +13,16 @@ from timeit import default_timer as timer
 from utils import time_this, timer_set_threshold
 
 
+class Logger:
+    log_name = "stdout.log"
+
+    @staticmethod
+    def log(txt, end="\n"):
+        with open(Logger.log_name, "a") as f:
+            f.write("%s%s" % (txt, end))
+        return
+
+
 def _populate_Be(nelems, xi, eta, xe, ye, Be):
     """
     Populate B matrices for all elements at a quadrature point
@@ -1757,7 +1767,7 @@ class TopOptProb:
 
         t_end = timer()
         elapse_s = t_end - t_start
-        print("[%3d], t(fun): %6.3f s, " % (self.it_counter, elapse_s), end="")
+        Logger.log("[%3d], t(fun): %6.3f s, " % (self.it_counter, elapse_s), end="")
 
         fail = 0
         self.it_counter += 1
@@ -1829,7 +1839,7 @@ class TopOptProb:
 
         t_end = timer()
         elapse_s = t_end - t_start
-        print("t(grad): %6.3f s" % (elapse_s))
+        Logger.log("t(grad): %6.3f s" % (elapse_s))
 
         return 0
 
@@ -2265,12 +2275,12 @@ if __name__ == "__main__":
     )
 
     # Print info
-    print("=== Problem overview ===")
-    print("objective:   %s" % args.objf)
-    print(f"constraints: {args.confs}")
-    print("num of dof:  %d" % analysis.nvars)
-    print("num of dv:   %d" % topo.ndv)
-    print()
+    Logger.log("=== Problem overview ===")
+    Logger.log("objective:   %s" % args.objf)
+    Logger.log(f"constraints: {args.confs}")
+    Logger.log("num of dof:  %d" % analysis.nvars)
+    Logger.log("num of dv:   %d" % topo.ndv)
+    Logger.log()
 
     if args.optimizer == "mma4py":
 
