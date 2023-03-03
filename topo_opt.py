@@ -896,9 +896,10 @@ class TopologyAnalysis:
         return self.fltr.applyGradient(dfdrho, x)
 
     @time_this
-    def solve_eigenvalue_problem(self, x, k=5, sigma=0.0, vtk_path=None):
+    def solve_eigenvalue_problem(self, x, k=5, sigma=0.0, nodal_sols=None):
         """
         Compute the k-th smallest natural frequencies
+        Populate nodal_sols and cell_sols if provided
         """
 
         if k > len(self.reduced):
@@ -927,25 +928,23 @@ class TopologyAnalysis:
         for i in range(k):
             Q[self.reduced, i] = Qr[:, i]
 
-        # Write the modes to vtk
-        if vtk_path is not None:
-            nodal_sols = []
-
-            nodal_sols.append({"x": np.array(x)})
-            nodal_sols.append({"rho": np.array(rho)})
+        # Save vtk output data
+        if nodal_sols is not None:
+            nodal_sols["x"] = np.array(x)
+            nodal_sols["rho"] = np.array(rho)
             for i in range(k):
-                nodal_sols.append({"u%d" % i: Q[0::2, i]})
-                nodal_sols.append({"v%d" % i: Q[1::2, i]})
-
-            to_vtk(vtk_path, self.conn, self.X, nodal_sols)
+                nodal_sols["u%d" % i] = Q[0::2, i]
+                nodal_sols["v%d" % i] = Q[1::2, i]
 
         # Save the eigenvalues and eigenvectors
         self.eigs = eigs
         self.Q = Q
 
-        return np.sqrt(self.eigs)
+        # Return natural frequencies
+        omega = np.sqrt(self.eigs)
+        return omega
 
-    def ks_eigenvalue(self, ks_rho=100.0):
+    def ks_omega(self, ks_rho=100.0):
         """
         Compute the ks minimum eigenvalue
         """
@@ -960,7 +959,7 @@ class TopologyAnalysis:
 
         return ks_min
 
-    def ks_eigenvalue_derivative(self, x, ks_rho=100.0):
+    def ks_omega_derivative(self, x, ks_rho=100.0):
         """
         Compute the ks minimum eigenvalue
         """
@@ -977,7 +976,6 @@ class TopologyAnalysis:
 
         dfdrho = np.zeros(self.nnodes)
 
-        ks_grad = np.zeros(self.nelems)
         for i in range(len(self.eigs)):
             kx = self.stiffness_matrix_derivative(rho, self.Q[:, i], self.Q[:, i])
             dfdrho += (eta[i] / (2 * omega[i])) * kx
@@ -1157,7 +1155,7 @@ class TopologyAnalysis:
     @time_this
     def get_stress_values(self, rho, eta, Q, allowable=1.0):
         """
-        Compute the strains at each quadrature point
+        Compute the stress at each element
         """
 
         # Loop over all the eigenvalues
@@ -1241,12 +1239,12 @@ class TopologyAnalysis:
         return stress
 
     @time_this
-    def eigenvector_stress(self, x, ks_rho=100.0, allowable=1.0):
+    def eigenvector_stress(self, x, ks_rho=100.0, allowable=1.0, cell_sols=None):
 
         # Compute the filtered variables
         rho = self.fltr.apply(x)
 
-        N = len(self.eigs)
+        # Evaluate eigenvalue eta
         c = np.min(self.eigs)
         eta = np.exp(-ks_rho * (self.eigs - c))
         a = np.sum(eta)
@@ -1254,6 +1252,9 @@ class TopologyAnalysis:
 
         # Compute the stress values
         stress = self.get_stress_values(rho, eta, self.Q, allowable=allowable)
+
+        if cell_sols is not None:
+            cell_sols["stress"] = stress
 
         # Now aggregate over the stress
         max_stress = np.max(stress)
@@ -1602,7 +1603,7 @@ class TopologyAnalysis:
         return
 
 
-class OptFrequency(ParOpt.Problem):
+class TopOptProb(ParOpt.Problem):
     """
     natural frequency maximization under a volume constraint
     """
@@ -1619,18 +1620,24 @@ class OptFrequency(ParOpt.Problem):
         prefix="result",
         dv_mapping=None,  # If provided, optimizer controls reduced design variable xr only
         lb=1e-3,
+        objf="frequency",
+        confs="volume",
+        omega_lb=None,
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
         self.xfull = np.zeros(self.analysis.nnodes)
-        self.xfull[self.non_design_nodes] = 1.0  # Set non-design mass to 0.0
+        self.xfull[self.non_design_nodes] = 1.0
         self.design_nodes = np.ones(len(self.xfull), dtype=bool)
         self.design_nodes[self.non_design_nodes] = False
         self.dv_mapping = dv_mapping
         self.lb = lb
+        self.objf = objf
+        self.confs = confs
+        self.omega_lb = omega_lb
 
         # Add more non-design constant to matrices
-        self.add_mat0(which="M", density=m0)
+        self.add_mat0("M", non_design_nodes, density=m0)
 
         x = np.ones(self.analysis.nnodes)
         self.area_gradient = self.analysis.eval_area_gradient(x)
@@ -1640,7 +1647,11 @@ class OptFrequency(ParOpt.Problem):
         self.ndv = np.sum(self.design_nodes)
         if dv_mapping is not None:
             self.ndv = dv_mapping.shape[1]
-        super().__init__(MPI.COMM_SELF, self.ndv, 1)
+
+        self.ncon = 1
+        if isinstance(confs, list):
+            self.ncon = len(confs)
+        super().__init__(MPI.COMM_SELF, self.ndv, self.ncon)
 
         self.draw_history = draw_history
         self.draw_every = draw_every
@@ -1649,13 +1660,13 @@ class OptFrequency(ParOpt.Problem):
         self.it_counter = 0
         return
 
-    def add_mat0(self, which="K", density=1.0):
+    def add_mat0(self, which, non_design_nodes, density=1.0):
         assert which == "K" or which == "M"
 
-        x = density * np.ones(self.analysis.nnodes)
-        rho = self.analysis.fltr.apply(x)
+        rho = np.zeros(self.analysis.nnodes)
+        rho[non_design_nodes] = 1.0
         if which == "M":
-            M0 = self.analysis.assemble_mass_matrix(rho)
+            M0 = density * self.analysis.assemble_mass_matrix(rho)
             self.analysis.set_M0(M0)
             return
 
@@ -1667,13 +1678,25 @@ class OptFrequency(ParOpt.Problem):
     def getVarsAndBounds(self, x, lb, ub):
         lb[:] = self.lb
         ub[:] = 1.0
+        x[:] = 0.95
         # np.random.seed(0)
         # x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
-        x[:] = 0.95
         return
 
     def evalObjCon(self, x):
         t_start = timer()
+
+        vtk_nodal_sols = None
+        vtk_cell_sols = None
+        vtk_path = None
+
+        # Save the design to vtk every certain iterations
+        if self.it_counter % self.draw_every == 0:
+            if not os.path.isdir(os.path.join(self.prefix, "vtk")):
+                os.mkdir(os.path.join(self.prefix, "vtk"))
+            vtk_nodal_sols = {}
+            vtk_cell_sols = {}
+            vtk_path = os.path.join(self.prefix, "vtk", "it_%d.vtk" % self.it_counter)
 
         # Populate the nodal variable for analysis
         if self.dv_mapping is not None:
@@ -1682,44 +1705,50 @@ class OptFrequency(ParOpt.Problem):
         else:
             self.xfull[self.design_nodes] = x[:]
 
-        # Save the design to vtk every certain iterations
-        vtk_path = None
-        if self.it_counter % self.draw_every == 0:
-            if not os.path.isdir(os.path.join(self.prefix, "vtk")):
-                os.mkdir(os.path.join(self.prefix, "vtk"))
-            vtk_path = os.path.join(self.prefix, "vtk", "%d.vtk" % self.it_counter)
-
         # Solve the genrealized eigenvalue problem
         omega = self.analysis.solve_eigenvalue_problem(
-            self.xfull, k=6, vtk_path=vtk_path
+            self.xfull, k=6, nodal_sols=vtk_nodal_sols
         )
-
-        # Evaluate the ks approximation of the smallest natural frequency
-        # ks = self.analysis.ks_eigenvalue(ks_rho=self.ks_rho)
-        # obj = -ks
 
         # obj = self.analysis.eigenvector_displacement()
 
-        obj = self.analysis.eigenvector_stress(self.xfull)
+        if self.objf == "frequency":
+            obj = -self.analysis.ks_omega(ks_rho=self.ks_rho)
+        else:  # objf == "stress"
+            obj = self.analysis.eigenvector_stress(self.xfull, cell_sols=vtk_cell_sols)
 
-        # Compute volumetric constraint
-        con = [self.fixed_area - self.analysis.eval_area(self.xfull)]
+        # Compute constraints
+        con = []
+        if "volume" in self.confs:
+            con.append(self.fixed_area - self.analysis.eval_area(self.xfull))
 
-        # Save the design as figure
+        if "frequency" in self.confs:
+            assert self.omega_lb is not None
+            omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            con.append(self.omega_lb - omega_ks)
+
+        # Save the design png and vtk
         if self.draw_history and self.it_counter % self.draw_every == 0:
             fig, ax = plt.subplots()
             rho = self.analysis.fltr.apply(self.xfull)
             self.analysis.plot(rho, ax=ax)
             ax.set_aspect("equal", "box")
-            plt.savefig(os.path.join(self.prefix, "%d.png" % self.it_counter))
+            fig.savefig(os.path.join(self.prefix, "%d.png" % self.it_counter))
             plt.close()
+            to_vtk(
+                vtk_path,
+                self.analysis.conn,
+                self.analysis.X,
+                vtk_nodal_sols,
+                vtk_cell_sols,
+            )
 
         # Log eigenvalues
-        with open(os.path.join(self.prefix, "eigenvalues.log"), "a") as f:
+        with open(os.path.join(self.prefix, "frequencies.log"), "a") as f:
             if self.it_counter % 10 == 0:
                 f.write("\n%10s" % "iter")
                 for i in range(len(omega)):
-                    name = "eigval[%d]" % i
+                    name = "omega[%d]" % i
                     f.write("%25s" % name)
                 f.write("\n")
 
@@ -1744,42 +1773,61 @@ class OptFrequency(ParOpt.Problem):
             self.xfull[:] = self.dv_mapping.dot(x)  # x = E*xr
             self.xfull[self.non_design_nodes] = 1.0
 
-            # g[:] = -self.dv_mapping.T.dot(
-            #     self.analysis.ks_eigenvalue_derivative(self.xfull)
-            # )
+            if self.objf == "frequency":
+                g[:] = -self.dv_mapping.T.dot(
+                    self.analysis.ks_omega_derivative(self.xfull)
+                )
+            else:  # objf == "stress"
+                g[:] = self.dv_mapping.T.dot(
+                    self.analysis.eigenvector_stress_derivative(self.xfull)
+                )
 
             # g[:] = self.dv_mapping.T.dot(
             #     self.analysis.eigenvector_displacement_deriv(self.xfull)
             # )
 
-            g[:] = self.dv_mapping.T.dot(
-                self.analysis.eigenvector_stress_derivative(self.xfull)
-            )
+            # Evaluate constraint gradients
+            index = 0
+            if "volume" in args.confs:
+                A[index][:] = -self.dv_mapping.T.dot(
+                    self.analysis.eval_area_gradient(self.xfull)
+                )
+                index += 1
 
-            # Evaluate constraint gradient
-            A[0][:] = -self.dv_mapping.T.dot(
-                self.analysis.eval_area_gradient(self.xfull)
-            )
+            if "frequency" in self.confs:
+                A[index][:] = -self.dv_mapping.T.dot(
+                    self.analysis.ks_omega_derivative(self.xfull)
+                )
+                index += 1
 
         else:
             # Populate the nodal variable for analysis
             self.xfull[self.design_nodes] = x[:]
 
-            # # Evaluate objective gradient
-            # g[:] = -self.analysis.ks_eigenvalue_derivative(self.xfull)[
-            #     self.design_nodes
-            # ]
-
             # g[:] = self.analysis.eigenvector_displacement_deriv(self.xfull)[
             #     self.design_nodes
             # ]
 
-            g[:] = self.analysis.eigenvector_stress_derivative(self.xfull)[
-                self.design_nodes
-            ]
+            if self.objf == "frequency":
+                g[:] = -self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
+            else:  # objf == "stress"
+                g[:] = self.analysis.eigenvector_stress_derivative(self.xfull)[
+                    self.design_nodes
+                ]
 
             # Evaluate constraint gradient
-            A[0][:] = -self.analysis.eval_area_gradient(self.xfull)[self.design_nodes]
+            index = 0
+            if "volume" in args.confs:
+                A[index][:] = -self.analysis.eval_area_gradient(self.xfull)[
+                    self.design_nodes
+                ]
+                index += 1
+
+            if "frequency" in self.confs:
+                A[index][:] = -self.analysis.ks_omega_derivative(self.xfull)[
+                    self.design_nodes
+                ]
+                index += 1
 
         t_end = timer()
         elapse_s = t_end - t_start
@@ -1792,9 +1840,10 @@ try:
     import mma4py
 
     class MMAProblem(mma4py.Problem):
-        def __init__(self, prob: OptFrequency) -> None:
+        def __init__(self, prob: TopOptProb) -> None:
             self.prob = prob
-            super().__init__(MPI.COMM_SELF, prob.ndv, prob.ndv, 1)
+            self.ncon = prob.ncon
+            super().__init__(MPI.COMM_SELF, prob.ndv, prob.ndv, prob.ncon)
             return
 
         def getVarsAndBounds(self, x, lb, ub):
@@ -1803,19 +1852,21 @@ try:
 
         def evalObjCon(self, x, cons) -> float:
             _fail, _obj, _cons = self.prob.evalObjCon(x)
-            cons[0] = -_cons[0]
+            for i in range(self.ncon):
+                cons[i] = -_cons[i]
             return _obj
 
         def evalObjConGrad(self, x, g, gcon):
             self.prob.evalObjConGradient(x, g, gcon)
-            gcon[0, :] = -gcon[0, :]
+            for i in range(self.ncon):
+                gcon[i, :] = -gcon[i, :]
             return
 
 except:
     MMAProblem = None
 
 
-def to_vtk(vtk_path, conn, X, nodal_sols=[]):
+def to_vtk(vtk_path, conn, X, nodal_sols={}, cell_sols={}):
     """
     Generate a vtk given conn, X, and optionally list of nodal solutions
     """
@@ -1856,12 +1907,20 @@ def to_vtk(vtk_path, conn, X, nodal_sols=[]):
         # Write solution
         if nodal_sols:
             fh.write(f"POINT_DATA {nnodes}\n")
-            for nodal_sol in nodal_sols:
-                for name, data in nodal_sol.items():
-                    fh.write(f"SCALARS {name} float 1\n")
-                    fh.write("LOOKUP_TABLE default\n")
-                    for val in data:
-                        fh.write(f"{val}\n")
+            for name, data in nodal_sols.items():
+                fh.write(f"SCALARS {name} float 1\n")
+                fh.write("LOOKUP_TABLE default\n")
+                for val in data:
+                    fh.write(f"{val}\n")
+
+        if cell_sols:
+            fh.write(f"CELL_DATA {nelems}\n")
+            for name, data in cell_sols.items():
+                fh.write(f"SCALARS {name} float 1\n")
+                fh.write("LOOKUP_TABLE default\n")
+                for val in data:
+                    fh.write(f"{val}\n")
+
     return
 
 
@@ -1919,16 +1978,16 @@ def create_cantilever_domain(lx=20, ly=10, m=128, n=64):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
-def create_square_domain(l=1.0, npquarter=30):
+def create_square_domain(r0_, l=1.0, nx=30):
     """
     Args:
         l: length of the square
-        npquarter: number of elements along each edge
+        nx: number of elements along x direction
     """
 
     # Generate the square domain problem by default
-    m = 2 * npquarter - 1  # Number of elements in x direction
-    n = 2 * npquarter - 1  # Number of elements in y direction
+    m = nx
+    n = nx
 
     nelems = m * n
     nnodes = (m + 1) * (n + 1)
@@ -1953,11 +2012,10 @@ def create_square_domain(l=1.0, npquarter=30):
             conn[i + j * m, 2] = nodes[j + 1, i + 1]
             conn[i + j * m, 3] = nodes[j + 1, i]
 
-    # Find indices of non-design mass
+    # We would like the center node or element to be the non-design region
     non_design_nodes = []
-    offset = int(npquarter / 5)
-    for j in range((n + 1) // 2 - offset, (n + 1) // 2 + offset):
-        for i in range((m + 1) // 2 - offset, (m + 1) // 2 + offset):
+    for j in range(n // 2, (n + 1) // 2 + 1):
+        for i in range(n // 2, (n + 1) // 2 + 1):
             non_design_nodes.append(nodes[j, i])
 
     # Constrain all boundaries
@@ -1975,7 +2033,7 @@ def create_square_domain(l=1.0, npquarter=30):
     for j in range(pn):
         forces[nodes[j, -1]] = [0, -P / pn]
 
-    r0 = 0.05 * l
+    r0 = l / nx * r0_
 
     # Create the mapping E such that x = E*xr, where xr is the nodal variable
     # of a quarter and is controlled by the optimizer, x is the nodal variable
@@ -1983,6 +2041,8 @@ def create_square_domain(l=1.0, npquarter=30):
     Ei = []
     Ej = []
     redu_idx = 0
+
+    # 8-way reflection
     for j in range(1, (n + 1) // 2):
         for i in range(j):
             if nodes[j, i] not in non_design_nodes:
@@ -1995,6 +2055,7 @@ def create_square_domain(l=1.0, npquarter=30):
                 )
                 redu_idx += 1
 
+    # 4-way reflection of diagonals
     for i in range((n + 1) // 2):
         if nodes[i, i] not in non_design_nodes:
             Ej.extend(4 * [redu_idx])
@@ -2003,14 +2064,25 @@ def create_square_domain(l=1.0, npquarter=30):
             )
             redu_idx += 1
 
+    # 4-way reflection of x- and y-symmetry axes, only apply if number of elements
+    # along x (and y) is even
+    if n % 2 == 0:
+        j = n // 2
+        for i in range(j + 1):
+            if nodes[i, j] not in non_design_nodes:
+                Ej.extend(4 * [redu_idx])
+                Ei.extend([nodes[i, j], nodes[n - i, j], nodes[j, i], nodes[j, n - i]])
+                redu_idx += 1
+
     Ev = np.ones(len(Ei))
     dv_mapping = coo_matrix((Ev, (Ei, Ej)))
 
     return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
 
 
-def visualize_domain(X, bcs, non_design_nodes=None):
+def visualize_domain(prefix, X, bcs, non_design_nodes=None):
     fig, ax = plt.subplots()
+    ax.set_aspect("equal")
 
     bc_X = np.array([X[i, :] for i in bcs.keys()])
     ax.scatter(X[:, 0], X[:, 1], color="black")
@@ -2019,7 +2091,7 @@ def visualize_domain(X, bcs, non_design_nodes=None):
     if non_design_nodes:
         m0_X = np.array([X[i, :] for i in non_design_nodes])
         ax.scatter(m0_X[:, 0], m0_X[:, 1], color="blue")
-    plt.show()
+    fig.savefig(os.path.join(prefix, "domain.pdf"))
     return
 
 
@@ -2052,25 +2124,76 @@ def get_paropt_default_options(prefix, algorithm="tr", maxit=1000):
 
 
 def parse_cmd_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--optimizer", default="mma4py", choices=["pmma", "mma4py", "tr"])
-    p.add_argument("--grad-check", action="store_true")
-    p.add_argument("--assume-same-element", action="store_true")
+    p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    # OS
+    p.add_argument("--prefix", default="result", type=str, help="result folder")
+
+    # Analysis
     p.add_argument(
-        "--npquarter", default=48, type=int, help="number of nodes for half-edge"
+        "--assume-same-element",
+        action="store_true",
+        help="assume all elements have identical shape",
+    )
+    p.add_argument(
+        "--nx", default=96, type=int, help="number of elements along x direction"
     )
     p.add_argument(
         "--lb", default=1e-3, type=float, help="lower bound of the design variable"
     )
-    p.add_argument("--filter", default="spatial", choices=["spatial", "helmholtz"])
-    p.add_argument("--maxit", default=500, type=int)
-    p.add_argument("--prefix", default="result", type=str)
-    p.add_argument("--ks-rho", default=10000, type=int)
-    p.add_argument("--ptype", default="ramp", choices=["simp", "ramp"])
+    p.add_argument(
+        "--filter",
+        default="spatial",
+        choices=["spatial", "helmholtz"],
+        help="density filter type",
+    )
+    p.add_argument("--ks-rho", default=10000, type=int, help="ks aggregation parameter")
+    p.add_argument(
+        "--ptype",
+        default="ramp",
+        choices=["simp", "ramp"],
+        help="material penalization method",
+    )
     p.add_argument(
         "--p", default=5.0, type=float, help="material penalization parameter"
     )
-    p.add_argument("--m0", default=100.0, type=float)
+    p.add_argument(
+        "--m0", default=100.0, type=float, help="magnitude of non-design mass"
+    )
+    p.add_argument("--r0", default=2.1, type=float, help="filter radius = r0 * lx / nx")
+
+    # Optimization
+    p.add_argument(
+        "--optimizer",
+        default="mma4py",
+        choices=["pmma", "mma4py", "tr"],
+        help="optimization method",
+    )
+    p.add_argument(
+        "--objf",
+        default="frequency",
+        choices=["frequency", "stress"],
+        help="objective function",
+    )
+    p.add_argument(
+        "--confs",
+        default="volume",
+        nargs="*",
+        choices=["volume", "frequency"],
+        help="constraint functions",
+    )
+    p.add_argument(
+        "--omega-lb",
+        default=None,
+        type=float,
+        help='Lower bound of natural frequency, only effective when "frequency" is in the confs',
+    )
+    p.add_argument(
+        "--maxit", default=200, type=int, help="maximum number of iterations"
+    )
+    p.add_argument(
+        "--grad-check", action="store_true", help="perform gradient check and exit"
+    )
     args = p.parse_args()
 
     return args
@@ -2091,8 +2214,11 @@ if __name__ == "__main__":
             f.write(f"{k:<20}{v}\n")
 
     conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_square_domain(
-        npquarter=args.npquarter
+        r0_=args.r0, nx=args.nx
     )
+
+    # Check the mesh
+    visualize_domain(args.prefix, X, bcs, non_design_nodes)
 
     # Create the filter
     fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=False)
@@ -2110,7 +2236,7 @@ if __name__ == "__main__":
     )
 
     # Create optimization problem
-    topo = OptFrequency(
+    topo = TopOptProb(
         analysis,
         non_design_nodes,
         ks_rho=args.ks_rho,
@@ -2119,12 +2245,16 @@ if __name__ == "__main__":
         prefix=args.prefix,
         dv_mapping=dv_mapping,
         lb=args.lb,
+        objf=args.objf,
+        confs=args.confs,
     )
 
     # Print info
     print("=== Problem overview ===")
-    print("num of dof: %d" % analysis.nvars)
-    print("num of dv:  %d" % topo.ndv)
+    print("objective:   %s" % args.objf)
+    print(f"constraints: {args.confs}")
+    print("num of dof:  %d" % analysis.nvars)
+    print("num of dv:   %d" % topo.ndv)
     print()
 
     if args.optimizer == "mma4py":
@@ -2143,8 +2273,6 @@ if __name__ == "__main__":
         mmaopt.optimize(niter=args.maxit, verbose=False)
 
     else:
-        # for dh in [1e-5, 5e-6, 1e-6, 5e-7, 1e-7]:
-        # topo.checkGradients(dh)
         topo.checkGradients(1e-6)
         if args.grad_check:
             exit(0)
