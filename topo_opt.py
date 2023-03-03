@@ -10,7 +10,7 @@ import argparse
 import os
 import mpmath as mp
 from timeit import default_timer as timer
-from utils import time_this, timer_set_threshold
+from utils import time_this, timer_set_threshold, timer_off
 
 
 class Logger:
@@ -2224,6 +2224,9 @@ def parse_cmd_args():
 
 
 if __name__ == "__main__":
+    # Turn off profiler
+    timer_off()
+
     # Get options from command line
     args = parse_cmd_args()
 
