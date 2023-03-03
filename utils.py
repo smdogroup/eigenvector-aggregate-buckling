@@ -15,6 +15,10 @@ class MyProfiler:
     saved_times = {}
 
     @staticmethod
+    def timer_set_log_path(log_path):
+        MyProfiler.log_name = log_path
+
+    @staticmethod
     def timer_set_threshold(t: float):
         """
         Don't show entries with elapse time smaller than this. Unit: ms
@@ -145,3 +149,4 @@ timer_on = MyProfiler.timer_on
 timer_off = MyProfiler.timer_off
 timer_to_stdout = MyProfiler.timer_to_stdout
 timer_set_threshold = MyProfiler.timer_set_threshold
+timer_set_log_path = MyProfiler.timer_set_log_path

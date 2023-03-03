@@ -10,7 +10,7 @@ import argparse
 import os
 import mpmath as mp
 from timeit import default_timer as timer
-from utils import time_this, timer_set_threshold, timer_off
+from utils import time_this, timer_set_log_path
 
 
 class Logger:
@@ -2228,14 +2228,12 @@ def parse_cmd_args():
 
 
 if __name__ == "__main__":
-    # Turn off profiler
-    timer_off()
-
     # Get options from command line
     args = parse_cmd_args()
 
     # Set up logger
     Logger.set_log_path(os.path.join(args.prefix, "stdout.log"))
+    timer_set_log_path(os.path.join(args.prefix, "profiler.log"))
 
     # Create result directory if needed
     if not os.path.isdir(args.prefix):
