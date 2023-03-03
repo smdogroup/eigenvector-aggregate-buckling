@@ -11,6 +11,7 @@ import os
 import mpmath as mp
 from timeit import default_timer as timer
 from utils import time_this, timer_set_log_path
+from collections import OrderedDict
 
 
 class Logger:
@@ -21,7 +22,7 @@ class Logger:
         Logger.log_name = log_path
 
     @staticmethod
-    def log(txt, end="\n"):
+    def log(txt="", end="\n"):
         with open(Logger.log_name, "a") as f:
             f.write("%s%s" % (txt, end))
         return
@@ -1379,7 +1380,9 @@ class TopologyAnalysis:
         # Form the augmented linear system of equations
         for k in range(N):
             # Compute B * vk = D * qk
-            bk = self.get_stress_product(rho, eta_stress, self.Q[:, k])
+            bk = self.get_stress_product(
+                rho, eta_stress, self.Q[:, k], allowable=allowable
+            )
             bkr = -eta[k] * self.reduce_vector(bk)
 
             vkr = Bfact(bkr)
@@ -1636,6 +1639,7 @@ class TopOptProb:
         objf="frequency",
         confs="volume",
         omega_lb=None,
+        stress_ub=None,
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -1648,6 +1652,7 @@ class TopOptProb:
         self.objf = objf
         self.confs = confs
         self.omega_lb = omega_lb
+        self.stress_ub = stress_ub
 
         # Add more non-design constant to matrices
         self.add_mat0("M", non_design_nodes, density=m0)
@@ -1695,7 +1700,13 @@ class TopOptProb:
         # x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
         return
 
-    def evalObjCon(self, x):
+    def evalObjCon(self, x, eval_stress=False):
+        # Functions of interest to be logged
+        foi = OrderedDict()
+        foi["area"] = "n/a"
+        foi["omega_ks"] = "n/a"
+        foi["stress_ks"] = "n/a"
+
         t_start = timer()
 
         vtk_nodal_sols = None
@@ -1722,22 +1733,43 @@ class TopOptProb:
             self.xfull, k=6, nodal_sols=vtk_nodal_sols
         )
 
-        # obj = self.analysis.eigenvector_displacement()
-
         if self.objf == "frequency":
-            obj = -self.analysis.ks_omega(ks_rho=self.ks_rho)
+            omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            obj = -omega_ks
+            foi["omega_ks"] = omega_ks
         else:  # objf == "stress"
-            obj = self.analysis.eigenvector_stress(self.xfull, cell_sols=vtk_cell_sols)
+            stress_ks = self.analysis.eigenvector_stress(
+                self.xfull, cell_sols=vtk_cell_sols
+            )
+            obj = stress_ks
+            foi["stress_ks"] = stress_ks
+
+        if eval_stress:
+            stress_ks = self.analysis.eigenvector_stress(
+                self.xfull, cell_sols=vtk_cell_sols
+            )
+            foi["stress_ks"] = stress_ks
 
         # Compute constraints
         con = []
         if "volume" in self.confs:
-            con.append(self.fixed_area - self.analysis.eval_area(self.xfull))
+            area = self.analysis.eval_area(self.xfull)
+            con.append(self.fixed_area - area)
+            foi["area"] = area
 
         if "frequency" in self.confs:
             assert self.omega_lb is not None
             omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
             con.append(omega_ks - self.omega_lb)
+            foi["omega_ks"] = omega_ks
+
+        if "stress" in self.confs:
+            assert self.stress_ub is not None
+            stress_ks = self.analysis.eigenvector_stress(
+                self.xfull, cell_sols=vtk_cell_sols
+            )
+            con.append(1.0 - stress_ks / self.stress_ub)
+            foi["stress_ks"] = stress_ks
 
         # Save the design png and vtk
         if self.draw_history and self.it_counter % self.draw_every == 0:
@@ -1770,8 +1802,20 @@ class TopOptProb:
             f.write("\n")
 
         t_end = timer()
-        elapse_s = t_end - t_start
-        Logger.log("[%3d], t(fun): %6.3f s, " % (self.it_counter, elapse_s), end="")
+        self.elapse_f = t_end - t_start
+
+        # Log function values and time
+        if self.it_counter % 10 == 0:
+            Logger.log("\n%5s%20s" % ("iter", "obj"), end="")
+            for k in foi.keys():
+                Logger.log("%20s" % k, end="")
+            Logger.log("%10s%10s" % ("tfun(s)", "tgrad(s)"))
+
+        Logger.log("%5d%20.10e" % (self.it_counter, obj), end="")
+        for v in foi.values():
+            if not isinstance(v, str):
+                v = "%20.10e" % v
+            Logger.log("%20s" % v, end="")
 
         fail = 0
         self.it_counter += 1
@@ -1794,10 +1838,6 @@ class TopOptProb:
                     self.analysis.eigenvector_stress_derivative(self.xfull)
                 )
 
-            # g[:] = self.dv_mapping.T.dot(
-            #     self.analysis.eigenvector_displacement_deriv(self.xfull)
-            # )
-
             # Evaluate constraint gradients
             index = 0
             if "volume" in args.confs:
@@ -1812,13 +1852,17 @@ class TopOptProb:
                 )
                 index += 1
 
+            if "stress" in self.confs:
+                A[index][:] = -self.dv_mapping.T.dot(
+                    self.analysis.eigenvector_stress_derivative(
+                        self.xfull
+                    ) / self.stress_ub
+                )
+                index += 1
+
         else:
             # Populate the nodal variable for analysis
             self.xfull[self.design_nodes] = x[:]
-
-            # g[:] = self.analysis.eigenvector_displacement_deriv(self.xfull)[
-            #     self.design_nodes
-            # ]
 
             if self.objf == "frequency":
                 g[:] = -self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
@@ -1841,9 +1885,16 @@ class TopOptProb:
                 ]
                 index += 1
 
+            if "stress" in self.confs:
+                A[index][:] = -self.analysis.eigenvector_stress_derivative(
+                    self.xfull
+                )[self.design_nodes] / self.stress_ub
+                index += 1
+
         t_end = timer()
-        elapse_s = t_end - t_start
-        Logger.log("t(grad): %6.3f s" % (elapse_s))
+        self.elapse_g = t_end - t_start
+
+        Logger.log("%10.3f%10.3f" % (self.elapse_f, self.elapse_g))
 
         return 0
 
@@ -2185,9 +2236,7 @@ def parse_cmd_args():
     p.add_argument(
         "--p", default=5.0, type=float, help="material penalization parameter"
     )
-    p.add_argument(
-        "--m0", default=100.0, type=float, help="magnitude of non-design mass"
-    )
+    p.add_argument("--m0", default=5.0, type=float, help="magnitude of non-design mass")
     p.add_argument("--r0", default=2.1, type=float, help="filter radius = r0 * lx / nx")
 
     # Optimization
@@ -2207,7 +2256,7 @@ def parse_cmd_args():
         "--confs",
         default="volume",
         nargs="*",
-        choices=["volume", "frequency"],
+        choices=["volume", "frequency", "stress"],
         help="constraint functions",
     )
     p.add_argument(
@@ -2215,6 +2264,12 @@ def parse_cmd_args():
         default=None,
         type=float,
         help='Lower bound of natural frequency, only effective when "frequency" is in the confs',
+    )
+    p.add_argument(
+        "--stress-ub",
+        default=None,
+        type=float,
+        help='Upper bound for stress constraint, only effective when "stress" is in the confs',
     )
     p.add_argument(
         "--maxit", default=200, type=int, help="maximum number of iterations"
@@ -2280,6 +2335,7 @@ if __name__ == "__main__":
         objf=args.objf,
         confs=args.confs,
         omega_lb=args.omega_lb,
+        stress_ub=args.stress_ub,
     )
 
     # Print info
@@ -2288,7 +2344,7 @@ if __name__ == "__main__":
     Logger.log(f"constraints: {args.confs}")
     Logger.log("num of dof:  %d" % analysis.nvars)
     Logger.log("num of dv:   %d" % topo.ndv)
-    Logger.log("")
+    Logger.log()
 
     if args.optimizer == "mma4py":
 
@@ -2299,18 +2355,20 @@ if __name__ == "__main__":
         mmaopt = mma4py.Optimizer(
             mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
         )
-        mmaopt.checkGradients()
         if args.grad_check:
+            mmaopt.checkGradients()
             exit(0)
 
         mmaopt.optimize(niter=args.maxit, verbose=False)
+        xopt = mmaopt.getOptimizedDesign()
 
     else:
         from mpi4py import MPI
 
         paroptprob = ParOptProblem(MPI.COMM_SELF, topo)
-        paroptprob.checkGradients(1e-6)
+
         if args.grad_check:
+            paroptprob.checkGradients(1e-6)
             exit(0)
 
         if args.optimizer == "pmma":
@@ -2326,4 +2384,7 @@ if __name__ == "__main__":
 
         # Set a new starting point
         opt.optimize()
-        x, z, zw, zl, zu = opt.getOptimizedPoint()
+        xopt, z, zw, zl, zu = opt.getOptimizedPoint()
+
+    # Evaluate the stress for optimzied design
+    topo.evalObjCon(xopt, eval_stress=True)
