@@ -1725,7 +1725,7 @@ class TopOptProb(ParOpt.Problem):
         if "frequency" in self.confs:
             assert self.omega_lb is not None
             omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
-            con.append(self.omega_lb - omega_ks)
+            con.append(omega_ks - self.omega_lb)
 
         # Save the design png and vtk
         if self.draw_history and self.it_counter % self.draw_every == 0:
@@ -1795,7 +1795,7 @@ class TopOptProb(ParOpt.Problem):
                 index += 1
 
             if "frequency" in self.confs:
-                A[index][:] = -self.dv_mapping.T.dot(
+                A[index][:] = self.dv_mapping.T.dot(
                     self.analysis.ks_omega_derivative(self.xfull)
                 )
                 index += 1
@@ -1824,7 +1824,7 @@ class TopOptProb(ParOpt.Problem):
                 index += 1
 
             if "frequency" in self.confs:
-                A[index][:] = -self.analysis.ks_omega_derivative(self.xfull)[
+                A[index][:] = self.analysis.ks_omega_derivative(self.xfull)[
                     self.design_nodes
                 ]
                 index += 1
