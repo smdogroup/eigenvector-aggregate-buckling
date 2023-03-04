@@ -1640,6 +1640,7 @@ class TopOptProb:
         confs="volume",
         omega_lb=None,
         stress_ub=None,
+        stress_scale=1.0,
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -1653,6 +1654,7 @@ class TopOptProb:
         self.confs = confs
         self.omega_lb = omega_lb
         self.stress_ub = stress_ub
+        self.stress_scale = stress_scale
 
         # Add more non-design constant to matrices
         self.add_mat0("M", non_design_nodes, density=m0)
@@ -1741,7 +1743,7 @@ class TopOptProb:
             stress_ks = self.analysis.eigenvector_stress(
                 self.xfull, cell_sols=vtk_cell_sols
             )
-            obj = stress_ks
+            obj = stress_ks * self.stress_scale
             foi["stress_ks"] = stress_ks
 
         if eval_stress:
@@ -1834,7 +1836,7 @@ class TopOptProb:
                     self.analysis.ks_omega_derivative(self.xfull)
                 )
             else:  # objf == "stress"
-                g[:] = self.dv_mapping.T.dot(
+                g[:] = self.stress_scale * self.dv_mapping.T.dot(
                     self.analysis.eigenvector_stress_derivative(self.xfull)
                 )
 
@@ -1854,9 +1856,8 @@ class TopOptProb:
 
             if "stress" in self.confs:
                 A[index][:] = -self.dv_mapping.T.dot(
-                    self.analysis.eigenvector_stress_derivative(
-                        self.xfull
-                    ) / self.stress_ub
+                    self.analysis.eigenvector_stress_derivative(self.xfull)
+                    / self.stress_ub
                 )
                 index += 1
 
@@ -1867,9 +1868,12 @@ class TopOptProb:
             if self.objf == "frequency":
                 g[:] = -self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
             else:  # objf == "stress"
-                g[:] = self.analysis.eigenvector_stress_derivative(self.xfull)[
-                    self.design_nodes
-                ]
+                g[:] = (
+                    self.stress_scale
+                    * self.analysis.eigenvector_stress_derivative(self.xfull)[
+                        self.design_nodes
+                    ]
+                )
 
             # Evaluate constraint gradient
             index = 0
@@ -1886,9 +1890,12 @@ class TopOptProb:
                 index += 1
 
             if "stress" in self.confs:
-                A[index][:] = -self.analysis.eigenvector_stress_derivative(
-                    self.xfull
-                )[self.design_nodes] / self.stress_ub
+                A[index][:] = (
+                    -self.analysis.eigenvector_stress_derivative(self.xfull)[
+                        self.design_nodes
+                    ]
+                    / self.stress_ub
+                )
                 index += 1
 
         t_end = timer()
@@ -2272,6 +2279,12 @@ def parse_cmd_args():
         help='Upper bound for stress constraint, only effective when "stress" is in the confs',
     )
     p.add_argument(
+        "--stress-scale",
+        default=1.0,
+        type=float,
+        help='scale the stress objective obj = stress * scale, only effective when objf is "stress"',
+    )
+    p.add_argument(
         "--maxit", default=200, type=int, help="maximum number of iterations"
     )
     p.add_argument(
@@ -2336,6 +2349,7 @@ if __name__ == "__main__":
         confs=args.confs,
         omega_lb=args.omega_lb,
         stress_ub=args.stress_ub,
+        stress_scale=args.stress_scale,
     )
 
     # Print info
