@@ -401,6 +401,7 @@ class TopologyAnalysis:
 
         self.ptype = ptype.lower()
         assert self.ptype == "ramp" or self.ptype == "simp"
+        self.rho0 = 1e-3  # Small offset to ensure a non-singular K
 
         self.fltr = fltr
         self.conn = np.array(conn)
@@ -504,9 +505,9 @@ class TopologyAnalysis:
 
         # Compute the element stiffnesses
         if self.ptype == "simp":
-            C = np.outer(rhoE**self.p, self.C0)
+            C = np.outer(rhoE**self.p + self.rho0, self.C0)
         else:
-            C = np.outer(rhoE / (1.0 + self.p * (1.0 - rhoE)), self.C0)
+            C = np.outer(rhoE / (1.0 + self.p * (1.0 - rhoE)) + self.rho0, self.C0)
         C = C.reshape((self.nelems, 3, 3))
 
         # Compute the element stiffness matrix
@@ -615,7 +616,7 @@ class TopologyAnalysis:
             for j in range(3):
                 dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        if self.p == "simp":
+        if self.ptype == "simp":
             dfdrhoE[:] *= self.p * rhoE ** (self.p - 1.0)
         else:
             dfdrhoE[:] *= (1.0 + self.p) / (1.0 + self.p * (1.0 - rhoE)) ** 2
@@ -1649,7 +1650,6 @@ class TopOptProb:
         self.design_nodes = np.ones(len(self.xfull), dtype=bool)
         self.design_nodes[self.non_design_nodes] = False
         self.dv_mapping = dv_mapping
-        self.lb = lb
         self.objf = objf
         self.confs = confs
         self.omega_lb = omega_lb
@@ -1695,7 +1695,7 @@ class TopOptProb:
         return
 
     def getVarsAndBounds(self, x, lb, ub):
-        lb[:] = self.lb
+        lb[:] = 0.0
         ub[:] = 1.0
         x[:] = 0.95
         # np.random.seed(0)
@@ -1875,9 +1875,7 @@ class TopOptProb:
             self.xfull[self.design_nodes] = x[:]
 
             if self.objf == "volume":
-                g[:] = self.analysis.eval_area_gradient(self.xfull)[
-                    self.design_nodes
-                ]
+                g[:] = self.analysis.eval_area_gradient(self.xfull)[self.design_nodes]
             elif self.objf == "frequency":
                 g[:] = -self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
             else:  # objf == "stress"
@@ -1922,7 +1920,7 @@ class TopOptProb:
 try:
     import mma4py
 
-    class MMAProblem(mma4py.Problem):
+    class MMAProb(mma4py.Problem):
         def __init__(self, prob: TopOptProb) -> None:
             self.prob = prob
             self.ncon = prob.ncon
@@ -1946,10 +1944,10 @@ try:
             return
 
 except:
-    MMAProblem = None
+    MMAProb = None
 
 
-class ParOptProblem(ParOpt.Problem):
+class ParOptProb(ParOpt.Problem):
     def __init__(self, comm, prob: TopOptProb) -> None:
         self.prob = prob
         super().__init__(comm, prob.ndv, prob.ncon)
@@ -2238,9 +2236,6 @@ def parse_cmd_args():
         "--nx", default=96, type=int, help="number of elements along x direction"
     )
     p.add_argument(
-        "--lb", default=1e-3, type=float, help="lower bound of the design variable"
-    )
-    p.add_argument(
         "--filter",
         default="spatial",
         choices=["spatial", "helmholtz"],
@@ -2256,7 +2251,9 @@ def parse_cmd_args():
     p.add_argument(
         "--p", default=5.0, type=float, help="material penalization parameter"
     )
-    p.add_argument("--m0", default=20.0, type=float, help="magnitude of non-design mass")
+    p.add_argument(
+        "--m0", default=20.0, type=float, help="magnitude of non-design mass"
+    )
     p.add_argument("--r0", default=2.1, type=float, help="filter radius = r0 * lx / nx")
 
     # Optimization
@@ -2357,7 +2354,6 @@ if __name__ == "__main__":
         draw_every=5,
         prefix=args.prefix,
         dv_mapping=dv_mapping,
-        lb=args.lb,
         objf=args.objf,
         confs=args.confs,
         omega_lb=args.omega_lb,
@@ -2375,10 +2371,10 @@ if __name__ == "__main__":
 
     if args.optimizer == "mma4py":
 
-        if MMAProblem is None:
+        if MMAProb is None:
             raise ImportError("Cannot use mma4py, package not found.")
 
-        mmaprob = MMAProblem(topo)
+        mmaprob = MMAProb(topo)
         mmaopt = mma4py.Optimizer(
             mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
         )
@@ -2392,7 +2388,7 @@ if __name__ == "__main__":
     else:
         from mpi4py import MPI
 
-        paroptprob = ParOptProblem(MPI.COMM_SELF, topo)
+        paroptprob = ParOptProb(MPI.COMM_SELF, topo)
 
         if args.grad_check:
             paroptprob.checkGradients(1e-6)
