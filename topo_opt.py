@@ -1735,7 +1735,12 @@ class TopOptProb:
             self.xfull, k=6, nodal_sols=vtk_nodal_sols
         )
 
-        if self.objf == "frequency":
+        if self.objf == "volume":
+            area = self.analysis.eval_area(self.xfull)
+            foi["area"] = area
+            obj = area
+
+        elif self.objf == "frequency":
             omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
             obj = -omega_ks
             foi["omega_ks"] = omega_ks
@@ -1831,7 +1836,11 @@ class TopOptProb:
             self.xfull[:] = self.dv_mapping.dot(x)  # x = E*xr
             self.xfull[self.non_design_nodes] = 1.0
 
-            if self.objf == "frequency":
+            if self.objf == "volume":
+                g[:] = self.dv_mapping.T.dot(
+                    self.analysis.eval_area_gradient(self.xfull)
+                )
+            elif self.objf == "frequency":
                 g[:] = -self.dv_mapping.T.dot(
                     self.analysis.ks_omega_derivative(self.xfull)
                 )
@@ -1865,7 +1874,11 @@ class TopOptProb:
             # Populate the nodal variable for analysis
             self.xfull[self.design_nodes] = x[:]
 
-            if self.objf == "frequency":
+            if self.objf == "volume":
+                g[:] = self.analysis.eval_area_gradient(self.xfull)[
+                    self.design_nodes
+                ]
+            elif self.objf == "frequency":
                 g[:] = -self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
             else:  # objf == "stress"
                 g[:] = (
@@ -2243,7 +2256,7 @@ def parse_cmd_args():
     p.add_argument(
         "--p", default=5.0, type=float, help="material penalization parameter"
     )
-    p.add_argument("--m0", default=5.0, type=float, help="magnitude of non-design mass")
+    p.add_argument("--m0", default=20.0, type=float, help="magnitude of non-design mass")
     p.add_argument("--r0", default=2.1, type=float, help="filter radius = r0 * lx / nx")
 
     # Optimization
@@ -2256,7 +2269,7 @@ def parse_cmd_args():
     p.add_argument(
         "--objf",
         default="frequency",
-        choices=["frequency", "stress"],
+        choices=["frequency", "stress", "volume"],
         help="objective function",
     )
     p.add_argument(
