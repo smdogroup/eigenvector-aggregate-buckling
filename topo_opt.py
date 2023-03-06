@@ -1636,7 +1636,7 @@ class TopOptProb:
         draw_every=1,
         prefix="result",
         dv_mapping=None,  # If provided, optimizer controls reduced design variable xr only
-        lb=1e-3,
+        lb=1e-6,
         objf="frequency",
         confs="volume",
         omega_lb=None,
@@ -1655,6 +1655,7 @@ class TopOptProb:
         self.omega_lb = omega_lb
         self.stress_ub = stress_ub
         self.stress_scale = stress_scale
+        self.lb = lb
 
         # Add more non-design constant to matrices
         self.add_mat0("M", non_design_nodes, density=m0)
@@ -1695,7 +1696,7 @@ class TopOptProb:
         return
 
     def getVarsAndBounds(self, x, lb, ub):
-        lb[:] = 0.0
+        lb[:] = self.lb
         ub[:] = 1.0
         x[:] = 0.95
         # np.random.seed(0)
@@ -2263,6 +2264,7 @@ def parse_cmd_args():
         choices=["pmma", "mma4py", "tr"],
         help="optimization method",
     )
+    p.add_argument("--lb", default=0.0, type=float, help="lower bound of design variables")
     p.add_argument(
         "--objf",
         default="frequency",
@@ -2354,6 +2356,7 @@ if __name__ == "__main__":
         draw_every=5,
         prefix=args.prefix,
         dv_mapping=dv_mapping,
+        lb=args.lb,
         objf=args.objf,
         confs=args.confs,
         omega_lb=args.omega_lb,
