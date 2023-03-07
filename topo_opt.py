@@ -402,6 +402,10 @@ class TopologyAnalysis:
         self.ptype = ptype.lower()
         assert self.ptype == "ramp" or self.ptype == "simp"
         self.rho0 = 1e-3  # Small offset to ensure a non-singular K
+        if self.ptype == "simp":
+            self.rho0 = 0.0
+        self.simp_c1 = 6e5
+        self.simp_c2 = -5e6
 
         self.fltr = fltr
         self.conn = np.array(conn)
@@ -646,8 +650,10 @@ class TopologyAnalysis:
         # Compute the element density
         if self.penalize_mass:
             if self.ptype == "simp":
-                density = self.density * rhoE ** (1.0 / self.p)
-            else:
+                nonlin = self.simp_c1 * rhoE**6.0 + self.simp_c2 * rhoE**7.0
+                cond = (rhoE > 0.1).astype(int)
+                density = self.density * (rhoE * cond + nonlin * (1 - cond))
+            else:  # ramp
                 density = self.density * (self.p + 1.0) * rhoE / (1 + self.p * rhoE)
         else:
             density = self.density * rhoE
@@ -767,10 +773,14 @@ class TopologyAnalysis:
 
         if self.penalize_mass:
             if self.ptype == "simp":
-                dfdrhoE[:] *= self.density * rhoE ** (1.0 / self.p - 1.0) / self.p
-            else:
+                dnonlin = (
+                    6.0 * self.simp_c1 * rhoE**5.0 + 7.0 * self.simp_c2 * rhoE**6.0
+                )
+                cond = (rhoE > 0.1).astype(int)
+                dfdrhoE[:] *= self.density * (cond + dnonlin * (1 - cond))
+            else:  # ramp
                 dfdrhoE[:] *= self.density * (1.0 + self.p) / (1.0 + self.p * rhoE) ** 2
-        else:
+        else:  # linear mass
             dfdrhoE[:] *= self.density
 
         dfdrho = np.zeros(self.nnodes)
