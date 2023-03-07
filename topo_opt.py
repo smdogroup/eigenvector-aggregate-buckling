@@ -398,7 +398,6 @@ class TopologyAnalysis:
         M0=None,
         assume_same_element=False,
     ):
-
         self.ptype = ptype.lower()
         assert self.ptype == "ramp" or self.ptype == "simp"
         self.rho0 = 1e-3  # Small offset to ensure a non-singular K
@@ -643,10 +642,13 @@ class TopologyAnalysis:
         )
 
         # Compute the element density
-        if self.ptype == "simp":
-            density = self.density * rhoE ** (1.0 / self.p)
-        else:
-            density = self.density * (self.p + 1.0) * rhoE / (1 + self.p * rhoE)
+        # if self.ptype == "simp":
+        #     density = self.density * rhoE ** (1.0 / self.p)
+        # else:
+        #     density = self.density * (self.p + 1.0) * rhoE / (1 + self.p * rhoE)
+
+        # We don't penalize mass matrix
+        density = self.density * rhoE
 
         # Compute the element stiffness matrix
         gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
@@ -671,7 +673,6 @@ class TopologyAnalysis:
                     Me += np.einsum("n,ij,il -> njl", density * detJ, He_, He_)
 
         else:
-
             He = np.zeros((self.nelems, 2, 8))
 
             # Compute the x and y coordinates of each element
@@ -762,10 +763,12 @@ class TopologyAnalysis:
                     ev = np.einsum("nij,nj -> ni", He, ve)
                     dfdrhoE += np.einsum("n,ni,ni -> n", detJ, eu, ev)
 
-        if self.ptype == "simp":
-            dfdrhoE[:] *= self.density * rhoE ** (1.0 / self.p - 1.0) / self.p
-        else:
-            dfdrhoE[:] *= self.density * (1.0 + self.p) / (1.0 + self.p * rhoE) ** 2
+        # if self.ptype == "simp":
+        #     dfdrhoE[:] *= self.density * rhoE ** (1.0 / self.p - 1.0) / self.p
+        # else:
+        #     dfdrhoE[:] *= self.density * (1.0 + self.p) / (1.0 + self.p * rhoE) ** 2
+
+        dfdrhoE[:] *= self.density
 
         dfdrho = np.zeros(self.nnodes)
         for i in range(4):
@@ -868,7 +871,6 @@ class TopologyAnalysis:
         return area
 
     def eval_area_gradient(self, x):
-
         dfdrhoE = np.zeros(self.nelems)
 
         # Quadrature points
@@ -911,7 +913,9 @@ class TopologyAnalysis:
         return self.fltr.applyGradient(dfdrho, x)
 
     @time_this
-    def solve_eigenvalue_problem(self, x, k=5, sigma=0.0, nodal_sols=None):
+    def solve_eigenvalue_problem(
+        self, x, k=5, sigma=0.0, nodal_sols=None, nodal_vecs=None
+    ):
         """
         Compute the k-th smallest natural frequencies
         Populate nodal_sols and cell_sols if provided
@@ -947,9 +951,10 @@ class TopologyAnalysis:
         if nodal_sols is not None:
             nodal_sols["x"] = np.array(x)
             nodal_sols["rho"] = np.array(rho)
+
+        if nodal_vecs is not None:
             for i in range(k):
-                nodal_sols["u%d" % i] = Q[0::2, i]
-                nodal_sols["v%d" % i] = Q[1::2, i]
+                nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
 
         # Save the eigenvalues and eigenvectors
         self.eigs = eigs
@@ -1002,7 +1007,6 @@ class TopologyAnalysis:
 
     @time_this
     def eigenvector_displacement(self, ks_rho=100.0):
-
         N = len(self.eigs)
         c = np.min(self.eigs)
         eta = np.exp(-ks_rho * (self.eigs - c))
@@ -1168,6 +1172,52 @@ class TopologyAnalysis:
         return self.fltr.applyGradient(dfdrho, x)
 
     @time_this
+    def postprocess_strain_stress(self, x, u, allowable=1.0):
+        """
+        Compute strain field and Von-mises stress given a displacement field
+        """
+        # Compute the filtered variables
+        rho = self.fltr.apply(x)
+
+        # Average the density to get the element-wise density
+        rhoE = 0.25 * (
+            rho[self.conn[:, 0]]
+            + rho[self.conn[:, 1]]
+            + rho[self.conn[:, 2]]
+            + rho[self.conn[:, 3]]
+        )
+
+        # Compute the stress relaxation factor
+        relax = rhoE / (rhoE + self.epsilon * (1.0 - rhoE))
+
+        Be = np.zeros((self.nelems, 3, 8))
+
+        # Compute the x and y coordinates of each element
+        xe = self.X[self.conn, 0]
+        ye = self.X[self.conn, 1]
+
+        # Compute the stress in the middle of the element
+        xi = 0.0
+        eta = 0.0
+        _populate_Be(self.nelems, xi, eta, xe, ye, Be)
+
+        qe = np.zeros((self.nelems, 8))
+        qe[:, ::2] = u[2 * self.conn]
+        qe[:, 1::2] = u[2 * self.conn + 1]
+
+        # Compute the stresses in each element
+        strain = np.einsum("nik,nk -> ni", Be, qe)
+        s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+
+        # Compute the von Mises stress
+        vonmises = (
+            relax
+            * (s[:, 0] ** 2 + s[:, 1] ** 2 - s[:, 0] * s[:, 1] + 3.0 * s[:, 2] ** 2)
+        ) / allowable**2
+
+        return strain, vonmises
+
+    @time_this
     def get_stress_values(self, rho, eta, Q, allowable=1.0):
         """
         Compute the stress at each element
@@ -1255,7 +1305,6 @@ class TopologyAnalysis:
 
     @time_this
     def eigenvector_stress(self, x, ks_rho=100.0, allowable=1.0, cell_sols=None):
-
         # Compute the filtered variables
         rho = self.fltr.apply(x)
 
@@ -1269,17 +1318,16 @@ class TopologyAnalysis:
         stress = self.get_stress_values(rho, eta, self.Q, allowable=allowable)
 
         if cell_sols is not None:
-            cell_sols["stress"] = stress
+            cell_sols["eigenvector_stress"] = stress
 
         # Now aggregate over the stress
         max_stress = np.max(stress)
-        h = max_stress + np.sum(np.exp(ks_rho * (stress - max_stress))) / ks_rho
+        h = max_stress + np.log(np.sum(np.exp(ks_rho * (stress - max_stress)))) / ks_rho
 
         return h
 
     @time_this
     def eigenvector_stress_derivative(self, x, ks_rho=100.0, allowable=1.0):
-
         # Compute the filtered variables
         rho = self.fltr.apply(x)
 
@@ -1427,7 +1475,6 @@ class TopologyAnalysis:
 
     @time_this
     def get_stress_values_deriv(self, rho, eta_stress, eta, Q, allowable=1.0):
-
         dfdrhoE = np.zeros(self.nelems)
 
         # Average the density to get the element-wise density
@@ -1516,7 +1563,6 @@ class TopologyAnalysis:
 
     @time_this
     def get_stress_product(self, rho, eta_stress, q, allowable=1.0):
-
         # Loop over all the eigenvalues
         # Dq = np.zeros(self.nvars)
 
@@ -1703,7 +1749,7 @@ class TopOptProb:
         # x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
         return
 
-    def evalObjCon(self, x, eval_stress=False):
+    def evalObjCon(self, x, eval_all=False):
         # Functions of interest to be logged
         foi = OrderedDict()
         foi["area"] = "n/a"
@@ -1713,15 +1759,19 @@ class TopOptProb:
         t_start = timer()
 
         vtk_nodal_sols = None
+        vtk_nodal_vecs = None
         vtk_cell_sols = None
+        vtk_cell_vecs = None
         vtk_path = None
 
         # Save the design to vtk every certain iterations
-        if self.it_counter % self.draw_every == 0:
+        if eval_all or self.it_counter % self.draw_every == 0:
             if not os.path.isdir(os.path.join(self.prefix, "vtk")):
                 os.mkdir(os.path.join(self.prefix, "vtk"))
             vtk_nodal_sols = {}
+            vtk_nodal_vecs = {}
             vtk_cell_sols = {}
+            vtk_cell_vecs = {}
             vtk_path = os.path.join(self.prefix, "vtk", "it_%d.vtk" % self.it_counter)
 
         # Populate the nodal variable for analysis
@@ -1733,9 +1783,10 @@ class TopOptProb:
 
         # Solve the genrealized eigenvalue problem
         omega = self.analysis.solve_eigenvalue_problem(
-            self.xfull, k=6, nodal_sols=vtk_nodal_sols
+            self.xfull, k=6, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
         )
 
+        # Evaluate objectives
         if self.objf == "volume":
             area = self.analysis.eval_area(self.xfull)
             foi["area"] = area
@@ -1750,12 +1801,6 @@ class TopOptProb:
                 self.xfull, cell_sols=vtk_cell_sols
             )
             obj = stress_ks * self.stress_scale
-            foi["stress_ks"] = stress_ks
-
-        if eval_stress:
-            stress_ks = self.analysis.eigenvector_stress(
-                self.xfull, cell_sols=vtk_cell_sols
-            )
             foi["stress_ks"] = stress_ks
 
         # Compute constraints
@@ -1779,9 +1824,30 @@ class TopOptProb:
             con.append(1.0 - stress_ks / self.stress_ub)
             foi["stress_ks"] = stress_ks
 
+        # Evaluate all quantities of interest
+        if eval_all:
+            stress_ks = self.analysis.eigenvector_stress(
+                self.xfull, cell_sols=vtk_cell_sols
+            )
+            omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            foi["stress_ks"] = stress_ks
+            foi["omega_ks"] = omega_ks
+
+            # Save strain and von mises stress for each eigenmode
+            for i, eig_mode in enumerate(self.analysis.Q.T):
+                strain, vonmises = self.analysis.postprocess_strain_stress(
+                    self.xfull, eig_mode
+                )
+                vtk_cell_sols["exx_%d" % i] = strain[:, 0]
+                vtk_cell_sols["eyy_%d" % i] = strain[:, 1]
+                vtk_cell_sols["exy_%d" % i] = strain[:, 2]
+                vtk_cell_sols["vonmises_%d" % i] = vonmises[:]
+
         # Save the design png and vtk
-        if self.draw_history and self.it_counter % self.draw_every == 0:
-            fig, ax = plt.subplots()
+        if eval_all or (self.draw_history and self.it_counter % self.draw_every == 0):
+            fig, ax = plt.subplots(figsize=(4.8, 4.8), constrained_layout=True)
+            ax.set_xticks([])
+            ax.set_yticks([])
             rho = self.analysis.fltr.apply(self.xfull)
             self.analysis.plot(rho, ax=ax)
             ax.set_aspect("equal", "box")
@@ -1793,6 +1859,8 @@ class TopOptProb:
                 self.analysis.X,
                 vtk_nodal_sols,
                 vtk_cell_sols,
+                vtk_nodal_vecs,
+                vtk_cell_vecs,
             )
 
         # Log eigenvalues
@@ -1964,9 +2032,15 @@ class ParOptProb(ParOpt.Problem):
         return self.prob.evalObjConGradient(x, g, A)
 
 
-def to_vtk(vtk_path, conn, X, nodal_sols={}, cell_sols={}):
+def to_vtk(vtk_path, conn, X, nodal_sols={}, cell_sols={}, nodal_vecs={}, cell_vecs={}):
     """
     Generate a vtk given conn, X, and optionally list of nodal solutions
+
+    Args:
+        nodal_sols: dictionary of arrays of length nnodes
+        cell_sols: dictionary of arrays of length nelems
+        nodal_vecs: dictionary of list of components [vx, vy], each has length nnodes
+        cell_vecs: dictionary of list of components [vx, vy], each has length nelems
     """
     # vtk requires a 3-dimensional data point
     X = np.append(X, np.zeros((X.shape[0], 1)), axis=1)
@@ -2003,21 +2077,37 @@ def to_vtk(vtk_path, conn, X, nodal_sols={}, cell_sols={}):
             fh.write(f"{vtk_type}\n")
 
         # Write solution
-        if nodal_sols:
+        if nodal_sols or nodal_vecs:
             fh.write(f"POINT_DATA {nnodes}\n")
+
+        if nodal_sols:
             for name, data in nodal_sols.items():
-                fh.write(f"SCALARS {name} float 1\n")
+                fh.write(f"SCALARS {name} double 1\n")
                 fh.write("LOOKUP_TABLE default\n")
                 for val in data:
                     fh.write(f"{val}\n")
 
-        if cell_sols:
+        if nodal_vecs:
+            for name, data in nodal_vecs.items():
+                fh.write(f"VECTORS {name} double\n")
+                for val in np.array(data).T:
+                    fh.write(f"{val[0]} {val[1]} 0.\n")
+
+        if cell_sols or cell_vecs:
             fh.write(f"CELL_DATA {nelems}\n")
+
+        if cell_sols:
             for name, data in cell_sols.items():
-                fh.write(f"SCALARS {name} float 1\n")
+                fh.write(f"SCALARS {name} double 1\n")
                 fh.write("LOOKUP_TABLE default\n")
                 for val in data:
                     fh.write(f"{val}\n")
+
+        if cell_vecs:
+            for name, data in cell_vecs.items():
+                fh.write(f"VECTORS {name} double\n")
+                for val in np.array(data).T:
+                    fh.write(f"{val[0]} {val[1]} 0.\n")
 
     return
 
@@ -2264,7 +2354,9 @@ def parse_cmd_args():
         choices=["pmma", "mma4py", "tr"],
         help="optimization method",
     )
-    p.add_argument("--lb", default=0.0, type=float, help="lower bound of design variables")
+    p.add_argument(
+        "--lb", default=0.0, type=float, help="lower bound of design variables"
+    )
     p.add_argument(
         "--objf",
         default="frequency",
@@ -2373,7 +2465,6 @@ if __name__ == "__main__":
     Logger.log()
 
     if args.optimizer == "mma4py":
-
         if MMAProb is None:
             raise ImportError("Cannot use mma4py, package not found.")
 
@@ -2413,4 +2504,4 @@ if __name__ == "__main__":
         xopt, z, zw, zl, zu = opt.getOptimizedPoint()
 
     # Evaluate the stress for optimzied design
-    topo.evalObjCon(xopt, eval_stress=True)
+    topo.evalObjCon(xopt, eval_all=True)
