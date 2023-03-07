@@ -392,6 +392,7 @@ class TopologyAnalysis:
         nu=0.3,
         ptype="RAMP",
         p=5.0,
+        penalize_mass=False,
         density=1.0,
         epsilon=0.3,
         K0=None,
@@ -406,6 +407,7 @@ class TopologyAnalysis:
         self.conn = np.array(conn)
         self.X = np.array(X)
         self.p = p
+        self.penalize_mass = penalize_mass
         self.density = density
         self.epsilon = epsilon
 
@@ -642,13 +644,13 @@ class TopologyAnalysis:
         )
 
         # Compute the element density
-        # if self.ptype == "simp":
-        #     density = self.density * rhoE ** (1.0 / self.p)
-        # else:
-        #     density = self.density * (self.p + 1.0) * rhoE / (1 + self.p * rhoE)
-
-        # We don't penalize mass matrix
-        density = self.density * rhoE
+        if self.penalize_mass:
+            if self.ptype == "simp":
+                density = self.density * rhoE ** (1.0 / self.p)
+            else:
+                density = self.density * (self.p + 1.0) * rhoE / (1 + self.p * rhoE)
+        else:
+            density = self.density * rhoE
 
         # Compute the element stiffness matrix
         gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
@@ -763,12 +765,13 @@ class TopologyAnalysis:
                     ev = np.einsum("nij,nj -> ni", He, ve)
                     dfdrhoE += np.einsum("n,ni,ni -> n", detJ, eu, ev)
 
-        # if self.ptype == "simp":
-        #     dfdrhoE[:] *= self.density * rhoE ** (1.0 / self.p - 1.0) / self.p
-        # else:
-        #     dfdrhoE[:] *= self.density * (1.0 + self.p) / (1.0 + self.p * rhoE) ** 2
-
-        dfdrhoE[:] *= self.density
+        if self.penalize_mass:
+            if self.ptype == "simp":
+                dfdrhoE[:] *= self.density * rhoE ** (1.0 / self.p - 1.0) / self.p
+            else:
+                dfdrhoE[:] *= self.density * (1.0 + self.p) / (1.0 + self.p * rhoE) ** 2
+        else:
+            dfdrhoE[:] *= self.density
 
         dfdrho = np.zeros(self.nnodes)
         for i in range(4):
@@ -2342,6 +2345,7 @@ def parse_cmd_args():
     p.add_argument(
         "--p", default=5.0, type=float, help="material penalization parameter"
     )
+    p.add_argument("--penalize-mass", action="store_true", help="penalize mass matrix")
     p.add_argument(
         "--m0", default=20.0, type=float, help="magnitude of non-design mass"
     )
@@ -2436,6 +2440,7 @@ if __name__ == "__main__":
         forces,
         ptype=args.ptype,
         p=args.p,
+        penalize_mass=args.penalize_mass,
         assume_same_element=args.assume_same_element,
     )
 
