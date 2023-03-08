@@ -401,9 +401,11 @@ class TopologyAnalysis:
     ):
         self.ptype = ptype.lower()
         assert self.ptype == "ramp" or self.ptype == "simp"
-        self.rho0 = 1e-3  # Small offset to ensure a non-singular K
+        self.rho0_K = 1e-3  # Small offset to ensure a non-singular K
+        self.rho0_M = 1e-7  # Small offset to ensure a non-singular M
         if self.ptype == "simp":
-            self.rho0 = 0.0
+            self.rho0_K = 0.0
+            self.rho0_M = 0.0
         self.simp_c1 = 6e5
         self.simp_c2 = -5e6
 
@@ -510,9 +512,9 @@ class TopologyAnalysis:
 
         # Compute the element stiffnesses
         if self.ptype == "simp":
-            C = np.outer(rhoE**self.p + self.rho0, self.C0)
+            C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
         else:
-            C = np.outer(rhoE / (1.0 + self.p * (1.0 - rhoE)) + self.rho0, self.C0)
+            C = np.outer(rhoE / (1.0 + self.p * (1.0 - rhoE)) + self.rho0_K, self.C0)
         C = C.reshape((self.nelems, 3, 3))
 
         # Compute the element stiffness matrix
@@ -654,7 +656,9 @@ class TopologyAnalysis:
                 cond = (rhoE > 0.1).astype(int)
                 density = self.density * (rhoE * cond + nonlin * (1 - cond))
             else:  # ramp
-                density = self.density * (self.p + 1.0) * rhoE / (1 + self.p * rhoE)
+                density = self.density * (
+                    (self.p + 1.0) * rhoE / (1 + self.p * rhoE) + self.rho0_M
+                )
         else:
             density = self.density * rhoE
 
@@ -1776,6 +1780,7 @@ class TopOptProb:
         vtk_cell_sols = None
         vtk_cell_vecs = None
         vtk_path = None
+        stress_ks = None
 
         # Save the design to vtk every certain iterations
         if eval_all or self.it_counter % self.draw_every == 0:
@@ -1846,6 +1851,8 @@ class TopOptProb:
             foi["stress_ks"] = stress_ks
             foi["omega_ks"] = omega_ks
 
+        # Save the design png and vtk
+        if eval_all or (self.draw_history and self.it_counter % self.draw_every == 0):
             # Save strain and von mises stress for each eigenmode
             for i, eig_mode in enumerate(self.analysis.Q.T):
                 strain, vonmises = self.analysis.postprocess_strain_stress(
@@ -1856,8 +1863,6 @@ class TopOptProb:
                 vtk_cell_sols["exy_%d" % i] = strain[:, 2]
                 vtk_cell_sols["vonmises_%d" % i] = vonmises[:]
 
-        # Save the design png and vtk
-        if eval_all or (self.draw_history and self.it_counter % self.draw_every == 0):
             fig, ax = plt.subplots(figsize=(4.8, 4.8), constrained_layout=True)
             ax.set_xticks([])
             ax.set_yticks([])
@@ -2340,6 +2345,9 @@ def parse_cmd_args():
         "--nx", default=96, type=int, help="number of elements along x direction"
     )
     p.add_argument(
+        "--stress-relax", default=0.3, type=float, help="stress relaxation factor"
+    )
+    p.add_argument(
         "--filter",
         default="spatial",
         choices=["spatial", "helmholtz"],
@@ -2448,6 +2456,7 @@ if __name__ == "__main__":
         X,
         bcs,
         forces,
+        epsilon=args.stress_relax,
         ptype=args.ptype,
         p=args.p,
         penalize_mass=args.penalize_mass,
