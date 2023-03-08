@@ -403,9 +403,14 @@ class TopologyAnalysis:
         assert self.ptype == "ramp" or self.ptype == "simp"
         self.rho0_K = 1e-3  # Small offset to ensure a non-singular K
         self.rho0_M = 1e-7  # Small offset to ensure a non-singular M
+
+        # For simp, we don't have small non-zero offsets, instead, we have to
+        # use a small non-zero lower bound for design variable x
         if self.ptype == "simp":
             self.rho0_K = 0.0
             self.rho0_M = 0.0
+
+        # C1 continuous mass penalization coefficients
         self.simp_c1 = 6e5
         self.simp_c2 = -5e6
 
@@ -2184,7 +2189,7 @@ def create_cantilever_domain(lx=20, ly=10, m=128, n=64):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
-def create_square_domain(r0_, l=1.0, nx=30):
+def create_square_domain(r0_, l=1.0, nx=30, m0_block_frac=0.0):
     """
     Args:
         l: length of the square
@@ -2220,8 +2225,9 @@ def create_square_domain(r0_, l=1.0, nx=30):
 
     # We would like the center node or element to be the non-design region
     non_design_nodes = []
-    for j in range(n // 2, (n + 1) // 2 + 1):
-        for i in range(n // 2, (n + 1) // 2 + 1):
+    offset = int(m0_block_frac * nx * 0.5)
+    for j in range(n // 2 - offset, (n + 1) // 2 + 1 + offset):
+        for i in range(n // 2 - offset, (n + 1) // 2 + 1 + offset):
             non_design_nodes.append(nodes[j, i])
 
     # Constrain all boundaries
@@ -2345,6 +2351,12 @@ def parse_cmd_args():
         "--nx", default=96, type=int, help="number of elements along x direction"
     )
     p.add_argument(
+        "--m0-block-frac",
+        default=0.0,
+        type=float,
+        help="fraction of the size of non-design mass block with respect to the domain",
+    )
+    p.add_argument(
         "--stress-relax", default=0.3, type=float, help="stress relaxation factor"
     )
     p.add_argument(
@@ -2440,7 +2452,7 @@ if __name__ == "__main__":
             f.write(f"{k:<20}{v}\n")
 
     conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_square_domain(
-        r0_=args.r0, nx=args.nx
+        r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
     )
 
     # Check the mesh
