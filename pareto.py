@@ -181,7 +181,7 @@ if __name__ == "__main__":
     ax.set_xlabel(args.metrics[0])
     ax.set_ylabel(args.metrics[1])
 
-    fig.savefig("pareto.pdf")
+    fig.savefig("pareto.png", dpi=500)
 
     # Concatenate design and history images
     topo_imgs = [Image.open(p) for p in topo_paths]
