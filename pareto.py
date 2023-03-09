@@ -7,8 +7,8 @@ from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from mma4py import mma4py_plot_log
 import re
 import numpy as np
-import PIL
 from PIL import Image
+import pyvista
 
 
 def remove_duplicated_heders(df):
@@ -18,12 +18,15 @@ def remove_duplicated_heders(df):
     return df
 
 
-def get_pareto_front(case_folders, xmetric, ymetric, refresh_history=False):
+def get_pareto_front(
+    case_folders, xmetric, ymetric, refresh_history=False, refresh_stress=False
+):
     case_folders.sort()
 
     x_vals = []
     y_vals = []
     topo_paths = []
+    topo_stress_paths = []
     hist_paths = []
 
     for case in case_folders:
@@ -34,7 +37,30 @@ def get_pareto_front(case_folders, xmetric, ymetric, refresh_history=False):
         topo_pngs.sort(key=get_iter)
         topo_paths.append(topo_pngs[-1])
 
-        # Generate mma4py history plots if needed
+        # Find the last vtk
+        vtks = glob(join(case, "vtk", "it_*.vtk"))
+        vtks.sort(key=lambda path: int(splitext(basename(path))[0][3:]))
+        vtk = vtks[-1]
+        topo_stress_png = "%s.png" % splitext(vtk)[0]
+        topo_stress_paths.append(topo_stress_png)
+
+        # Generate the stress visualization if not already exists
+        if not glob(topo_stress_png) or refresh_stress:
+            print("[Info] generating %s" % topo_stress_png)
+            mesh = pyvista.read(vtk)
+            mesh.plot(
+                scalars="eigenvector_stress",
+                cpos="xy",
+                zoom="tight",
+                off_screen=True,
+                show_axes=False,
+                show_scalar_bar=True,
+                scalar_bar_args={"position_x": 0.0, "position_y": 0.0},
+                window_size=[800, 800],
+                screenshot=topo_stress_png,
+            )
+
+        # Generate mma4py history plots if not already exists
         mma4py_log = join(case, "mma4py.log")
         mma4py_png = join(case, "mma4py.png")
         if not glob(mma4py_png) or refresh_history:
@@ -54,7 +80,7 @@ def get_pareto_front(case_folders, xmetric, ymetric, refresh_history=False):
         x_vals.append(stdout_log[xmetric].iloc[-1])
         y_vals.append(stdout_log[ymetric].iloc[-1])
 
-    return x_vals, y_vals, topo_paths, hist_paths
+    return x_vals, y_vals, topo_paths, hist_paths, topo_stress_paths
 
 
 def insert_image(imgpath, zoom, ax, xy, xybox, arrowprops={}):
@@ -76,6 +102,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("case_folders", nargs="*", type=str)
     p.add_argument("--refresh-history", action="store_true")
+    p.add_argument("--refresh-stress", action="store_true")
     p.add_argument(
         "--metrics",
         default=["stress_ks", "omega_ks"],
@@ -84,8 +111,11 @@ if __name__ == "__main__":
     )
     args = p.parse_args()
 
-    x_vals, y_vals, topo_paths, hist_paths = get_pareto_front(
-        args.case_folders, *args.metrics, refresh_history=args.refresh_history
+    x_vals, y_vals, topo_paths, hist_paths, topo_stress_paths = get_pareto_front(
+        args.case_folders,
+        *args.metrics,
+        refresh_history=args.refresh_history,
+        refresh_stress=args.refresh_stress
     )
 
     # Draw pareto front with designs
@@ -117,12 +147,22 @@ if __name__ == "__main__":
     # Concatenate design and history images
     topo_imgs = [Image.open(p) for p in topo_paths]
     hist_imgs = [Image.open(p) for p in hist_paths]
+    stress_imgs = [Image.open(p) for p in topo_stress_paths]
 
     # pick the image which is the smallest, and resize the others to match it
     min_shape = sorted([(np.sum(i.size), i.size) for i in topo_imgs])[0][1]
+
+    arr_stress = np.hstack([i.resize(min_shape) for i in stress_imgs])
     arr_topo = np.hstack([i.resize(min_shape) for i in topo_imgs])
     arr_hist = np.hstack([i.resize(min_shape) for i in hist_imgs])
 
+    # If not in RGBA format, manually append the alpha channel
+    if arr_stress.shape[-1] == 3:
+        arr_stress = np.concatenate(
+            (arr_stress, 255 * np.ones((*arr_stress.shape[:-1], 1), dtype=np.uint8)),
+            axis=-1,
+        )
+
     # Concatenate and save
-    image_concat = Image.fromarray(np.array([*arr_topo, *arr_hist]))
+    image_concat = Image.fromarray(np.array([*arr_stress, *arr_topo, *arr_hist]))
     image_concat.save("designs_historys.png")
