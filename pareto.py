@@ -4,11 +4,45 @@ import pandas as pd
 from os.path import join, splitext, basename
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
-from mma4py import mma4py_plot_log
 import re
 import numpy as np
 from PIL import Image
 import pyvista
+
+
+def mma4py_plot_log(ax, log_path):
+    # Load from history, drop repeated header rows and reset indices
+    df = pd.read_fwf(log_path)
+    df = df[df.ne(df.columns).any(axis="columns")]
+    df.reset_index(drop=True, inplace=True)
+    df = df.astype(float)
+
+    # Plot objective using primary axis
+
+    l0 = ax.plot(df["iter"], df["obj"], color="blue", label="obj")
+
+    # Plot KKT error and infeasibility using secondary axis (with log-scale)
+    ax2 = ax.twinx()
+    l1 = ax2.semilogy(
+        df["iter"], df["KKT_l2"], color="orange", alpha=0.8, label="KKT l2"
+    )
+    l2 = ax2.semilogy(
+        df["iter"], df["KKT_linf"], color="orange", alpha=0.5, label="KKT linf"
+    )
+    l3 = ax2.semilogy(
+        df["iter"], df["infeas"], color="purple", alpha=0.5, label="infeas"
+    )
+
+    # Manually set legends
+    lns = l0 + l1 + l2 + l3
+    labs = [l.get_label() for l in lns]
+    ax.legend(lns, labs, loc=0, frameon=False)
+
+    ax.set_xlabel("iterations")
+    ax.set_ylabel("objective")
+    ax2.set_xlabel("opt/feas criteria")
+
+    return ax2
 
 
 def remove_duplicated_heders(df):
