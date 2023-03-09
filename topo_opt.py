@@ -390,47 +390,43 @@ class TopologyAnalysis:
         forces={},
         E=10.0,
         nu=0.3,
-        ptype="RAMP",
-        p=5.0,
-        penalize_mass=False,
+        ptype_K="ramp",
+        ptype_M="ramp",
+        rho0_K=1e-3,
+        rho0_M=1e-7,
+        p=3.0,
+        q=5.0,
         density=1.0,
         epsilon=0.3,
-        K0=None,
-        M0=None,
         assume_same_element=False,
     ):
-        self.ptype = ptype.lower()
-        assert self.ptype == "ramp" or self.ptype == "simp"
-        self.rho0_K = 1e-3  # Small offset to ensure a non-singular K
-        self.rho0_M = 1e-7  # Small offset to ensure a non-singular M
+        self.ptype_K = ptype_K.lower()
+        self.ptype_M = ptype_M.lower()
 
-        # For simp, we don't have small non-zero offsets, instead, we have to
-        # use a small non-zero lower bound for design variable x
-        if self.ptype == "simp":
-            self.rho0_K = 0.0
-            self.rho0_M = 0.0
-
-        # C1 continuous mass penalization coefficients
-        self.simp_c1 = 6e5
-        self.simp_c2 = -5e6
+        self.rho0_K = rho0_K
+        self.rho0_M = rho0_M
 
         self.fltr = fltr
         self.conn = np.array(conn)
         self.X = np.array(X)
         self.p = p
-        self.penalize_mass = penalize_mass
+        self.q = q
         self.density = density
         self.epsilon = epsilon
+        self.assume_same_element = assume_same_element
+
+        # C1 continuous mass penalization coefficients if ptype_M == msimp
+        self.simp_c1 = 6e5
+        self.simp_c2 = -5e6
 
         self.D_index = 23
-
-        self.K0 = K0
-        self.M0 = M0
-        self.assume_same_element = assume_same_element
 
         self.nelems = self.conn.shape[0]
         self.nnodes = int(np.max(self.conn)) + 1
         self.nvars = 2 * self.nnodes
+
+        self.K0 = None
+        self.M0 = None
 
         self.Q = None
         self.eigs = None
@@ -516,10 +512,11 @@ class TopologyAnalysis:
         )
 
         # Compute the element stiffnesses
-        if self.ptype == "simp":
+        if self.ptype_K == "simp":
             C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
-        else:
-            C = np.outer(rhoE / (1.0 + self.p * (1.0 - rhoE)) + self.rho0_K, self.C0)
+        else:  # ramp
+            C = np.outer(rhoE / (1.0 + self.q * (1.0 - rhoE)) + self.rho0_K, self.C0)
+
         C = C.reshape((self.nelems, 3, 3))
 
         # Compute the element stiffness matrix
@@ -628,10 +625,10 @@ class TopologyAnalysis:
             for j in range(3):
                 dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        if self.ptype == "simp":
+        if self.ptype_K == "simp":
             dfdrhoE[:] *= self.p * rhoE ** (self.p - 1.0)
-        else:
-            dfdrhoE[:] *= (1.0 + self.p) / (1.0 + self.p * (1.0 - rhoE)) ** 2
+        else:  # ramp
+            dfdrhoE[:] *= (1.0 + self.q) / (1.0 + self.q * (1.0 - rhoE)) ** 2
 
         dfdrho = np.zeros(self.nnodes)
         for i in range(4):
@@ -655,16 +652,15 @@ class TopologyAnalysis:
         )
 
         # Compute the element density
-        if self.penalize_mass:
-            if self.ptype == "simp":
-                nonlin = self.simp_c1 * rhoE**6.0 + self.simp_c2 * rhoE**7.0
-                cond = (rhoE > 0.1).astype(int)
-                density = self.density * (rhoE * cond + nonlin * (1 - cond))
-            else:  # ramp
-                density = self.density * (
-                    (self.p + 1.0) * rhoE / (1 + self.p * rhoE) + self.rho0_M
-                )
-        else:
+        if self.ptype_M == "msimp":
+            nonlin = self.simp_c1 * rhoE**6.0 + self.simp_c2 * rhoE**7.0
+            cond = (rhoE > 0.1).astype(int)
+            density = self.density * (rhoE * cond + nonlin * (1 - cond))
+        elif self.ptype_M == "ramp":
+            density = self.density * (
+                (self.q + 1.0) * rhoE / (1 + self.q * rhoE) + self.rho0_M
+            )
+        else:  # linear
             density = self.density * rhoE
 
         # Compute the element stiffness matrix
@@ -780,16 +776,15 @@ class TopologyAnalysis:
                     ev = np.einsum("nij,nj -> ni", He, ve)
                     dfdrhoE += np.einsum("n,ni,ni -> n", detJ, eu, ev)
 
-        if self.penalize_mass:
-            if self.ptype == "simp":
-                dnonlin = (
-                    6.0 * self.simp_c1 * rhoE**5.0 + 7.0 * self.simp_c2 * rhoE**6.0
-                )
-                cond = (rhoE > 0.1).astype(int)
-                dfdrhoE[:] *= self.density * (cond + dnonlin * (1 - cond))
-            else:  # ramp
-                dfdrhoE[:] *= self.density * (1.0 + self.p) / (1.0 + self.p * rhoE) ** 2
-        else:  # linear mass
+        if self.ptype_M == "msimp":
+            dnonlin = (
+                6.0 * self.simp_c1 * rhoE**5.0 + 7.0 * self.simp_c2 * rhoE**6.0
+            )
+            cond = (rhoE > 0.1).astype(int)
+            dfdrhoE[:] *= self.density * (cond + dnonlin * (1 - cond))
+        elif self.ptype_M == "ramp":
+            dfdrhoE[:] *= self.density * (1.0 + self.q) / (1.0 + self.q * rhoE) ** 2
+        else:  # linear
             dfdrhoE[:] *= self.density
 
         dfdrho = np.zeros(self.nnodes)
@@ -2303,7 +2298,7 @@ def visualize_domain(prefix, X, bcs, non_design_nodes=None):
     if non_design_nodes:
         m0_X = np.array([X[i, :] for i in non_design_nodes])
         ax.scatter(m0_X[:, 0], m0_X[:, 1], color="blue")
-    fig.savefig(os.path.join(prefix, "domain.pdf"))
+    fig.savefig(os.path.join(prefix, "domain.png"), dpi=500)
     return
 
 
@@ -2352,7 +2347,7 @@ def parse_cmd_args():
     )
     p.add_argument(
         "--m0-block-frac",
-        default=0.0,
+        default=0.1,
         type=float,
         help="fraction of the size of non-design mass block with respect to the domain",
     )
@@ -2367,15 +2362,26 @@ def parse_cmd_args():
     )
     p.add_argument("--ks-rho", default=10000, type=int, help="ks aggregation parameter")
     p.add_argument(
-        "--ptype",
+        "--ptype-K",
         default="ramp",
-        choices=["simp", "ramp"],
-        help="material penalization method",
+        choices=["ramp", "simp"],
+        help="material penalization for stiffness matrix",
     )
     p.add_argument(
-        "--p", default=5.0, type=float, help="material penalization parameter"
+        "--ptype-M",
+        default="ramp",
+        choices=["ramp", "msimp", "linear"],
+        help="material penalization for stiffness matrix",
     )
-    p.add_argument("--penalize-mass", action="store_true", help="penalize mass matrix")
+    p.add_argument("--p", default=3.0, type=float, help="SIMP penalization parameter")
+    p.add_argument("--q", default=5.0, type=float, help="RAMP penalization parameter")
+    p.add_argument(
+        "--rho0-K", default=0.0, type=float, help="rho offset to prevent singular K"
+    )
+    p.add_argument(
+        "--rho0-M", default=0.0, type=float, help="rho offset to prevent singular M"
+    )
+
     p.add_argument(
         "--m0", default=20.0, type=float, help="magnitude of non-design mass"
     )
@@ -2468,10 +2474,13 @@ if __name__ == "__main__":
         X,
         bcs,
         forces,
-        epsilon=args.stress_relax,
-        ptype=args.ptype,
+        ptype_K=args.ptype_K,
+        ptype_M=args.ptype_M,
+        rho0_K=args.rho0_K,
+        rho0_M=args.rho0_M,
         p=args.p,
-        penalize_mass=args.penalize_mass,
+        q=args.q,
+        epsilon=args.stress_relax,
         assume_same_element=args.assume_same_element,
     )
 
