@@ -8,6 +8,11 @@ import re
 import numpy as np
 from PIL import Image
 import pyvista
+import sys
+
+# To use pyvista on headless linux server (like PACE), needs to use Xvfb
+if not pyvista.system_supports_plotting() and "linux" in sys.platform:
+    pyvista.start_xvfb()
 
 
 def mma4py_plot_log(ax, log_path):
@@ -75,7 +80,7 @@ def get_pareto_front(
         vtks = glob(join(case, "vtk", "it_*.vtk"))
         vtks.sort(key=lambda path: int(splitext(basename(path))[0][3:]))
         vtk = vtks[-1]
-        topo_stress_png = "%s.png" % splitext(vtk)[0]
+        topo_stress_png = "%s_stress.png" % splitext(vtk)[0]
         topo_stress_paths.append(topo_stress_png)
 
         # Generate the stress visualization if not already exists
