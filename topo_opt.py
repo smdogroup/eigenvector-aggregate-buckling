@@ -2184,6 +2184,74 @@ def create_cantilever_domain(lx=20, ly=10, m=128, n=64):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
+def create_lbracket_domain(r0_=2.1, l=1.0, lfrac=0.4, nx=96, m0_block_frac=0.0):
+    """
+     _nt__       ________________
+    |     |                     ^
+    |     |                     |
+    |     |_____                l
+    |           | lfrac * l     |
+    |___________|  _____________|
+          nx
+    """
+    nt = int(nx * lfrac)
+    nelems = nx * nx - (nx - nt) * (nx - nt)
+    nnodes = (nx + 1) * (nx + 1) - (nx - nt) * (nx - nt)
+
+    nodes_1 = np.arange((nx + 1) * (nt + 1)).reshape(nt + 1, nx + 1)
+    nodes_2 = (nx + 1) * (nt + 1) + np.arange((nx - nt) * (nt + 1)).reshape(
+        nx - nt, nt + 1
+    )
+
+    def ij_to_node(ip, jp):
+        if jp <= nt:
+            return nodes_1[jp, ip]
+        return nodes_2[jp - nt - 1, ip]
+
+    def pt_out_domain(ip, jp):
+        return ip > nt and jp > nt
+
+    def elem_out_domain(ie, je):
+        return ie >= nt and je >= nt
+
+    X = np.zeros((nnodes, 2))
+    index = 0
+    for jp in range(nx + 1):  # y-directional index
+        for ip in range(nx + 1):  # x-directional index
+            if not pt_out_domain(ip, jp):
+                X[index, :] = [l / nx * ip, l / nx * jp]
+                index += 1
+
+    conn = np.zeros((nelems, 4), dtype=int)
+    index = 0
+    for je in range(nx):  # y-directional index
+        for ie in range(nx):  # x-directional index
+            if not elem_out_domain(ie, je):
+                conn[index, :] = [
+                    ij_to_node(ie, je),
+                    ij_to_node(ie + 1, je),
+                    ij_to_node(ie + 1, je + 1),
+                    ij_to_node(ie, je + 1),
+                ]
+                index += 1
+
+    non_design_nodes = []
+    nm = int(np.ceil(nx * m0_block_frac))
+    for jp in range(nt - nm, nt + 1):
+        for ip in range(nx - nm, nx + 1):
+            non_design_nodes.append(ij_to_node(ip, jp))
+
+    bcs = {}
+    for ip in range(nt + 1):
+        bcs[ij_to_node(ip, nx)] = [0, 1]
+
+    forces = {}
+
+    r0 = l / nx * r0_
+
+    return conn, X, r0, bcs, forces, non_design_nodes
+
+
 def create_square_domain(r0_, l=1.0, nx=30, m0_block_frac=0.0):
     """
     Args:
@@ -2288,16 +2356,19 @@ def create_square_domain(r0_, l=1.0, nx=30, m0_block_frac=0.0):
 
 
 def visualize_domain(prefix, X, bcs, non_design_nodes=None):
+    markersize = 1.0
     fig, ax = plt.subplots()
     ax.set_aspect("equal")
 
-    bc_X = np.array([X[i, :] for i in bcs.keys()])
-    ax.scatter(X[:, 0], X[:, 1], color="black")
-    ax.scatter(bc_X[:, 0], bc_X[:, 1], color="red")
+    ax.scatter(X[:, 0], X[:, 1], color="black", s=markersize)
+
+    if bcs:
+        bc_X = np.array([X[i, :] for i in bcs.keys()])
+        ax.scatter(bc_X[:, 0], bc_X[:, 1], color="red", s=markersize)
 
     if non_design_nodes:
         m0_X = np.array([X[i, :] for i in non_design_nodes])
-        ax.scatter(m0_X[:, 0], m0_X[:, 1], color="blue")
+        ax.scatter(m0_X[:, 0], m0_X[:, 1], color="blue", s=markersize)
     fig.savefig(os.path.join(prefix, "domain.png"), dpi=500)
     return
 
@@ -2337,6 +2408,7 @@ def parse_cmd_args():
     p.add_argument("--prefix", default="result", type=str, help="result folder")
 
     # Analysis
+    p.add_argument("--domain", default="square", choices=["square", "lbracket"])
     p.add_argument(
         "--assume-same-element",
         action="store_true",
@@ -2457,9 +2529,15 @@ if __name__ == "__main__":
         for k, v in vars(args).items():
             f.write(f"{k:<20}{v}\n")
 
-    conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_square_domain(
-        r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
-    )
+    if args.domain == "square":
+        conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_square_domain(
+            r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
+        )
+    else:
+        conn, X, r0, bcs, forces, non_design_nodes = create_lbracket_domain(
+            r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
+        )
+        dv_mapping = None
 
     # Check the mesh
     visualize_domain(args.prefix, X, bcs, non_design_nodes)
