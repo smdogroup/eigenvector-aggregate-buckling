@@ -1705,6 +1705,7 @@ class TopOptProb:
         omega_lb=None,
         stress_ub=None,
         stress_scale=1.0,
+        grad_check=False,
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -1719,6 +1720,7 @@ class TopOptProb:
         self.stress_ub = stress_ub
         self.stress_scale = stress_scale
         self.lb = lb
+        self.grad_check = grad_check
 
         # Add more non-design constant to matrices
         self.add_mat0("M", non_design_nodes, density=m0)
@@ -1762,8 +1764,9 @@ class TopOptProb:
         lb[:] = self.lb
         ub[:] = 1.0
         x[:] = 0.95
-        # np.random.seed(0)
-        # x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
+        if self.grad_check:
+            np.random.seed(0)
+            x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
         return
 
     def evalObjCon(self, x, eval_all=False):
@@ -2577,6 +2580,7 @@ if __name__ == "__main__":
         omega_lb=args.omega_lb,
         stress_ub=args.stress_ub,
         stress_scale=args.stress_scale,
+        grad_check=args.grad_check,
     )
 
     # Print info
@@ -2596,7 +2600,9 @@ if __name__ == "__main__":
             mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
         )
         if args.grad_check:
-            mmaopt.checkGradients()
+            np.random.seed(0)
+            for i in range(5):
+                mmaopt.checkGradients()
             exit(0)
 
         mmaopt.optimize(niter=args.maxit, verbose=False)
@@ -2608,7 +2614,8 @@ if __name__ == "__main__":
         paroptprob = ParOptProb(MPI.COMM_SELF, topo)
 
         if args.grad_check:
-            paroptprob.checkGradients(1e-6)
+            for i in range(5):
+                paroptprob.checkGradients(1e-6)
             exit(0)
 
         if args.optimizer == "pmma":
