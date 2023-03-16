@@ -2470,6 +2470,12 @@ def parse_cmd_args():
         help="optimization method",
     )
     p.add_argument(
+        "--movelim",
+        default=0.2,
+        type=float,
+        help="move limit for design variables, for mma4py only",
+    )
+    p.add_argument(
         "--lb", default=0.0, type=float, help="lower bound of design variables"
     )
     p.add_argument(
@@ -2605,7 +2611,7 @@ if __name__ == "__main__":
                 mmaopt.checkGradients()
             exit(0)
 
-        mmaopt.optimize(niter=args.maxit, verbose=False)
+        mmaopt.optimize(niter=args.maxit, verbose=False, movelim=args.movelim)
         xopt = mmaopt.getOptimizedDesign()
 
     else:
