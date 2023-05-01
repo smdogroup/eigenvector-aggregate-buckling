@@ -8,6 +8,7 @@ from timeit import default_timer as timer
 
 import matplotlib.pylab as plt
 import matplotlib.tri as tri
+from mpi4py import MPI
 import mpmath as mp
 import numpy as np
 from paropt import ParOpt
@@ -1683,7 +1684,7 @@ class TopOptProb:
         dv_mapping=None,  # If provided, optimizer controls reduced design variable xr only
         lb=1e-6,
         objf="frequency",
-        confs="volume_ub",
+        confs="volume",
         omega_lb=None,
         stress_ub=None,
         stress_scale=1.0,
@@ -1827,7 +1828,7 @@ class TopOptProb:
 
         # Compute constraints
         con = []
-        if "volume_ub" in self.confs:
+        if "volume" in self.confs:
             assert self.fixed_area_ub is not None
             area = self.analysis.eval_area(self.xfull)
             con.append(self.fixed_area_ub - area)
@@ -1836,13 +1837,6 @@ class TopOptProb:
                 self.xfull, cell_sols=vtk_cell_sols
             )
             foi["stress_ks"] = stress_ks
-
-        if "volume_lb" in self.confs:
-            assert self.fixed_area_lb is not None
-            area = self.analysis.eval_area(self.xfull)
-            con.append(area - self.fixed_area_lb)
-            if "volume_ub" not in self.confs:
-                foi["area"] = area / np.sum(self.area_gradient)
 
         if "frequency" in self.confs:
             assert self.omega_lb is not None
@@ -1969,13 +1963,7 @@ class TopOptProb:
 
             # Evaluate constraint gradients
             index = 0
-            if "volume_ub" in self.confs:
-                A[index][:] = -self.dv_mapping.T.dot(
-                    self.analysis.eval_area_gradient(self.xfull)
-                )
-                index += 1
-
-            if "volume_lb" in self.confs:
+            if "volume" in self.confs:
                 A[index][:] = -self.dv_mapping.T.dot(
                     self.analysis.eval_area_gradient(self.xfull)
                 )
@@ -2030,13 +2018,7 @@ class TopOptProb:
 
             # Evaluate constraint gradient
             index = 0
-            if "volume_ub" in args.confs:
-                A[index][:] = -self.analysis.eval_area_gradient(self.xfull)[
-                    self.design_nodes
-                ]
-                index += 1
-
-            if "volume_lb" in args.confs:
+            if "volume" in args.confs:
                 A[index][:] = -self.analysis.eval_area_gradient(self.xfull)[
                     self.design_nodes
                 ]
@@ -2072,36 +2054,6 @@ class TopOptProb:
         Logger.log("%10.3f%10.3f" % (self.elapse_f, self.elapse_g))
 
         return 0
-
-
-try:
-    import mma4py
-
-    class MMAProb(mma4py.Problem):
-        def __init__(self, prob: TopOptProb) -> None:
-            self.prob = prob
-            self.ncon = prob.ncon
-            super().__init__(prob.ndv, prob.ndv, prob.ncon)
-            return
-
-        def getVarsAndBounds(self, x, lb, ub):
-            self.prob.getVarsAndBounds(x, lb, ub)
-            return
-
-        def evalObjCon(self, x, cons) -> float:
-            _fail, _obj, _cons = self.prob.evalObjCon(x)
-            for i in range(self.ncon):
-                cons[i] = -_cons[i]
-            return _obj
-
-        def evalObjConGrad(self, x, g, gcon):
-            self.prob.evalObjConGradient(x, g, gcon)
-            for i in range(self.ncon):
-                gcon[i, :] = -gcon[i, :]
-            return
-
-except:
-    MMAProb = None
 
 
 class ParOptProb(ParOpt.Problem):
@@ -2568,15 +2520,9 @@ def parse_cmd_args():
     # Optimization
     p.add_argument(
         "--optimizer",
-        default="mma4py",
-        choices=["pmma", "mma4py", "tr"],
+        default="pmma",
+        choices=["pmma", "tr"],
         help="optimization method",
-    )
-    p.add_argument(
-        "--movelim",
-        default=0.2,
-        type=float,
-        help="move limit for design variables, for mma4py only",
     )
     p.add_argument(
         "--lb", default=1e-06, type=float, help="lower bound of design variables"
@@ -2589,9 +2535,9 @@ def parse_cmd_args():
     )
     p.add_argument(
         "--confs",
-        default="volume_ub",
+        default="volume",
         nargs="*",
-        choices=["volume_ub", "volume_lb", "frequency", "stress", "displacement"],
+        choices=["volume", "frequency", "stress", "displacement"],
         help="constraint functions",
     )
     p.add_argument(
@@ -2610,13 +2556,7 @@ def parse_cmd_args():
         "--vol-frac-ub",
         default=None,
         type=float,
-        help='volume fraction, only effective when "volume_ub" is in the confs',
-    )
-    p.add_argument(
-        "--vol-frac-lb",
-        default=None,
-        type=float,
-        help='volume fraction, only effective when "volume_lb" is in the confs',
+        help='volume fraction, only effective when "volume" is in the confs',
     )
     p.add_argument(
         "--stress-scale",
@@ -2629,12 +2569,6 @@ def parse_cmd_args():
         default=None,
         type=float,
         help='displacement constraint, only effective when "displacement" is in the confs',
-    )
-    p.add_argument(
-        "--mode",
-        default=2,
-        type=int,
-        help='mode number, only effective when "displacement" is in the confs',
     )
     p.add_argument(
         "--maxit", default=200, type=int, help="maximum number of iterations"
@@ -2658,14 +2592,12 @@ def create_folder(args):
         os.mkdir(args.prefix)
     if args.confs == ["stress", "frequency"]:
         args.confs = ["frequency", "stress"]
-    if args.confs == ["frequency", "volume_ub"]:
-        args.confs = ["volume_ub", "frequency"]
-    if args.confs == ["stress", "volume_ub"]:
-        args.confs = ["volume_ub", "stress"]
-    if args.confs == ["volume_ub", "volume_lb"]:
-        args.confs = ["volume_lb", "volume_ub"]
-    if args.confs == ["volume_ub", "displacement"]:
-        args.confs = ["displacement", "volume_ub"]
+    if args.confs == ["frequency", "volume"]:
+        args.confs = ["volume", "frequency"]
+    if args.confs == ["stress", "volume"]:
+        args.confs = ["volume", "stress"]
+    if args.confs == ["volume", "displacement"]:
+        args.confs = ["displacement", "volume"]
 
     name = f"{args.domain}"
     if not os.path.isdir(os.path.join(args.prefix, name)):
@@ -2679,23 +2611,23 @@ def create_folder(args):
     args.prefix = os.path.join(args.prefix, name2)
 
     # create a folder inside the output folder to store the results of each run
-    if args.confs == ["volume_ub", "stress"]:
+    if args.confs == ["volume", "stress"]:
         args.prefix = os.path.join(
             args.prefix,
             "nx=" + f"{args.nx}, vol=" + f"{args.vol_frac_ub}, s=",
             +f"{args.stress_ub}",
         )
-    elif args.confs == ["volume_ub"]:
+    elif args.confs == ["volume"]:
         args.prefix = os.path.join(
             args.prefix,
             "nx=" + f"{args.nx}, vol=" + f"{args.vol_frac_ub}",
         )
-    elif args.confs == ["displacement", "volume_ub"]:
+    elif args.confs == ["displacement", "volume"]:
         args.prefix = os.path.join(
             args.prefix,
             "nx=" + f"{args.nx}, vol=" + f"{args.vol_frac_ub}, dis=" + f"{args.dis_ub}",
         )
-    elif args.confs == ["volume_ub", "displacement", "stress"]:
+    elif args.confs == ["volume", "displacement", "stress"]:
         args.prefix = os.path.join(
             args.prefix,
             "nx="
@@ -2795,7 +2727,6 @@ def main(args):
         omega_lb=args.omega_lb,
         stress_ub=args.stress_ub,
         vol_frac_ub=args.vol_frac_ub,
-        vol_frac_lb=args.vol_frac_lb,
         stress_scale=args.stress_scale,
         dis_ub=args.dis_ub,
         grad_check=args.grad_check,
@@ -2810,48 +2741,28 @@ def main(args):
     Logger.log("num of dv:   %d" % topo.ndv)
     Logger.log()
 
-    if args.optimizer == "mma4py":
-        if MMAProb is None:
-            raise ImportError("Cannot use mma4py, package not found.")
+    paroptprob = ParOptProb(MPI.COMM_SELF, topo)
 
-        mmaprob = MMAProb(topo)
-        mmaopt = mma4py.Optimizer(
-            mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
-        )
-        if args.grad_check:
-            np.random.seed(0)
-            for i in range(5):
-                mmaopt.checkGradients()
-            exit(0)
+    if args.grad_check:
+        for i in range(5):
+            paroptprob.checkGradients(1e-6)
+        exit(0)
 
-        mmaopt.optimize(niter=args.maxit, verbose=False, movelim=args.movelim)
-        xopt = mmaopt.getOptimizedDesign()
-
+    if args.optimizer == "pmma":
+        algorithm = "mma"
     else:
-        from mpi4py import MPI
+        algorithm = args.optimizer
 
-        paroptprob = ParOptProb(MPI.COMM_SELF, topo)
+    options = get_paropt_default_options(
+        args.prefix, algorithm=algorithm, maxit=args.maxit
+    )
 
-        if args.grad_check:
-            for i in range(5):
-                paroptprob.checkGradients(1e-6)
-            exit(0)
+    # Set up the optimizer
+    opt = ParOpt.Optimizer(paroptprob, options)
 
-        if args.optimizer == "pmma":
-            algorithm = "mma"
-        else:
-            algorithm = args.optimizer
-
-        options = get_paropt_default_options(
-            args.prefix, algorithm=algorithm, maxit=args.maxit
-        )
-
-        # Set up the optimizer
-        opt = ParOpt.Optimizer(paroptprob, options)
-
-        # Set a new starting point
-        opt.optimize()
-        xopt, z, zw, zl, zu = opt.getOptimizedPoint()
+    # Set a new starting point
+    opt.optimize()
+    xopt, z, zw, zl, zu = opt.getOptimizedPoint()
 
     # Evaluate the stress for optimzied design
     topo.evalObjCon(xopt, eval_all=True)

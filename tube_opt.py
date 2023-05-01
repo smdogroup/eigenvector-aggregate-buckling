@@ -1821,10 +1821,10 @@ def main(problem, finalise=False):
 
 if __name__ == "__main__":
     problem = [
-        # "plot_E",
-        # "accuracy_analysis",
-        # "optimization_eigenvalue",
-        # "optimization_displacement",
+        "plot_E",
+        "accuracy_analysis",
+        "optimization_eigenvalue",
+        "optimization_displacement",
         "optimization_stress",
     ]
 
