@@ -6,7 +6,6 @@ import shutil as shutil
 from shutil import rmtree
 from timeit import default_timer as timer
 
-from icecream import ic
 import matplotlib.pylab as plt
 import matplotlib.tri as tri
 import mpmath as mp
@@ -820,32 +819,6 @@ class TopologyAnalysis:
         temp = np.zeros(self.nvars)
         temp[self.reduced] = vec[:]
         return temp
-
-    def solve(self, x):
-        """
-        Perform a linear static analysis
-        """
-
-        # Compute the density at each node
-        rho = self.fltr.apply(x)
-
-        K = self.assemble_stiffness_matrix(rho)
-        Kr = self.reduce_matrix(K)
-        fr = self.reduce_vector(self.f)
-
-        ur = sparse.linalg.spsolve(Kr, fr)
-        u = self.full_vector(ur)
-
-        return u
-
-    def compliance(self, x):
-        self.u = self.solve(x)
-        return self.f.dot(self.u)
-
-    def compliance_gradient(self, x):
-        rho = self.fltr.apply(x)
-        dfdrho = -1.0 * self.stiffness_matrix_derivative(rho, self.u, self.u)
-        return self.fltr.applyGradient(dfdrho, x)
 
     def eval_area(self, x):
         rho = self.fltr.apply(x)
@@ -1706,7 +1679,7 @@ class TopOptProb:
         m0=10.0,
         draw_history=True,
         draw_every=1,
-        prefix="result",
+        prefix="output",
         dv_mapping=None,  # If provided, optimizer controls reduced design variable xr only
         lb=1e-6,
         objf="frequency",
@@ -1833,7 +1806,7 @@ class TopOptProb:
         if self.objf == "volume":
             area = self.analysis.eval_area(self.xfull)
             obj = area
-            if self.domain == "beam" or self.domain == "building":
+            if self.domain == "beam":
                 area *= 1 / np.sum(self.area_gradient)
             foi["area"] = area
 
@@ -1841,10 +1814,6 @@ class TopOptProb:
             omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
             obj = -0.01 * omega_ks
             foi["omega_ks"] = omega_ks
-        elif self.objf == "compliance":
-            compliance = self.analysis.compliance(self.xfull)
-            obj = compliance
-            foi["compliance"] = compliance
         elif self.objf == "displacement":
             displacement = self.analysis.eigenvector_displacement(ks_rho=self.ks_rho)
             obj = 10 * displacement
@@ -1987,10 +1956,6 @@ class TopOptProb:
                 g[:] = -0.01 * self.dv_mapping.T.dot(
                     self.analysis.ks_omega_derivative(self.xfull)
                 )
-            elif self.objf == "compliance":
-                g[:] = self.dv_mapping.T.dot(
-                    self.analysis.compliance_gradient(self.xfull)
-                )
             elif self.objf == "displacement":
                 g[:] = 10 * self.dv_mapping.T.dot(
                     self.analysis.eigenvector_displacement_deriv(
@@ -2048,8 +2013,6 @@ class TopOptProb:
                     -0.01
                     * self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
                 )
-            elif self.objf == "compliance":
-                g[:] = self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
             elif self.objf == "displacement":
                 g[:] = (
                     10
@@ -2291,93 +2254,6 @@ def create_cantilever_domain(lx=20, ly=10, m=128, n=64):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
-def create_lbracket_domain(r0_=2.1, l=8.0, lfrac=0.4, nx=96, m0_block_frac=0.0):
-    """
-     _nt__       ________________
-    |     |                     ^
-    |     |                     |
-    |     |_____                l
-    |           | lfrac * l     |
-    |___________|  _____________|
-          nx
-    """
-    nt = int(nx * lfrac)
-    nelems = nx * nx - (nx - nt) * (nx - nt)
-    nnodes = (nx + 1) * (nx + 1) - (nx - nt) * (nx - nt)
-
-    nodes_1 = np.arange((nx + 1) * (nt + 1)).reshape(nt + 1, nx + 1)
-    nodes_2 = (nx + 1) * (nt + 1) + np.arange((nx - nt) * (nt + 1)).reshape(
-        nx - nt, nt + 1
-    )
-
-    def ij_to_node(ip, jp):
-        if jp <= nt:
-            return nodes_1[jp, ip]
-        return nodes_2[jp - nt - 1, ip]
-
-    def pt_out_domain(ip, jp):
-        return ip > nt and jp > nt
-
-    def elem_out_domain(ie, je):
-        return ie >= nt and je >= nt
-
-    X = np.zeros((nnodes, 2))
-    index = 0
-    for jp in range(nx + 1):  # y-directional index
-        for ip in range(nx + 1):  # x-directional index
-            if not pt_out_domain(ip, jp):
-                X[index, :] = [l / nx * ip, l / nx * jp]
-                index += 1
-
-    conn = np.zeros((nelems, 4), dtype=int)
-    index = 0
-    for je in range(nx):  # y-directional index
-        for ie in range(nx):  # x-directional index
-            if not elem_out_domain(ie, je):
-                conn[index, :] = [
-                    ij_to_node(ie, je),
-                    ij_to_node(ie + 1, je),
-                    ij_to_node(ie + 1, je + 1),
-                    ij_to_node(ie, je + 1),
-                ]
-                index += 1
-
-    non_design_nodes = []
-    nm = int(np.ceil(0.1 * nx * m0_block_frac))
-    # for jp in range(nt - nm, nt + 1):
-    #     for ip in range(nx - nm, nx + 1):
-    #         non_design_nodes.append(ij_to_node(ip, jp))
-
-    bcs = {}
-    for ip in range(nt + 1):
-        bcs[ij_to_node(ip, nx)] = [0, 1]
-        # non_design_nodes.append(ij_to_node(ip, nx))
-        # non_design_nodes.append(ij_to_node(ip, nx-1))
-
-    offset = int(nx)
-    # for j in range(nx):
-    #     bcs[ij_to_node(0, j)] = [0, 1]
-
-    for j in range(nt + 1, nx):
-        bcs[ij_to_node(nt, j)] = [0]
-
-    # bcs[ij_to_node(0, int(nt/2))] = [0]
-
-    forces = {}
-    P = 1.0
-    for jp in range(nt, nt + 1):
-        for ip in range(nx, nx + 1):
-            forces[ij_to_node(ip, jp)] = [0, -P / nm]
-
-    # for jp in range(nt + 1):
-    #     for ip in range(nx, nx + 1):
-    #         forces[ij_to_node(ip, jp)] = [0, -P / nm]
-
-    r0 = l / nx * r0_
-
-    return conn, X, r0, bcs, forces, non_design_nodes
-
-
 def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100):
     """
     _____________|_____________
@@ -2390,12 +2266,6 @@ def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100):
     m = nx
     n = int(np.ceil((frac * nx)))
 
-    # # make sure m is odd and n is even
-    # if n % 2 == 1:
-    #     n -= 1
-    # if m % 2 == 0:
-    #     m -= 1
-    
     # make sure m and n is even
     if n % 2 == 0:
         n -= 1
@@ -2426,80 +2296,26 @@ def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100):
             conn[i + j * m, 3] = nodes[j + 1, i]
 
     non_design_nodes = []
-    # apply top middle a square block
-    # nm = int(np.ceil(2*n * m0_block_frac))
-    # for i in range(n - nm+1, n+1):
-    #     for j in range((m - nm) // 2 +1, (m + nm) // 2 +1):
-    #         non_design_nodes.append(nodes[i, j])
-
     bcs = {}
 
     bcs[nodes[n // 2, 0]] = [0, 1]
     bcs[nodes[n // 2, m]] = [0, 1]
-    # bcs[nodes[n // 2 + 1, 0]] = [0, 1]
-    # bcs[nodes[n // 2 + 1, m]] = [0, 1]
-
-    # offset = int(np.floor(n * 0.1))
-    # offset = 1
-    # for i in range(n // 2 - offset, n // 2 + offset + 1):
-    #     for j in range(m + 1):
-    #         non_design_nodes.append(nodes[i, j])
-    # non_design_nodes.append(nodes[i, m - j])
-
-    # non_design_nodes.append(nodes[i, 0])
-    # non_design_nodes.append(nodes[i, m])
-
-    # offset = int(np.ceil(m * 0.05))
-    # for i in range(offset):
-    #     bcs[nodes[0, i]] = [1]
-    #     bcs[nodes[0, m-i]] = [1]
-    # for i in range(m+1):
-    #     if i == 0:
-    #         bcs[nodes[0, i]] = [0, 1]
-    #     else:
-    #         bcs[nodes[0, i]] = [1]
-    # bcs[nodes[i, 0]] = [0]
-    # bcs[nodes[i, m]] = [0]
-
-    # # fix the bottom left corner
-    # bcs[nodes[0, 0]] = [0, 1]
-    # # fix the bottom right corner
-    # bcs[nodes[0, m]] = [1]
-
-    # bcs[nodes[0, m//2]] = [0, 1]
-    # bcs[nodes[0, m//2+1]] = [0, 1]
 
     # force is independent of the mesh size
     P = 1.0
     forces = {}
-    # # apply a force at the top middle
-    # offset = int(np.ceil(m * 0.01))
-    # for i in range(offset):
-    #     forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
-    #     forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
 
     r0 = l / nx * r0_
-    ic(r0)
-    # r0 = 0.05
 
     Ei = []
     Ej = []
     redu_idx = 0
-    
-    # # 2-way reflection left to right
-    # for j in range(2 * (n + 1)):
-    #     for i in range((m + 1) // 2):
-    #         if j % 2 == 0:
-    #             Ej.extend([i + j * (m + 1) // 4])
-    #         else:
-    #             Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
-    #         Ei.extend([i + j * (m + 1) // 2])
-    
+
     # 4-way reflection of x- and y-symmetry axes
     a = n // 2
     b = m // 2
-    for i in range(a+1):
-        for j in range(b+1):
+    for i in range(a + 1):
+        for j in range(b + 1):
             if nodes[i, j] not in non_design_nodes:
                 Ej.extend(4 * [redu_idx])
                 Ei.extend(
@@ -2512,148 +2328,8 @@ def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100):
                 )
                 redu_idx += 1
 
-
-
-    # for j in range(2 * (n + 1)):
-    #     for i in range((m + 1) // 2):
-    #         if j % 2 == 0:
-    #             Ej.extend([i])
-    #         else:
-    #             Ej.extend([i + (m // 2 - 2 * i) ])
-    #         Ei.extend([i + j * (m + 1) // 2])
-
-    # 2-way reflection top to bottom
-    # for j in range(2 * (n + 1)):
-    #     for i in range((m + 1) // 2):
-    #         Ei.extend([i + j * (m + 1) // 2])
-    #         Ej.extend([i])
-
     Ev = np.ones(len(Ei))
     dv_mapping = coo_matrix((Ev, (Ei, Ej)))
-
-    # change dv_mapping to np.array
-    # dv_mapping = np.array(dv_mapping.todense())
-    # ic(dv_mapping.shape)
-    # ic(dv_mapping)
-
-    return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
-
-
-def create_building_domain(r0_=2.1, l=8.0, frac=0.125, nx=100, m0_block_frac=0.0):
-    """
-    _______
-    |     |
-    |     |
-    |     |
-    |     |
-    |     | n
-    |     |
-    |     |
-    |     |
-    |_____|
-       m
-    """
-
-    m = int(np.ceil((frac * nx)))
-    n = nx
-
-    # make sure number of nodes along x is even
-    if m % 2 == 0:
-        m += 1
-
-    nelems = m * n
-    nnodes = (m + 1) * (n + 1)
-
-    y = np.linspace(0, l, n + 1)
-    x = np.linspace(0, l * frac, m + 1)
-    nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
-
-    ic(nodes.shape)
-    # Set the node locations
-    X = np.zeros((nnodes, 2))
-    for j in range(n + 1):
-        for i in range(m + 1):
-            X[i + j * (m + 1), 0] = x[i]
-            X[i + j * (m + 1), 1] = y[j]
-
-    # Set the connectivity
-    conn = np.zeros((nelems, 4), dtype=int)
-    for j in range(n):
-        for i in range(m):
-            conn[i + j * m, 0] = nodes[j, i]
-            conn[i + j * m, 1] = nodes[j, i + 1]
-            conn[i + j * m, 2] = nodes[j + 1, i + 1]
-            conn[i + j * m, 3] = nodes[j + 1, i]
-
-    non_design_nodes = []
-    # apply top middle a square block
-    nm = int(np.ceil(m * m0_block_frac))
-    if nm % 2 == 1:
-        nm -= 1
-    nm = 2
-
-    # for i in range(n - nm + 1, n + 1):
-    #     for j in range((m - nm) // 2 + 1, (m + nm) // 2 + 1):
-    #         non_design_nodes.append(nodes[i, j])
-
-    # for i in range(n - nm + 1, n + 1):
-    #     for j in range(0, nm):
-    #         non_design_nodes.append(nodes[i, j])
-    # for i in range(n - nm + 1, n + 1):
-    #     for j in range(m - nm + 1, m + 1):
-    #         non_design_nodes.append(nodes[i, j])
-
-    # for i in range(n - nm + 1, n + 1):
-    #     for j in range(0, m + 1):
-    #         non_design_nodes.append(nodes[i, j])
-
-    # h = n // 8
-    # for i in range(1, 9):
-    #     for j in range(m + 1):
-    #         non_design_nodes.append(nodes[i * h, j])
-
-    bcs = {}
-
-    offset = int(np.floor(n * 0.0002))
-    for j in range(m + 1):
-        bcs[nodes[0, j]] = [0, 1]
-
-    # bcs[nodes[0, 0]] = [0, 1]
-    # bcs[nodes[0, m]] = [0, 1]
-
-    # force is independent of the mesh size
-    P = 100.0
-    forces = {}
-    # # apply a force at the top middle
-    # offset = int(np.ceil(m * 0.01))
-    # for i in range(offset):
-    #     forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
-    #     forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
-    forces[nodes[n, m // 2]] = [P, 0]
-
-    r0 = l / nx * r0_
-    ic(r0)
-    # r0 = 0.075
-
-    Ei = []
-    Ej = []
-
-    # 2-way reflection left to right
-    for j in range(2 * (n + 1)):
-        for i in range((m + 1) // 2):
-            if j % 2 == 0:
-                Ej.extend([i + j * (m + 1) // 4])
-            else:
-                Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
-            Ei.extend([i + j * (m + 1) // 2])
-
-    Ev = np.ones(len(Ei))
-    dv_mapping = coo_matrix((Ev, (Ei, Ej)))
-
-    # change dv_mapping to np.array
-    # dv_mapping = np.array(dv_mapping.todense())
-    # ic(dv_mapping.shape)
-    # ic(dv_mapping)
 
     return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
 
@@ -2694,10 +2370,6 @@ def create_square_domain(r0_, l=8.0, nx=30, m0_block_frac=0.0):
 
     # We would like the center node or element to be the non-design region
     non_design_nodes = []
-    # offset = int(m0_block_frac * nx*0.5)
-    # for j in range(n // 2 - offset, (n + 1) // 2 + 1 + offset):
-    #     for i in range(n // 2 - offset, (n + 1) // 2 + 1 + offset):
-    #         non_design_nodes.append(nodes[j, i])
 
     # Constrain all boundaries
     bcs = {}
@@ -2837,13 +2509,13 @@ def parse_cmd_args():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     # OS
-    p.add_argument("--prefix", default="result", type=str, help="result folder")
+    p.add_argument("--prefix", default="output", type=str, help="output folder")
 
     # Analysis
     p.add_argument(
         "--domain",
         default="square",
-        choices=["square", "lbracket", "beam", "building"],
+        choices=["square", "beam"],
     )
     p.add_argument(
         "--assume-same-element",
@@ -2891,7 +2563,7 @@ def parse_cmd_args():
     )
 
     p.add_argument("--m0", default=0.0, type=float, help="magnitude of non-design mass")
-    p.add_argument("--r0", default=1.0, type=float, help="filter radius = r0 * lx / nx")
+    p.add_argument("--r0", default=2.1, type=float, help="filter radius = r0 * lx / nx")
 
     # Optimization
     p.add_argument(
@@ -2912,7 +2584,7 @@ def parse_cmd_args():
     p.add_argument(
         "--objf",
         default="frequency",
-        choices=["frequency", "stress", "volume", "compliance", "displacement"],
+        choices=["frequency", "stress", "volume", "displacement"],
         help="objective function",
     )
     p.add_argument(
@@ -3006,62 +2678,22 @@ def create_folder(args):
         os.mkdir(os.path.join(args.prefix, name2))
     args.prefix = os.path.join(args.prefix, name2)
 
-    # create a folder inside the result folder to store the results of each run
-    if args.confs == ["frequency", "stress"]:
-        args.prefix = os.path.join(
-            args.prefix, "freq=" + f"{args.omega_lb}, s=" + f"{args.stress_ub}"
-        )
-    elif args.confs == ["volume_ub", "frequency"]:
-        args.prefix = os.path.join(
-            args.prefix, "freq=" + f"{args.omega_lb}, vol=" + f"{args.vol_frac_ub} "
-        )
-    elif args.confs == ["volume_ub", "stress"]:
+    # create a folder inside the output folder to store the results of each run
+    if args.confs == ["volume_ub", "stress"]:
         args.prefix = os.path.join(
             args.prefix,
-            "nx="
-            + f"{args.nx}, vol="
-            + f"{args.vol_frac_ub}, s="
-            + f"{args.stress_ub}, r0="
-            + f"{args.r0}, K="
-            + f"{args.ptype_K}, M="
-            + f"{args.ptype_M}",
-        )
-    elif args.confs == ["volume_lb", "volume_ub"]:
-        args.prefix = os.path.join(
-            args.prefix, "vol=" + f"{args.vol_frac_lb}_{args.vol_frac_ub}"
+            "nx=" + f"{args.nx}, vol=" + f"{args.vol_frac_ub}, s=",
+            +f"{args.stress_ub}",
         )
     elif args.confs == ["volume_ub"]:
         args.prefix = os.path.join(
             args.prefix,
-            "nx="
-            + f"{args.nx}, vol="
-            + f"{args.vol_frac_ub}, r0="
-            + f"{args.r0}, K="
-            + f"{args.ptype_K}, M="
-            + f"{args.ptype_M}",
-        )
-    elif args.confs == ["volume_lb"]:
-        args.prefix = os.path.join(args.prefix, "vol=" + f"{args.vol_frac_lb}")
-    elif args.confs == ["frequency"]:
-        args.prefix = os.path.join(args.prefix, "freq=" + f"{args.omega_lb}")
-    elif args.confs == ["stress"]:
-        args.prefix = os.path.join(args.prefix, "s=" + f"{args.stress_ub}")
-    elif args.confs == ["frequency", "volume_lb", "volume_ub"]:
-        args.prefix = os.path.join(
-            args.prefix,
-            f"{args.vol_frac_lb}_{args.vol_frac_ub}_{args.omega_lb}",
+            "nx=" + f"{args.nx}, vol=" + f"{args.vol_frac_ub}",
         )
     elif args.confs == ["displacement", "volume_ub"]:
         args.prefix = os.path.join(
             args.prefix,
-            "nx="
-            + f"{args.nx}, vol="
-            + f"{args.vol_frac_ub}, dis="
-            + f"{args.dis_ub}, mode="
-            + f"{args.mode}, r0="
-            + f"{args.r0}, K="
-            + f"{args.ptype_K}, M="
-            + f"{args.ptype_M}",
+            "nx=" + f"{args.nx}, vol=" + f"{args.vol_frac_ub}, dis=" + f"{args.dis_ub}",
         )
     elif args.confs == ["volume_ub", "displacement", "stress"]:
         args.prefix = os.path.join(
@@ -3069,20 +2701,9 @@ def create_folder(args):
             "nx="
             + f"{args.nx}, vol="
             + f"{args.vol_frac_ub}, dis="
-            + f"{args.dis_ub}, mode="
-            + f"{args.mode}, s="
-            + f"{args.stress_ub}, r0="
-            + f"{args.r0}, K="
-            + f"{args.ptype_K}, M="
-            + f"{args.ptype_M}",
+            + f"{args.dis_ub}, s="
+            + f"{args.stress_ub}",
         )
-    elif args.confs == ["stress", "volume_lb", "volume_ub"]:
-        args.prefix = os.path.join(
-            args.prefix,
-            f"{args.vol_frac_lb}_{args.vol_frac_ub}_{args.stress_ub}",
-        )
-    elif args.confs == ["displacement"]:
-        args.prefix = os.path.join(args.prefix, f"{args.dis_ub}")
 
     # if there is already a folder with the same name, delete it, otherwise create a new folder
     if os.path.isdir(args.prefix):
@@ -3108,26 +2729,9 @@ def main(args):
         conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_square_domain(
             r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
         )
-    elif args.domain == "lbracket":
-        conn, X, r0, bcs, forces, non_design_nodes = create_lbracket_domain(
-            r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
-        )
-        dv_mapping = None
     elif args.domain == "beam":
         conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_beam_domain(
             r0_=args.r0, nx=args.nx
-        )
-    elif args.domain == "building":
-        (
-            conn,
-            X,
-            r0,
-            bcs,
-            forces,
-            non_design_nodes,
-            dv_mapping,
-        ) = create_building_domain(
-            r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
         )
 
     # Check the mesh
@@ -3137,9 +2741,6 @@ def main(args):
     if "beam" in args.domain:
         m = args.nx
         n = int(np.ceil((0.125 * args.nx)))
-    elif "building" in args.domain:
-        m = int(np.ceil((0.125 * args.nx)))
-        n = args.nx
     elif "square" in args.domain:
         m = args.nx
         n = args.nx
@@ -3147,33 +2748,16 @@ def main(args):
         raise ValueError("Not supported domain")
 
     D_index = None
-    ic(m, n)
+
     for conf in args.confs:
         if conf == "displacement":
             if args.domain == "beam":
-                if args.mode == 1:
-                    # node_loc=(0, m * 0.5), y direction
-                    D_index = 2 * (m // 2 - 1) + 1
-                elif args.mode == 2:
-                    # node_loc=(n, m * 0.36), y direction
-                    # D_index = 2 * int((n * m - m * 0.64)) + 1
-                    D_index = 2 * int((n * m - m * 0.5)) + 1
-                else:
-                    # node_loc=(n * 0.5, m * 0.5), y direction
-                    D_index = n * m - 1
+                # node_loc=(n, m * 0.5), y direction
+                D_index = 2 * int((n * m - m * 0.5)) + 1
             if args.domain == "square":
-                if args.mode == 1:
-                    # node_loc=(0.75*n, 0.75*m), x direction
-                    D_index = 2 * int(190760)
-                elif args.mode == 2:
-                    # node_loc=(181, 408), y direction
-                    D_index = 2 * int((181 * (m+1) + 408)) + 1
-                elif args.mode == 3:
-                    D_index = [2 * 207605, 2 * 207605 + 1]
-                elif args.mode == 4:
-                    D_index = [2 * 91100, 2 * 91100 + 1]
-                elif args.mode == 5:
-                    D_index = [2 * 190760, 2 * 190760 + 1]
+                # node_loc=(n * 0.75, m * 0.75), y direction
+                id = int((0.75 * n * m - 0.75 * m))
+                D_index = [2 * id, 2 * id + 1]
 
     # Create the filter
     fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=args.proj)
