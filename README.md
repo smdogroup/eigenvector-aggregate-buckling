@@ -48,5 +48,5 @@ To be added
 ```
 
 ## Contact
-If you have any questions, please contact [Bao Li](libao@gatech.edu). 
+If you have any questions, please contact [Bao Li](libao@gatech.edu), [Yicong Fu](aaronfu@gatech.edu), or [Graeme J. Kennedy](graeme.kennedy@aerospace.gatech.edu).
 
