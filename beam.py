@@ -1,4 +1,3 @@
-from icecream import ic
 import matplotlib as mpl
 from matplotlib import cm
 from matplotlib.lines import Line2D
@@ -19,7 +18,7 @@ class EulerBeam:
     """
 
     def __init__(
-        self, nelems, ndvs=5, L=1.0, t=0.01, N=5, ksrho=10.0, E=1.0, density=1.0
+        self, nelems, ndvs=5, L=1.0, t=0.01, N=6, ksrho=10.0, E=1.0, density=1.0
     ):
         """
         Initizlie the data for the clamped-clamped beam eigenvalue problem.
@@ -365,7 +364,6 @@ class EulerBeam:
 
         # Compute the eigenvalues of the generalized eigen problem
         lam, Q = eigh(A, B)
-
         return lam, Q
 
     def solve_eigenvalue_problem(self, x):
@@ -430,7 +428,6 @@ class EulerBeam:
 
         eta = np.exp(-self.ksrho * (lam - np.min(lam)))
         eta = eta / np.sum(eta)
-
         # h = np.trace(np.dot(np.diag(eta), np.dot(Q.T, np.dot(self.D, Q))))
         h = np.trace(np.diag(eta) @ Q.T @ self.D @ Q)
         return h
@@ -476,6 +473,8 @@ class EulerBeam:
 
         dfdx = np.zeros(self.ndvs)
 
+        E = np.zeros((Q.shape[0], Q.shape[0]))
+
         G = np.dot(np.diag(eta), np.dot(Q.T, np.dot(self.D, Q)))
         for j in range(Q.shape[0]):
             for i in range(Q.shape[0]):
@@ -484,7 +483,8 @@ class EulerBeam:
                 if i == j:
                     scalar = qDq - h
 
-                Eij = scalar * self.precise(self.ksrho, trace, lam_min, lam[i], lam[j])
+                E[i, j] = self.precise(self.ksrho, trace, lam_min, lam[i], lam[j])
+                Eij = scalar * E[i, j]
 
                 # Add to dfdx from A
                 dfdx += Eij * self.get_stiffness_matrix_deriv(x, Q[:, i], Q[:, j])
@@ -493,8 +493,7 @@ class EulerBeam:
                 dfdx -= (Eij * lam[j] + G[i, j]) * self.get_mass_matrix_deriv(
                     Q[:, i], Q[:, j]
                 )
-
-        return dfdx
+        return dfdx, E
 
     def approx_eigenvector_deriv(self, x):
         """
@@ -779,9 +778,6 @@ class EulerBeam:
         trace = np.sum(eta)
         eta = eta / trace
 
-        # count nonzero entries in the eta vector as self.Np
-        # self.Np = np.count_nonzero(eta)
-
         # resize Q to self.Np columns
         QN = Q[:, : self.Np]
 
@@ -837,15 +833,6 @@ class EulerBeam:
             bbar = Z.T @ rhs3
             wj = Z @ np.linalg.solve(Abar, bbar)
 
-            # ic(j, lam[j])
-
-            # ic(j, Ak)
-            # ic(j, -self.ksrho * (lam[j] - lam_min))
-            # ic(j, eta[j])
-            # ic(j, uj)
-            # ic(j, vj)
-            # ic(j, wj)
-
             # Compute the contributions from the derivative from Adot
             hdot += 2.0 * self.get_stiffness_matrix_deriv(x, QN[:, j], vj)
             hdot += self.get_mass_matrix_deriv(QN[:, j], uj)
@@ -854,47 +841,7 @@ class EulerBeam:
 
         return hdot
 
-    def check_consisten(self, x, QN, eta, eta_stress, allowable=1.0):
-        # Compute the stresses in the beam
-        stress = self.get_stress_values(x, eta, QN, allowable=allowable)
-
-        value = np.dot(stress, eta_stress)
-        print("value = ", value)
-
-        value2 = 0.0
-        for k in range(self.Np):
-            prod = self.get_stress_product(x, eta_stress, QN[:, k], allowable=allowable)
-            value2 += eta[k] * np.dot(prod, QN[:, k])
-
-        print("value2 = ", value2)
-        print("rel. diff = ", (value - value2) / value)
-
-        return
-
-    # def plot_modes(self, x, N=5):
-    #     """
-    #     Plot the modes
-    #     """
-
-    #     u = np.linspace(0.5 / self.nelems, 1.0 - 0.5 / self.nelems, self.nelems)
-    #     xvals = np.dot(self.N, x)
-
-    #     plt.figure()
-    #     plt.plot(u, xvals)
-
-    #     _, QN = self.solve_eigenvalue_problem(x, N=N)
-
-    #     plt.figure()
-    #     for k in range(N):
-    #         u = np.zeros(self.nelems + 1)
-    #         x = np.linspace(0, self.L, self.nelems + 1)
-    #         u[1:-1] = QN[::4, k]
-    #         if k == 1:
-    #             plt.plot(x, u)
-
-    #     plt.show()
-
-    def process_Q(self, Q, scale=4.0):
+    def process_Q(self, Q):
         """
         Process:
             Q  ->  (dy, dz, ay, az)
@@ -907,9 +854,6 @@ class EulerBeam:
             ay: rotation along y-axis
             az: rotation along z-axis
         """
-
-        # scale the modes to be more visible
-        Q *= scale * self.L / np.max(Q)
 
         dy, dz, ay, az = Q[0::4, :], Q[1::4, :], Q[2::4, :], Q[3::4, :]
         ay /= 180.0 / np.pi  # convert to radians
@@ -937,6 +881,7 @@ class EulerBeam:
         r_node = np.zeros(self.nelems + 1)
         for i in range(self.nelems - 1):
             r_node[i + 1] = (r[i + 1] + r[i]) / 2
+
         r_node[0] = 2 * r[0] - r_node[1]
         r_node[-1] = 2 * r[-1] - r_node[-2]
 
@@ -992,13 +937,15 @@ class EulerBeam:
         x_out, y_out, z_out = self.converter(dy, dz, ay, az, r + self.t, deg0, deg1)
 
         # # plot the surface
-        ax.plot_surface(x_in, y_in, z_in, color="b", alpha=0.8)
-        ax.plot_surface(x_out, y_out, z_out, color="b", alpha=0.2)
+        ax.plot_surface(x_in / 2, 2 * y_in, 2 * z_in, color="b", alpha=0.5)
+        ax.plot_surface(x_out / 2, 2 * y_out, 2 * z_out, color="b", alpha=0.2)
         ax.set_axis_off()
 
         return ax
 
-    def plot_modes(self, ax, x, n=2, scale=4.0):
+    def plot_modes(
+        self, ax, x, n=2, scale=4.0, flip_1=False, flip_2=False, flip_3=False
+    ):
         """
         Plot n modes of the tube
 
@@ -1018,16 +965,31 @@ class EulerBeam:
             n = 8
 
         # set r to constant
-        r = 0.0025 * np.ones(Q.shape[0] // 4 + 2) * self.L
+        r = 0.001 * np.ones(Q.shape[0] // 4 + 2) * self.L
 
         # process the data from (Q, r) -> (dy, dz, ay, az, r_node)
-        dy, dz, ay, az = self.process_Q(Q[:, :n], scale=scale)
+        if flip_1:
+            # switch first and second modes
+            Q[:, 0], Q[:, 1] = Q[:, 1], Q[:, 0].copy()
+            Q[:, 2], Q[:, 3] = Q[:, 3], Q[:, 2].copy()
+        if flip_2:
+            Q[:, 2] = -Q[:, 2]
+        if flip_3:
+            # Q[:, 0], Q[:, 1] = Q[:, 1], Q[:, 0].copy()
+            Q[:, 2], Q[:, 3] = Q[:, 3], Q[:, 2].copy()
+            Q[:, 1] = -Q[:, 1]
+            Q[:, 3] = -Q[:, 3]
+
+        dy, dz, ay, az = self.process_Q(-Q[:, :n])
+        dy = dy * scale
+        dz = dz * scale
 
         color = ["b", "b", "r", "r", "g", "g", "y", "y"]
-        # plot the tube
         for i in range(n):
             # convert the coordinates of the tube
             x, y, z = self.converter(dy[:, i], dz[:, i], ay[:, i], az[:, i], r)
+            x = x / 2.0
+
             # each two surfeces have the same color
             ax.plot_surface(x, y, z, color=color[i], alpha=0.8)
 
@@ -1056,14 +1018,33 @@ class EulerBeam:
                     alpha=0.5,
                 )
                 if i < 2:
-                    ax.scatter(
+                    point1 = ax.scatter(
                         x[0, max_index[j]],
                         dy[max_index[j], i],
                         dz[max_index[j], i],
                         color=color[i],
                         s=2,
+                        zorder=10,
                     )
-                    ax.scatter(x[0, max_index[j]], 0, 0, color=color[i], s=2)
+                    if i == 0:
+                        ax.text(
+                            x[0, max_index[j]] - 0.05,
+                            dy[max_index[j], i],
+                            dz[max_index[j], i],
+                            "{:.2f} m".format(
+                                dz[max_index[j], i] / scale,
+                            ),
+                            fontsize=7,
+                            zorder=10,
+                        )
+                    ax.scatter(
+                        x[0, max_index[j]],
+                        0,
+                        0,
+                        color=color[i],
+                        s=2,
+                        zorder=10,
+                    )
                 else:
                     ax.scatter(
                         x[0, max_index[j]],
@@ -1072,23 +1053,57 @@ class EulerBeam:
                         color=color[i],
                         s=2,
                         label="upper curvature",
+                        zorder=10,
                     )
-                    ax.scatter(x[0, max_index[j]], 0, 0, color=color[i], s=2)
+                    if i == 2:
+                        if dz[max_index[j], i] > 0:
+                            ax.text(
+                                x[0, max_index[j]] - 0.05,
+                                dy[max_index[j], i],
+                                dz[max_index[j], i],
+                                "{:.2f} m".format(
+                                    dz[max_index[j], i] / scale,
+                                ),
+                                fontsize=7,
+                                zorder=10,
+                            )
 
+                    ax.scatter(
+                        x[0, max_index[j]],
+                        0,
+                        0,
+                        color=color[i],
+                        s=2,
+                        zorder=10,
+                    )
+
+        if flip_1:
+            bbox_to_anchor = (0.17, 0.43)
+        elif flip_2:
+            bbox_to_anchor = (0.155, 0.43)
+        else:
+            bbox_to_anchor = (0.158, 0.43)
         ax.legend(
-            [Line2D([0], [0], color=color[i], lw=1) for i in range(n)],
-            ["mode {}".format(i + 1) for i in range(n)],
-            loc="upper center",
-            bbox_to_anchor=(0.5, 0.08),
-            # decrease the size of the legend box
-            # loc="best",
-            # bbox_to_anchor=(1, 0.85),
-            ncol=n,
+            [Line2D([0], [0], color=color[i], lw=1) for i in range(0, n, 2)],
+            [
+                "Mode Shape {}".format(i + 1) + ", {}".format(i + 2)
+                for i in range(0, n, 2)
+            ],
+            loc="upper left",
+            bbox_to_anchor=bbox_to_anchor,
             borderaxespad=0,
             frameon=False,
-            # size of box
-            # prop={"size": 5},
-            borderpad=0.5,
+            fontsize=5,
+        )
+
+        ax.plot(
+            [0, 1],
+            [0, 0],
+            [0, 0],
+            color="k",
+            linestyle="--",
+            linewidth=0.5,
+            alpha=0.5,
         )
 
         return ax
@@ -1116,14 +1131,15 @@ class EulerBeam:
         stress = self.get_stress_values(res_x, eta, QN)
         stress = self.process_r(stress)
 
-        # normalize the stress to 0-1
+        # scale and normalize the stress to 0-1
+        stress = stress**2
         stress = (stress - np.min(stress)) / (np.max(stress) - np.min(stress))
 
-        theta = np.linspace(-np.pi, 0.5 * np.pi, np.power(2, 6))
+        theta = np.linspace(-np.pi, 0.5 * np.pi, np.power(2, 5))
         x = np.linspace(0, self.L, np.shape(r)[0])
 
         # interpolate the surface
-        kind = "cubic"  # kind = "linear"
+        kind = "linear"
         r = interpolate.interp1d(x, r, kind=kind)
         stress = interpolate.interp1d(x, stress, kind=kind)
 
@@ -1142,26 +1158,23 @@ class EulerBeam:
         # reshape the stress with repeated x_in.shape[0] times column
         stress_surf = np.tile(stress, (x.shape[0], 1))
 
-        # normalize the stress
-        # norm = mpl.colors.Normalize(vmin=np.min(stress), vmax=np.max(stress))
-        cmap = mpl.cm.coolwarm  # cmap = mpl.cm.Greys, cmap = mpl.cm.Purples
-        m = cm.ScalarMappable(cmap=cmap)
+        cmap = mpl.cm.coolwarm
 
         ax.plot_surface(
-            x,
-            y_in,
-            z_in,
+            x / 2,
+            2 * y_in,
+            2 * z_in,
             rstride=1,
             cstride=1,
             facecolors=cmap(stress_surf),
             linewidth=0.0,
-            alpha=0.5,
+            alpha=0.8,
         )
 
         ax.plot_surface(
-            x,
-            y_out,
-            z_out,
+            x / 2,
+            2 * y_out,
+            2 * z_out,
             rstride=1,
             cstride=1,
             facecolors=cmap(stress_surf),
@@ -1169,55 +1182,119 @@ class EulerBeam:
             alpha=0.2,
         )
 
-        # plot the colorbar
-        cax = fig.add_axes(
-            [
-                ax.get_position().x1 + 0.05,
-                ax.get_position().y0 + 0.15,
-                0.01,
-                ax.get_position().height - 0.4,
-            ]
+        ax.text(
+            -0.0325,
+            0.0,
+            0.125,
+            "(c)",
+            horizontalalignment="left",
+            verticalalignment="top",
+            weight="bold",
         )
-        cb = plt.colorbar(m, shrink=1, aspect=1, cax=cax)
-        cb.set_label("Normalized \n ks-stress", labelpad=-12, y=1.15, rotation=0)
-
-        # add points to the plot
-        # lowest_stress = np.sort(np.abs(stress))[0:2]
-        # lowest_stress_index = np.zeros(2).astype(int)
-        # for i in range(len(lowest_stress)):
-        #     lowest_stress_index[i] = np.where(np.abs(stress) == lowest_stress[i])[0][0]
-        # ax.scatter(xnew[lowest_stress_index], 0, 0, color="b", s=2)
-        ax.scatter(xnew[-1], 0, 0, color="r", s=4)
-        ax.scatter(0, 0, 0, color="r", s=4)
-        # add legend
-        plt.legend(
-            [
-                Line2D([0], [0], color="b", marker="o", lw=0, markersize=2),
-                Line2D([0], [0], color="r", marker="o", lw=0, markersize=2),
-            ],
-            ["lower curvature", "higher curvature"],
-            # loc="lower center",
-            bbox_to_anchor=(-25, -0.15),
-            # decrease the size of the legend box
-            # loc="best",
-            # bbox_to_anchor=(1, 0.85),
-            ncol=2,
-            borderaxespad=0,
-            frameon=False,
-            # size of box
-            # prop={"size": 5},
-            borderpad=0.5,
+        ax.text(
+            1.01,
+            0.0,
+            0.25,
+            "$\omega_{opt\_c} = 660.90$ rad/s",
+            horizontalalignment="right",
+            verticalalignment="top",
         )
 
-        # ax.set_axis_off()
-        # don't show the value of the axis
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_zticks([])
-        # don't show the axis line
-        ax.xaxis.line.set_lw(0.0)
-        ax.yaxis.line.set_lw(0.0)
-        ax.zaxis.line.set_lw(0.0)
+        ax.set_axis_off()
+
+        return ax
+
+    def plot_displacement(self, ax, res_x):
+        """
+        Plot the tube with inner surface and outer surface
+
+            r: the inner radius of the tube
+            t: the thickness of the tube
+            L: the length of the tube
+        """
+
+        # process the data r_element -> r_node
+        r = np.dot(self.N, res_x)
+        r = self.process_r(r)
+
+        # get the stress
+        lam, QN = self.solve_eigenvalue_problem(res_x)
+
+        # add zero to the beginning and end
+        dis = np.abs(QN[::4, 0])
+        dis = np.insert(dis, 0, 0)
+        dis = np.append(dis, 0)
+
+        # normalize the stress to 0-1
+        dis = dis**2
+        dis = (dis - np.min(dis)) / (np.max(dis) - np.min(dis))
+
+        theta = np.linspace(-np.pi, 0.5 * np.pi, np.power(2, 6))
+        x = np.linspace(0, self.L, np.shape(r)[0])
+
+        # interpolate the surface
+        kind = "cubic"
+        r = interpolate.interp1d(x, r, kind=kind)
+        dis = interpolate.interp1d(x, dis, kind=kind)
+
+        xnew = np.linspace(0, self.L, np.shape(x)[0] * 4)
+        rnew = r(xnew)
+        dis = dis(xnew)
+        x, theta = np.meshgrid(xnew, theta)
+
+        # compute the coordinates of the tube
+        y_in = rnew * np.cos(theta)
+        z_in = rnew * np.sin(theta)
+
+        y_out = (rnew + self.t) * np.cos(theta)
+        z_out = (rnew + self.t) * np.sin(theta)
+
+        # reshape the dis with repeated x_in.shape[0] times column
+        dis_surf = np.tile(dis, (x.shape[0], 1))
+
+        cmap = mpl.cm.coolwarm
+
+        ax.plot_surface(
+            x / 2,
+            2 * y_in,
+            2 * z_in,
+            rstride=1,
+            cstride=1,
+            facecolors=cmap(dis_surf),
+            linewidth=0.0,
+            alpha=0.8,
+        )
+
+        ax.plot_surface(
+            x / 2,
+            2 * y_out,
+            2 * z_out,
+            rstride=1,
+            cstride=1,
+            facecolors=cmap(dis_surf),
+            linewidth=0.0,
+            alpha=0.2,
+        )
+
+        ax.text(
+            -0.017,
+            0.0,
+            0.125,
+            "(b)",
+            horizontalalignment="left",
+            verticalalignment="top",
+            weight="bold",
+        )
+        ax.text(
+            1.0,
+            0.0,
+            0.25,
+            "$\omega_{opt\_b} = 440.57$ rad/s",
+            horizontalalignment="right",
+            verticalalignment="top",
+        )
+
+        ax.set_axis_off()
 
         return ax
 
@@ -1225,379 +1302,533 @@ class EulerBeam:
 np.random.seed(12345)
 
 
-# problem = "exact_derivative"
-# problem = "optimization_eigenvalue"
-# problem = "optimization_eigenvector"
-problem = "stress"
+def main(problem, finalise=False):
+    print("Running problem {}".format(problem))
+    if problem == "plot_E":
+        set_beam = {
+            "nelems": 25,
+            "ndvs": 10,
+            "L": 2.0,
+            "t": 0.005,  # 5 mm
+            "N": 10,
+            "E": 70e9,  # 70 GPa
+            "density": 2710.0,  # 2710 kg/m^3
+        }
 
-if problem == "exact_derivative":
-    # sets for the beam
-    set_beam = {
-        "nelems": 11,
-        "ndvs": 5,
-        "L": 1.0,
-        "t": 0.025,
-        "N": 5,
-        "ksrho": 10.0,
-    }
+        # Pick a direction
+        x = 0.01 * np.ones(set_beam["ndvs"])
+        px = np.random.rand(set_beam["ndvs"])
 
-    npts = 10
-    nlines = 12
-    res = np.zeros((npts, nlines))
+        beam0 = EulerBeam(**set_beam)
+        lam, Q = beam0.solve_eigenvalue_problem(x)
 
-    # Pick a direction
-    x = 0.1 * np.ones(set_beam["ndvs"])
-    px = np.ones(set_beam["ndvs"])
-
-    beam0 = EulerBeam(**set_beam)
-    lam, Q = beam0.solve_eigenvalue_problem(x)
-    ksrho = lam[0] * (10 ** np.linspace(-5, 1, npts))
-
-    for i in range(npts):
-        for j in range(2, nlines):
-            beam = EulerBeam(
-                set_beam["nelems"],
-                set_beam["ndvs"],
-                set_beam["L"],
-                set_beam["t"],
-                j - 1,
-                ksrho[i],
-            )
-
-            # Set the matrix component we want to zero
-            dof = np.arange(0, beam.nelems // 4)
-            beam.D[dof, dof] = 1.0
-
-            dh = 1e-30
-
-            if j == 2:
-                res[i, 0] = np.dot(px, beam.exact_eigenvector_deriv(x))
-                res[i, 1] = beam.exact_eigenvector(x + 1j * dh * px).imag / dh
-
-            res[i, j] = np.dot(px, beam.approx_eigenvector_deriv(x))
-        print(".", end="", flush=True)
-    print("")
-
-    # save the data
-    np.savez(
-        "output/exact_derivative.npz",
-        ksrho=ksrho,
-        exact=res[:, 0],
-        fd=res[:, 1],
-        approx1=res[:, 2],
-        approx2=res[:, 3],
-        approx3=res[:, 4],
-        approx4=res[:, 5],
-        approx5=res[:, 6],
-        approx6=res[:, 7],
-        approx7=res[:, 8],
-        approx8=res[:, 9],
-        approx9=res[:, 10],
-        approx10=res[:, 11],
-    )
-
-    # read the data
-    data = np.load("output/exact_derivative.npz")
-    ksrho = data["ksrho"]
-    fd = data["fd"]
-    exact = data["exact"]
-
-    with plt.style.context(["science", "nature"]):
-        # plt.style.use(niceplots.get_style())
-        # plt.style.use("mystyle")
-        # plt.figure(figsize=(8, 6))
-        # plt.semilogx(ksrho, fd, label="complex step")
-        # plt.semilogx(ksrho, exact, label="exact")
-        # for i in range(1, nlines - 1):
-        #     plt.semilogx(ksrho, data["approx%d" % i], label="approx N = %d" % i)
-        # plt.legend()
-        # plt.savefig("output/exact_derivative.png")
-
-        colors = ["k", "b", "r", "b", "r", "b", "r", "b", "r", "b"]
-        styles = ["-", "-", "--", "-", "--", "-", "--", "-", "--", "-"]
-        alpha = [1.0, 1.0, 1.0, 0.8, 0.8, 0.6, 0.6, 0.4, 0.4, 0.2]
-        fig, ax = plt.subplots()
-        for i in range(1, nlines - 1):
-            plt.loglog(
-                ksrho,
-                np.abs(data["approx%d" % i] - exact) / np.abs(exact),
-                label="%d" % i,
-                color=colors[i - 1],
-                alpha=alpha[i - 1],
-                linestyle=styles[i - 1],
-            )
-        # niceplots.adjust_spines(ax)
-        handles, labels = ax.get_legend_handles_labels()
-        handles = [handles[i] for i in range(0, len(handles), 2)] + [
-            handles[i] for i in range(1, len(handles), 2)
-        ]
-        labels = [labels[i] for i in range(0, len(labels), 2)] + [
-            labels[i] for i in range(1, len(labels), 2)
-        ]
-        ax.legend(
-            handles,
-            labels,
-            title="Approximate: N",
-            ncol=2,
-            loc="upper right",
+        beam = EulerBeam(
+            set_beam["nelems"],
+            set_beam["ndvs"],
+            set_beam["L"],
+            set_beam["t"],
+            set_beam["N"],
+            ksrho=0.1 * (1.0 / lam[0]),
+            E=set_beam["E"],
+            density=set_beam["density"],
         )
-        ax.set_xlabel(r"$\rho$")
-        ax.set_ylabel("Relative Error")
-        ax.tick_params(direction="out")
-        ax.tick_params(which="minor", direction="out")
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.xaxis.set_ticks_position("bottom")
-        ax.yaxis.set_ticks_position("left")
-        plt.savefig("output/Fig1.pdf")
 
-        # ax.legend(title="Approximate: N", ncol=2, loc="upper right")
-        # ax.set_xlabel(r"$\rho$")
-        # ax.set_ylabel("Relative Error")
-        # ax.tick_params(direction="out")
-        # ax.tick_params(which="minor", direction="out")
-        # plt.savefig("output/Fig1.pdf")
+        E = beam.exact_eigenvector_deriv(x)[1]
+
+        with plt.style.context(["nature"]):
+            fig = plt.figure(figsize=(3.3, 3.3))
+            ax = plt.gca()
+            E = np.where(E == 0, 1e-300, E)
+            E = np.log10(np.abs(E))
+            plt.contourf(E, E.shape[0], cmap="coolwarm")
+            plt.gca().invert_yaxis()
+            ax.xaxis.tick_top()
+            ax.yaxis.set_ticks_position("left")
+            ax.tick_params(direction="out")
+            ax.tick_params(which="minor", direction="out")
+            ax.set_aspect("equal")
+            cax = fig.add_axes(
+                [
+                    ax.get_position().x1 + 0.05,
+                    ax.get_position().y0,
+                    0.02,
+                    ax.get_position().height,
+                ]
+            )
+            m = plt.cm.ScalarMappable(cmap="coolwarm")
+            cb = plt.colorbar(m, shrink=1, aspect=1, cax=cax)
+            plt.savefig("output/tube/E.png", bbox_inches="tight", dpi=1000)
+
+    if problem == "accuracy_analysis":
+        # sets for the beam
+        set_beam = {
+            "nelems": 10,
+            "ndvs": 5,
+            "L": 2.0,
+            "t": 0.005,  # 5 mm
+            "N": 10,
+            "ksrho": 1e-7,
+            "E": 70e9,  # 70 GPa
+            "density": 2710.0,  # 2710 kg/m^3
+        }
+
+        npts = 10
+        nlines = 12
+        res = np.zeros((npts, nlines))
+
+        # Pick a direction
+        x = 0.01 * np.ones(set_beam["ndvs"])
+        px = np.random.rand(set_beam["ndvs"])
+
+        beam0 = EulerBeam(**set_beam)
+        lam, Q = beam0.solve_eigenvalue_problem(x)
+        ksrho = (1.0 / lam[0]) * (10 ** np.linspace(-3, 4, npts))
+        print("omega_1 = {}".format(np.sqrt(lam[0])))
+
+        for i in range(npts):
+            for j in range(2, nlines):
+                beam = EulerBeam(
+                    set_beam["nelems"],
+                    set_beam["ndvs"],
+                    set_beam["L"],
+                    set_beam["t"],
+                    N=j - 1,
+                    ksrho=ksrho[i],
+                    E=set_beam["E"],
+                    density=set_beam["density"],
+                )
+
+                beam.D = np.eye(beam.ndof)
+
+                # for k in range(0, beam.ndof, 4):
+                #     beam.D[k, k] = 1.0
+
+                dh = 1e-30
+
+                if j == 2:
+                    res[i, 0] = np.dot(px, beam.exact_eigenvector_deriv(x)[0])
+                    res[i, 1] = beam.exact_eigenvector(x + 1j * dh * px).imag / dh
+
+                res[i, j] = np.dot(px, beam.approx_eigenvector_deriv(x))
+            print(".", end="", flush=True)
+        print("")
+
+        np.savez(
+            "output/tube/accuracy_analysis.npz",
+            ksrho=ksrho,
+            exact=res[:, 0],
+            fd=res[:, 1],
+            approx1=res[:, 2],
+            approx2=res[:, 3],
+            approx3=res[:, 4],
+            approx4=res[:, 5],
+            approx5=res[:, 6],
+            approx6=res[:, 7],
+            approx7=res[:, 8],
+            approx8=res[:, 9],
+            approx9=res[:, 10],
+            approx10=res[:, 11],
+        )
+
+        with plt.style.context(["nature"]):
+            colors = ["k", "b", "r", "b", "r", "b", "r", "b", "r", "b"]
+            styles = ["-", "-", "--", "-", "--", "-", "--", "-", "--", "-"]
+            alpha = [1.0, 1.0, 1.0, 0.8, 0.8, 0.6, 0.6, 0.4, 0.4, 0.2]
+            if finalise:
+                fig, axs = plt.subplot_mosaic("a;b", figsize=(3.3, 5.2), sharex=True)
+                text = ["(a)", "(b)"]
+
+                for n, (key, ax) in enumerate(axs.items()):
+                    if n == 0:
+                        data = np.load("output/tube/accuracy_analysis.npz")
+                    else:
+                        data = np.load("output/tube/accuracy_analysis.npz")
+                    ksrho = data["ksrho"]
+                    fd = data["fd"]
+                    exact = data["exact"]
+                    for i in range(1, nlines - 1):
+                        ax.loglog(
+                            ksrho,
+                            np.abs(data["approx%d" % i] - exact) / np.abs(exact),
+                            label="%d" % i,
+                            color=colors[i - 1],
+                            alpha=alpha[i - 1],
+                            linestyle=styles[i - 1],
+                        )
+
+                    handles, labels = ax.get_legend_handles_labels()
+                    handles = [handles[i] for i in range(0, len(handles), 2)] + [
+                        handles[i] for i in range(1, len(handles), 2)
+                    ]
+                    labels = [labels[i] for i in range(0, len(labels), 2)] + [
+                        labels[i] for i in range(1, len(labels), 2)
+                    ]
+                    ax.legend(
+                        handles,
+                        labels,
+                        title="Approximate: N",
+                        ncol=2,
+                        loc=[0.58, 0.4],
+                        frameon=False,
+                    )
+                    ax.set_xlabel(r"$\rho$")
+                    ax.set_ylabel("Relative Error")
+                    ax.tick_params(direction="out")
+                    ax.tick_params(which="minor", direction="out")
+                    ax.spines["top"].set_visible(False)
+                    ax.spines["right"].set_visible(False)
+                    ax.xaxis.set_ticks_position("bottom")
+                    ax.yaxis.set_ticks_position("left")
+                    ax.text(
+                        -0.1,
+                        1.1,
+                        text[n],
+                        transform=ax.transAxes,
+                        horizontalalignment="left",
+                        verticalalignment="top",
+                        weight="bold",
+                    )
+
+                plt.savefig(
+                    "output/tube/accuracy_analysis.pdf",
+                    bbox_inches="tight",
+                    pad_inches=0.0,
+                )
+            else:
+                data = np.load("output/tube/accuracy_analysis.npz")
+                fig, ax = plt.subplots()
+                ksrho = data["ksrho"]
+                fd = data["fd"]
+                exact = data["exact"]
+                for i in range(1, nlines - 1):
+                    ax.loglog(
+                        ksrho,
+                        np.abs(data["approx%d" % i] - exact) / np.abs(exact),
+                        label="%d" % i,
+                        color=colors[i - 1],
+                        alpha=alpha[i - 1],
+                        linestyle=styles[i - 1],
+                    )
+                handles, labels = ax.get_legend_handles_labels()
+                handles = [handles[i] for i in range(0, len(handles), 2)] + [
+                    handles[i] for i in range(1, len(handles), 2)
+                ]
+                labels = [labels[i] for i in range(0, len(labels), 2)] + [
+                    labels[i] for i in range(1, len(labels), 2)
+                ]
+                ax.legend(
+                    handles,
+                    labels,
+                    title="Approximate: N",
+                    ncol=2,
+                    loc=[0.58, 0.4],
+                    frameon=False,
+                )
+                ax.set_xlabel(r"$\rho$")
+                ax.set_ylabel("Relative Error")
+                ax.tick_params(direction="out")
+                ax.tick_params(which="minor", direction="out")
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+                ax.xaxis.set_ticks_position("bottom")
+                ax.yaxis.set_ticks_position("left")
+
+            plt.savefig(
+                "output/tube/accuracy_analysis.pdf",
+                bbox_inches="tight",
+                pad_inches=0.0,
+            )
+
+                
+
+    elif problem == "optimization_eigenvalue":
+        set_beam = {
+            "nelems": 50,
+            "ndvs": 10,
+            "L": 2.0,
+            "t": 0.005,
+            "N": 4,
+            "ksrho": 100 / (519.94**2),  # 519.94 rad/s is the first frequency
+            "E": 70e9,  # 70 GPa
+            "density": 2710.0,  # 2700 kg/m^3
+        }
+
+        beam = EulerBeam(**set_beam)
+
+        # sets for the optimization
+        set_opt = {
+            "x0": 0.01 * np.ones(beam.ndvs),
+            "x_con": 0.01 * np.ones(beam.ndvs),
+            "x_lower": 0.005 * np.ones(beam.ndvs),
+            "x_upper": 0.1 * np.ones(beam.ndvs),
+        }
+
+        # minimize the eigenvalue
+        obj = lambda x: -beam.appox_min_eigenvalue(x) / (519.94**2)
+        obj_grad = lambda x: -beam.approx_min_eigenvalue_deriv(x) / (519.94**2)
+
+        # constrain the mass: mas(x_con) - mass(x) => 0
+        mass = lambda x: (beam.get_mass(set_opt["x_con"]) - beam.get_mass(x))
+        mass_grad = lambda x: -beam.get_mass_deriv()
+
+        res = minimize(
+            obj,
+            set_opt["x0"],
+            jac=obj_grad,
+            method="SLSQP",
+            bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
+            constraints={"type": "ineq", "fun": mass, "jac": mass_grad},
+            options={"disp": 1, "maxiter": 200, "ftol": 1e-8},
+            callback=lambda x: print("obj: ", obj(x)),
+            # callback=lambda x: print("mass: ", (beam.get_mass(set_opt["x_con"]) - beam.get_mass(x))),
+            # callback=lambda x: print("mass: ", (beam.get_mass(set_opt["x_con"]))),
+        )
+
+        np.save("output/tube/optimization_eigenvalue.npy", res.x)
+        res_x = np.load("output/tube/optimization_eigenvalue.npy")
+
+        with plt.style.context(["nature"]):
+            fig = plt.figure(figsize=(8, 6))
+            ax = fig.add_subplot(111, projection="3d")
+            ax.scatter(1, 0, 0, color="r", s=4, zorder=100)
+            ax.scatter(0, 0, 0, color="r", s=4, zorder=100)
+            ax = beam.plot_modes(ax, res_x, n=4, scale=0.15, flip_1=True)
+            ax = beam.plot_tube(ax, res_x)
+            ax.set_aspect("equal")
+            ax.text(
+                -0.04,
+                0.0,
+                0.14,
+                "(a)",
+                horizontalalignment="left",
+                verticalalignment="top",
+                weight="bold",
+            )
+            ax.text(
+                1.01,
+                0.0,
+                0.275,
+                "$\omega_{opt\_a} = 730.34$ rad/s",
+                horizontalalignment="right",
+                verticalalignment="top",
+            )
+            plt.savefig(
+                "output/tube/optimization_eigenvalue.png",
+                bbox_inches="tight",
+                pad_inches=0,
+                dpi=550,
+            )
+
+    elif problem == "optimization_displacement":
+        set_beam = {
+            # set nelems even to make middle node is the one we want to optimize
+            "nelems": 50,
+            "ndvs": 10,
+            "L": 2.0,
+            "t": 0.005,
+            "N": 4,
+            "ksrho": 100.0 / (519.94**2),  # 519.94 rad/s is the first frequency
+            "E": 70e9,  # 70 GPa
+            "density": 2710.0,  # 2700 kg/m^3
+        }
+
+        beam = EulerBeam(**set_beam)
+
+        # set displacement constraints node
+        node_index = np.floor(beam.nelems / 2).astype(int)
+        beam.D[(node_index - 1) * 4, (node_index - 1) * 4] = 1.0
+        beam.D[(node_index - 1) * 4 + 1, (node_index - 1) * 4 + 1] = 1.0
+        beam.D[(node_index - 1) * 4 + 2, (node_index - 1) * 4 + 2] = 1.0
+        beam.D[(node_index - 1) * 4 + 3, (node_index - 1) * 4 + 3] = 1.0
+
+        # sets for the optimization
+        set_opt = {
+            "x0": 0.01 * np.ones(beam.ndvs),
+            "x_con": 0.01 * np.ones(beam.ndvs),
+            "x_lower": 0.005 * np.ones(beam.ndvs),
+            "x_upper": 0.1 * np.ones(beam.ndvs),
+        }
+
+        # maximun the eigenvalue
+        obj = lambda x: -beam.appox_min_eigenvalue(x) / (519.94**2)
+        obj_grad = lambda x: -beam.approx_min_eigenvalue_deriv(x) / (519.94**2)
+
+        dis = lambda x: 0.8 - np.abs(beam.approx_eigenvector(x))
+        dis_grad = lambda x: -beam.approx_eigenvector_deriv(x)
+
+        # constrain the mass: mas(x_con) - mass(x) => 0
+        mass = lambda x: (beam.get_mass(set_opt["x_con"]) - beam.get_mass(x))
+        mass_grad = lambda x: -beam.get_mass_deriv()
+
+        res = minimize(
+            obj,
+            set_opt["x0"],
+            jac=obj_grad,
+            method="SLSQP",
+            bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
+            constraints=(
+                {"type": "ineq", "fun": mass, "jac": mass_grad},
+                {"type": "ineq", "fun": dis, "jac": dis_grad},
+            ),
+            options={"disp": 1, "maxiter": 100, "ftol": 1e-8},
+            callback=lambda x: print("obj: %f" % obj(x)),
+            # callback=lambda x: print("displacement for midpoint: %f" % dis(x)),
+            # callback=lambda x: print("mass for midpoint: %f" % mass(x)),
+        )
+
+        np.save("output/tube/optimization_displacement.npy", res.x)
+        res_x = np.load("output/tube/optimization_displacement.npy")
+
+        with plt.style.context(["nature"]):
+            fig = plt.figure(figsize=(8, 6))
+            ax = plt.axes(projection="3d")
+            ax = beam.plot_displacement(ax, res_x)
+            cmap = mpl.cm.coolwarm
+            m = cm.ScalarMappable(cmap=cmap)
+            cax = fig.add_axes(
+                [
+                    ax.get_position().x1 - 0.485,
+                    ax.get_position().y0 + 0.34,
+                    0.01,
+                    ax.get_position().height - 0.75,
+                ]
+            )
+            cb = plt.colorbar(m, shrink=1, aspect=1, cax=cax)
+            cb.ax.set_title(
+                "Normalized \nDisplacement",
+                pad=-12,
+                y=1.4,
+                x=6.25,
+                fontsize=5,
+                rotation=0,
+            )
+            cb.ax.tick_params(labelsize=5)
+
+            ax.scatter(1, 0, 0, color="r", s=4, zorder=100)
+            ax.scatter(0, 0, 0, color="r", s=4, zorder=100)
+            ax = beam.plot_modes(ax, res_x, n=4, scale=0.15, flip_2=True)
+            ax.set_aspect("equal")
+            ax.set_axis_off()
+            # add a point at the center of the tube
+            ax.scatter(set_beam["L"] / 4, 0, 0, marker="o", color="k", s=10)
+            plt.savefig(
+                "output/tube/optimization_displacement.png",
+                bbox_inches="tight",
+                pad_inches=0,
+                dpi=550,
+            )
+
+    elif problem == "optimization_stress":
+        set_beam = {
+            "nelems": 50,
+            "ndvs": 10,
+            "L": 2.0,  # 2 m
+            "t": 0.005,  # 5 mm
+            "N": 4,
+            "ksrho": 100 / (519.94**2),  # 519.94 rad/s is the first frequency
+            "E": 70e9,  # 70 GPa
+            "density": 2710.0,  # 2710 kg/m^3
+        }
+
+        beam = EulerBeam(**set_beam)
+
+        # sets for the stress
+        set_stress = {
+            "rho": 100.0 / (519.94**2),
+            "allowable": 1,
+        }
+
+        # sets for the optimization
+        set_opt = {
+            "x0": 0.01 * np.ones(beam.ndvs),
+            "x_con": 0.01 * np.ones(beam.ndvs),
+            "x_lower": 0.005 * np.ones(beam.ndvs),
+            "x_upper": 0.1 * np.ones(beam.ndvs),
+            "options": {"disp": 1, "maxiter": 200, "ftol": 1e-8},
+        }
+
+        rho = set_stress["rho"]
+        allowable = set_stress["allowable"]
+
+        # minimize the eigenvalue
+        obj = lambda x: -beam.appox_min_eigenvalue(x) / (519.94**2)
+        obj_grad = lambda x: -beam.approx_min_eigenvalue_deriv(x) / (519.94**2)
+
+        stress = lambda x: 0.52 - 1e-20 * beam.eigenvector_stress(
+            x, rho=rho, allowable=allowable
+        )
+        stress_grad = lambda x: -1e-20 * beam.eigenvector_stress_deriv(
+            x, rho=rho, allowable=allowable
+        )
+
+        # constrain the mass: mas(x_con) - mass(x) => 0
+        mass = lambda x: (beam.get_mass(set_opt["x_con"]) - beam.get_mass(x))
+        mass_grad = lambda x: -beam.get_mass_deriv()
+
+        # minimize the stress
+        res = minimize(
+            obj,
+            set_opt["x0"],
+            jac=obj_grad,
+            method="SLSQP",
+            bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
+            constraints=(
+                {"type": "ineq", "fun": stress, "jac": stress_grad},
+                {"type": "ineq", "fun": mass, "jac": mass_grad},
+            ),
+            options=set_opt["options"],
+            callback=lambda x: print("obj: ", obj(x)),
+            # callback=lambda x: print("stress constraint: ", stress(x)),
+            # callback=lambda x: print("mass constraints: ", (beam.get_mass(set_opt["x_con"]))),
+        )
+
+        # save and read the result
+        np.save("output/tube/optimization_stress.npy", res.x)
+        res_x = np.load("output/tube/optimization_stress.npy")
+
+        with plt.style.context(["nature"]):
+            fig = plt.figure(figsize=(8, 6))
+            ax = plt.axes(projection="3d")
+            ax.scatter(1, 0, 0, color="r", s=4, zorder=100)
+            ax.scatter(0, 0, 0, color="r", s=4, zorder=100)
+            ax = beam.plot_modes(ax, res_x, n=4, scale=0.15, flip_3=True)
+            ax = beam.plot_stress(ax, res_x)
+            cmap = mpl.cm.coolwarm
+            m = cm.ScalarMappable(cmap=cmap)
+            cax = fig.add_axes(
+                [
+                    ax.get_position().x1 - 0.483,
+                    ax.get_position().y0 + 0.34,
+                    0.01,
+                    ax.get_position().height - 0.75,
+                ]
+            )
+            cb = plt.colorbar(m, shrink=1, aspect=1, cax=cax)
+            cb.ax.set_title(
+                "Normalized \nStress", pad=-12, y=1.4, x=6.0, fontsize=5, rotation=0
+            )
+            cb.ax.tick_params(labelsize=5)
+            ax.set_aspect("equal")
+            ax.set_axis_off()
+
+            plt.savefig(
+                "output/tube/optimization_stress.png",
+                dpi=550,
+                bbox_inches="tight",
+                pad_inches=0.0,
+            )
 
 
-elif problem == "optimization_eigenvector":
-    # sets for the beam
-    set_beam = {
-        # set nelems even to make middle node is the one we want to optimize
-        "nelems": 50,
-        "ndvs": 50,
-        "L": 1.0,
-        "t": 0.025,
-        "N": 10,
-        "ksrho": 10.0,
-    }
+if __name__ == "__main__":
+    problem = [
+        # "plot_E",
+        # "accuracy_analysis",
+        # "optimization_eigenvalue",
+        # "optimization_displacement",
+        "optimization_stress",
+    ]
 
-    beam = EulerBeam(**set_beam)
-
-    node_index = np.floor(beam.nelems / 2).astype(int)
-    beam.D[(node_index - 1) * 4, (node_index - 1) * 4] = 1.0
-    beam.D[(node_index - 1) * 4 + 1, (node_index - 1) * 4 + 1] = 1.0
-
-    # sets for the optimization
-    set_opt = {
-        "x0": 0.05 * beam.L * np.ones(beam.ndvs),
-        "x_con": 0.075 * beam.L * np.ones(beam.ndvs),
-        "x_lower": 0.01 * beam.L * np.ones(beam.ndvs),
-        "x_upper": 0.1 * beam.L * np.ones(beam.ndvs),
-    }
-
-    # minimize the eigenvector
-    obj = lambda x: 0.1 * beam.approx_eigenvector(x)
-    obj_grad = lambda x: 0.1 * beam.approx_eigenvector_deriv(x)
-
-    # constrain the mass
-    mass = lambda x: beam.get_mass(set_opt["x_con"]) - beam.get_mass(x)
-    mass_grad = lambda x: beam.get_mass_deriv()
-
-    res = minimize(
-        obj,
-        set_opt["x0"],
-        jac=obj_grad,
-        method="SLSQP",
-        bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
-        # constraints={"type": "ineq", "fun": mass, "jac": mass_grad},
-        options={"disp": 1, "maxiter": 100, "ftol": 1e-6},
-        callback=lambda x: print("min mode for midpoint: %f" % obj(x)),
-    )
-
-    fig = plt.figure(figsize=(12, 12))
-    ax = fig.add_subplot(111, projection="3d")
-    ax = beam.plot_tube(ax, res.x)
-    ax.set_aspect("equal")
-    plt.savefig("output/eigenvector.pdf")
-
-
-elif problem == "optimization_eigenvalue":
-    # sets for the beam
-    set_beam = {
-        "nelems": 50,
-        "ndvs": 5,
-        "L": 1.0,
-        "t": 0.025,
-        "N": 5,
-        "ksrho": 10.0,
-    }
-
-    beam = EulerBeam(**set_beam)
-
-    # sets for the optimization
-    set_opt = {
-        "x0": 0.1 * beam.L * np.ones(beam.ndvs),
-        "x_con": 0.15 * beam.L * np.ones(beam.ndvs),
-        "x_lower": 0.1 * beam.L * np.ones(beam.ndvs),
-        "x_upper": 0.25 * beam.L * np.ones(beam.ndvs),
-    }
-
-    # minimize the eigenvalue
-    obj = lambda x: beam.appox_min_eigenvalue(x)
-    obj_grad = lambda x: beam.approx_min_eigenvalue_deriv(x)
-
-    # constrain the mass
-    mass = lambda x: beam.get_mass(set_opt["x_con"]) - beam.get_mass(x)
-    mass_grad = lambda x: beam.get_mass_deriv()
-
-    res = minimize(
-        obj,
-        set_opt["x0"],
-        jac=obj_grad,
-        method="SLSQP",
-        bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
-        constraints={"type": "ineq", "fun": mass, "jac": mass_grad},
-        options={"disp": 1, "maxiter": 100, "ftol": 1e-8},
-        callback=lambda x: print("min eigenvalue: ", obj(x)),
-    )
-
-    fig = plt.figure(figsize=(12, 12))
-    ax = fig.add_subplot(111, projection="3d")
-    ax = beam.plot_modes(ax, res.x, n=4, scale=4.0)
-    ax.set_aspect("equal")
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    ax.invert_yaxis()
-    plt.savefig("output/eigenvalue.pdf")
-
-elif problem == "stress":
-    # sets for the beam
-    # [50, 50, 1.0, 0.025, 5, 0.01] + [0.01, 0.05, 0.01, 0.1]
-    # set_beam = {
-    #     "nelems": 500,
-    #     "ndvs": 50,
-    #     "L": 1.0,
-    #     "t": 0.025,
-    #     "N": 4,
-    #     "ksrho": 0.01,
-    # }
-
-    # set the beam for aluminum
-    set_beam = {
-        "nelems": 10,
-        "ndvs": 10,
-        "L": 1.0,  # 1 m
-        "t": 0.025,  # 2.5 cm
-        "N": 4,
-        "ksrho": 1.0,
-        "E": 70e9,  # 70 GPa
-        "density": 2700.0,  # 2700 kg/m^3
-    }
-
-    beam = EulerBeam(**set_beam)
-    dof = np.arange(0, beam.nelems // 4)
-    beam.D[dof, dof] = 1.0
-
-    # sets for the stress
-    set_stress = {
-        "rho": 100.0,
-        "allowable": 276e6,  # 276 MPa
-    }
-
-    # sets for the optimization
-    set_opt = {
-        "x0": 0.05 * beam.L * np.ones(beam.ndvs),
-        "x_con": 0.1 * beam.L * np.ones(beam.ndvs),
-        "x_lower": 0.025 * beam.L * np.ones(beam.ndvs),
-        "x_upper": 0.2 * beam.L * np.ones(beam.ndvs),
-        "options": {"disp": 1, "maxiter": 100, "ftol": 1e-8},
-    }
-
-    rho = set_stress["rho"]
-    allowable = set_stress["allowable"]
-
-    x = 0.1 * np.ones(beam.ndvs)
-    p = np.random.uniform(size=x.shape)
-    dfdx = beam.eigenvector_stress_deriv(x, rho=rho, allowable=allowable)
-    exact = beam.exact_eigenvector_stress_deriv(x, rho=rho, allowable=allowable)
-    approx = np.dot(dfdx, p)
-    exact = np.dot(exact, p)
-    ic(np.abs((exact - approx)) / exact)
-    
-    dfdx = beam.approx_eigenvector_deriv(x)
-    exact = beam.exact_eigenvector_deriv(x)
-
-    approx = np.dot(dfdx, p)
-    exact = np.dot(exact, p)
-    ic((exact - approx) / exact)
-    
-    # # check the stress derivative
-    # if True:
-    #     x = 0.1 * np.ones(beam.ndvs)
-    #     p = np.random.uniform(size=x.shape)
-
-    #     exact = beam.exact_eigenvector_stress_deriv(x, rho=rho, allowable=allowable)
-    #     dfdx = beam.eigenvector_stress_deriv(x, rho=rho, allowable=allowable)
-
-    #     ic(set_beam["nelems"])
-    #     # dfdx = beam.approx_eigenvector_deriv(x)
-    #     # exact = np.dot(p, beam.exact_eigenvector_deriv(x))
-
-    #     approx = np.dot(dfdx, p)
-    #     exact = np.dot(exact, p)
-    #     ic((exact - approx) / exact)
-
-    # for dh in 10 ** np.linspace(-4, -10, 10):
-    #     # fd = (
-    #     #     beam.exact_eigenvector(x + dh * p) - beam.exact_eigenvector(x - dh * p)
-    #     # ) / (2.0 * dh)
-    #     fd = (
-    #         beam.eigenvector_stress(x + dh * p, rho=rho, allowable=allowable)
-    #         - beam.eigenvector_stress(x - dh * p, rho=rho, allowable=allowable)
-    #     ) / (2.0 * dh)
-
-    #     # ans2 = np.dot(dfdx2, p)
-
-    #     # print("dh      = %15.5e" % (dh))
-    #     # print("fd      = %15.5f" % (fd))
-    #     # prin
-    #     # t("ans     = %15.5f" % (ans))
-    #     # ic(dh)
-    #     ic((fd - approx) / fd)
-    #     ic((fd - exact) / fd)
-
-    # exit(0)
-
-    obj = lambda x: 1e-3 * beam.eigenvector_stress(x, rho=rho, allowable=allowable)
-    obj_grad = lambda x: 1e-3 * beam.eigenvector_stress_deriv(
-        x, rho=rho, allowable=allowable
-    )
-
-    ic(beam.get_mass(set_opt["x_con"]))
-    mass = lambda x: 0.1 * (beam.get_mass(set_opt["x_con"]) - beam.get_mass(x))
-    mass_grad = lambda x: 0.1 * beam.get_mass_deriv()
-
-    # minimize the stress
-    res = minimize(
-        obj,
-        set_opt["x0"],
-        jac=obj_grad,
-        method="SLSQP",
-        bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
-        constraints={"type": "ineq", "fun": mass, "jac": mass_grad},
-        options=set_opt["options"],
-        callback=lambda x: print("stress: ", obj(x)),
-    )
-    ic(beam.N @ res.x)
-
-    # save and read the result
-    np.save("output/stress.npy", res.x)
-    res_x = np.load("output/stress.npy")
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-    ax = beam.plot_tube(ax, res_x)
-    ax.set_aspect("equal")
-    plt.savefig("output/stress_tube.pdf")
-
-    with plt.style.context(["science", "nature"]):
-        fig = plt.figure(figsize=(6.4, 4.8))
-        ax = plt.axes(projection="3d")
-        ax = beam.plot_stress(ax, res_x)
-        ax = beam.plot_modes(ax, res_x, n=set_beam["N"], scale=2.0)
-        ax.set_aspect("equal")
-        plt.savefig("output/stress.pdf")
-
-
-plt.show()
+    for p in problem:
+        main(p)
+        
+    plt.show()

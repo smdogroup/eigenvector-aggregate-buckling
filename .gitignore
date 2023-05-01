@@ -6,5 +6,5 @@ __pycache__
 .vscode
 .DS_Store
 *.png
-output/
 result/
+final_results/

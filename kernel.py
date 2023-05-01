@@ -1,6 +1,3 @@
-from time import time
-
-from icecream import ic
 import matplotlib.pylab as plt
 from mpl_toolkits.mplot3d import Axes3D, proj3d
 import mpmath as mp
@@ -127,7 +124,6 @@ def deriv_approx(A, B, D, Adot, Bdot, Ddot=None, ndvs=1, rho=1.0, N=5):
 
     # count nonzero entries in the eta vector as self.Np
     N = np.count_nonzero(eta)
-    ic(N)
 
     C = B @ Q[:, :N]
     U, _ = np.linalg.qr(C)
@@ -208,14 +204,9 @@ eta = eta / np.sum(eta)
 
 times = []
 
-start = time()
 ans = np.dot(deriv(rho, A, B, D, Adot, Bdot, Ddot,ndvs=ndvs), p)
-end = time()
-times.append(end - start)
-start = time()
 ans_approx = np.dot(deriv_approx(A, B, D, Adot, Bdot,Ddot, ndvs=ndvs, rho=rho, N=N), p)
-end = time()
-times.append(end - start)
 
-ic(np.abs((ans_approx - ans) / ans))
-ic(times[0] / times[1])
+print("ans = ", ans)
+print("ans_approx = ", ans_approx)
+print("error = ", np.abs(ans - ans_approx) / np.abs(ans))

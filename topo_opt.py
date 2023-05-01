@@ -393,7 +393,9 @@ class TopologyAnalysis:
         X,
         bcs,
         forces={},
-        E=10.0,
+        m=None,
+        D_index=None,
+        E=10.0 * 1e6,
         nu=0.3,
         ptype_K="ramp",
         ptype_M="ramp",
@@ -424,12 +426,11 @@ class TopologyAnalysis:
         self.simp_c1 = 6e5
         self.simp_c2 = -5e6
 
-        self.D_index = 23
-
         self.nelems = self.conn.shape[0]
         self.nnodes = int(np.max(self.conn)) + 1
         self.nvars = 2 * self.nnodes
 
+        self.D_index = D_index
         self.K0 = None
         self.M0 = None
 
@@ -1036,7 +1037,8 @@ class TopologyAnalysis:
 
         h = 0.0
         for i in range(N):
-            h += eta[i] * self.Q[self.D_index, i] ** 2
+            q = self.Q[self.D_index, i]
+            h += eta[i] * np.dot(q, q)
 
         return h
 
@@ -1070,14 +1072,15 @@ class TopologyAnalysis:
         # Compute the h values
         h = 0.0
         for i in range(N):
-            h += eta[i] * self.Q[self.D_index, i] ** 2
+            q = self.Q[self.D_index, i]
+            h += eta[i] * np.dot(q, q)
 
         # Set the value of the derivative
         dfdrho = np.zeros(self.nnodes)
 
         for j in range(N):
             for i in range(j + 1):
-                qDq = self.Q[self.D_index, i] * self.Q[self.D_index, j]
+                qDq = np.dot(self.Q[self.D_index, i], self.Q[self.D_index, j])
                 scalar = qDq
                 if i == j:
                     scalar = qDq - h
@@ -1696,7 +1699,9 @@ class TopOptProb:
         self,
         analysis: TopologyAnalysis,
         non_design_nodes: list,  # indices for nodes whose density is not controlled by the optimizer
-        vol_frac=None,
+        vol_frac_ub=None,
+        vol_frac_lb=None,
+        dis_ub=None,
         ks_rho=100,
         m0=10.0,
         draw_history=True,
@@ -1705,11 +1710,12 @@ class TopOptProb:
         dv_mapping=None,  # If provided, optimizer controls reduced design variable xr only
         lb=1e-6,
         objf="frequency",
-        confs="volume",
+        confs="volume_ub",
         omega_lb=None,
         stress_ub=None,
         stress_scale=1.0,
         grad_check=False,
+        domain="square",
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -1725,13 +1731,25 @@ class TopOptProb:
         self.stress_scale = stress_scale
         self.lb = lb
         self.grad_check = grad_check
+        self.domain = domain
 
         # Add more non-design constant to matrices
         self.add_mat0("M", non_design_nodes, density=m0)
 
         x = np.ones(self.analysis.nnodes)
         self.area_gradient = self.analysis.eval_area_gradient(x)
-        self.fixed_area = vol_frac * np.sum(self.area_gradient)
+        if vol_frac_ub is None:
+            self.fixed_area_ub = None
+        else:
+            self.fixed_area_ub = vol_frac_ub * np.sum(self.area_gradient)
+
+        if vol_frac_lb is None:
+            self.fixed_area_lb = None
+        else:
+            self.fixed_area_lb = vol_frac_lb * np.sum(self.area_gradient)
+
+        self.fixed_dis_ub = dis_ub
+
         self.ks_rho = ks_rho
 
         self.ndv = np.sum(self.design_nodes)
@@ -1814,17 +1832,23 @@ class TopOptProb:
         # Evaluate objectives
         if self.objf == "volume":
             area = self.analysis.eval_area(self.xfull)
-            foi["area"] = area
             obj = area
+            if self.domain == "beam" or self.domain == "building":
+                area *= 1 / np.sum(self.area_gradient)
+            foi["area"] = area
 
         elif self.objf == "frequency":
             omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
-            obj = -omega_ks
+            obj = -0.01 * omega_ks
             foi["omega_ks"] = omega_ks
         elif self.objf == "compliance":
             compliance = self.analysis.compliance(self.xfull)
             obj = compliance
             foi["compliance"] = compliance
+        elif self.objf == "displacement":
+            displacement = self.analysis.eigenvector_displacement(ks_rho=self.ks_rho)
+            obj = 10 * displacement
+            foi["displacement"] = displacement
         else:  # objf == "stress"
             stress_ks = self.analysis.eigenvector_stress(
                 self.xfull, cell_sols=vtk_cell_sols
@@ -1834,13 +1858,22 @@ class TopOptProb:
 
         # Compute constraints
         con = []
-        if "volume" in self.confs:
-            assert self.fixed_area is not None
+        if "volume_ub" in self.confs:
+            assert self.fixed_area_ub is not None
             area = self.analysis.eval_area(self.xfull)
-            con.append(self.fixed_area - area)
-            if self.objf == "compliance":
-                area *= 5.0
-            foi["area"] = area
+            con.append(self.fixed_area_ub - area)
+            foi["area"] = area / np.sum(self.area_gradient)
+            stress_ks = self.analysis.eigenvector_stress(
+                self.xfull, cell_sols=vtk_cell_sols
+            )
+            foi["stress_ks"] = stress_ks
+
+        if "volume_lb" in self.confs:
+            assert self.fixed_area_lb is not None
+            area = self.analysis.eval_area(self.xfull)
+            con.append(area - self.fixed_area_lb)
+            if "volume_ub" not in self.confs:
+                foi["area"] = area / np.sum(self.area_gradient)
 
         if "frequency" in self.confs:
             assert self.omega_lb is not None
@@ -1855,6 +1888,12 @@ class TopOptProb:
             )
             con.append(1.0 - stress_ks / self.stress_ub)
             foi["stress_ks"] = stress_ks
+
+        if "displacement" in self.confs:
+            assert self.fixed_dis_ub is not None
+            displacement = self.analysis.eigenvector_displacement(ks_rho=self.ks_rho)
+            con.append(self.fixed_dis_ub - displacement)
+            foi["displacement"] = displacement
 
         # Evaluate all quantities of interest
         if eval_all:
@@ -1883,7 +1922,10 @@ class TopOptProb:
             rho = self.analysis.fltr.apply(self.xfull)
             self.analysis.plot(rho, ax=ax)
             ax.set_aspect("equal", "box")
-            fig.savefig(os.path.join(self.prefix, "%d.png" % self.it_counter), bbox_inches="tight")
+            fig.savefig(
+                os.path.join(self.prefix, "%d.png" % self.it_counter),
+                bbox_inches="tight",
+            )
             plt.close()
             to_vtk(
                 vtk_path,
@@ -1942,12 +1984,18 @@ class TopOptProb:
                     self.analysis.eval_area_gradient(self.xfull)
                 )
             elif self.objf == "frequency":
-                g[:] = -self.dv_mapping.T.dot(
+                g[:] = -0.01 * self.dv_mapping.T.dot(
                     self.analysis.ks_omega_derivative(self.xfull)
                 )
             elif self.objf == "compliance":
                 g[:] = self.dv_mapping.T.dot(
                     self.analysis.compliance_gradient(self.xfull)
+                )
+            elif self.objf == "displacement":
+                g[:] = 10 * self.dv_mapping.T.dot(
+                    self.analysis.eigenvector_displacement_deriv(
+                        self.xfull, self.ks_rho
+                    )
                 )
             else:  # objf == "stress"
                 g[:] = self.stress_scale * self.dv_mapping.T.dot(
@@ -1956,7 +2004,13 @@ class TopOptProb:
 
             # Evaluate constraint gradients
             index = 0
-            if "volume" in self.confs:
+            if "volume_ub" in self.confs:
+                A[index][:] = -self.dv_mapping.T.dot(
+                    self.analysis.eval_area_gradient(self.xfull)
+                )
+                index += 1
+
+            if "volume_lb" in self.confs:
                 A[index][:] = -self.dv_mapping.T.dot(
                     self.analysis.eval_area_gradient(self.xfull)
                 )
@@ -1975,6 +2029,14 @@ class TopOptProb:
                 )
                 index += 1
 
+            if "displacement" in self.confs:
+                A[index][:] = -self.dv_mapping.T.dot(
+                    self.analysis.eigenvector_displacement_deriv(
+                        self.xfull, self.ks_rho
+                    )
+                )
+                index += 1
+
         else:
             # Populate the nodal variable for analysis
             self.xfull[self.design_nodes] = x[:]
@@ -1982,11 +2044,19 @@ class TopOptProb:
             if self.objf == "volume":
                 g[:] = self.analysis.eval_area_gradient(self.xfull)[self.design_nodes]
             elif self.objf == "frequency":
-                g[:] = -self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
+                g[:] = (
+                    -0.01
+                    * self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
+                )
             elif self.objf == "compliance":
-                g[:] = self.analysis.compliance_gradient(self.xfull)[
-                    self.design_nodes
-                ]
+                g[:] = self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
+            elif self.objf == "displacement":
+                g[:] = (
+                    10
+                    * self.analysis.eigenvector_displacement_deriv(
+                        self.xfull, self.ks_rho
+                    )[self.design_nodes]
+                )
             else:  # objf == "stress"
                 g[:] = (
                     self.stress_scale
@@ -1997,7 +2067,13 @@ class TopOptProb:
 
             # Evaluate constraint gradient
             index = 0
-            if "volume" in args.confs:
+            if "volume_ub" in args.confs:
+                A[index][:] = -self.analysis.eval_area_gradient(self.xfull)[
+                    self.design_nodes
+                ]
+                index += 1
+
+            if "volume_lb" in args.confs:
                 A[index][:] = -self.analysis.eval_area_gradient(self.xfull)[
                     self.design_nodes
                 ]
@@ -2015,6 +2091,15 @@ class TopOptProb:
                         self.design_nodes
                     ]
                     / self.stress_ub
+                )
+                index += 1
+
+            if "displacement" in self.confs:
+                A[index][:] = (
+                    -self.analysis.eigenvector_displacement_deriv(
+                        self.xfull, self.ks_rho
+                    )[self.design_nodes]
+                    / self.disp_ub
                 )
                 index += 1
 
@@ -2206,7 +2291,7 @@ def create_cantilever_domain(lx=20, ly=10, m=128, n=64):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
-def create_lbracket_domain(r0_=2.1, l=1.0, lfrac=0.4, nx=96, m0_block_frac=0.0):
+def create_lbracket_domain(r0_=2.1, l=8.0, lfrac=0.4, nx=96, m0_block_frac=0.0):
     """
      _nt__       ________________
     |     |                     ^
@@ -2258,22 +2343,42 @@ def create_lbracket_domain(r0_=2.1, l=1.0, lfrac=0.4, nx=96, m0_block_frac=0.0):
                 index += 1
 
     non_design_nodes = []
-    nm = int(np.ceil(nx * m0_block_frac))
-    for jp in range(nt - nm, nt + 1):
-        for ip in range(nx - nm, nx + 1):
-            non_design_nodes.append(ij_to_node(ip, jp))
+    nm = int(np.ceil(0.1 * nx * m0_block_frac))
+    # for jp in range(nt - nm, nt + 1):
+    #     for ip in range(nx - nm, nx + 1):
+    #         non_design_nodes.append(ij_to_node(ip, jp))
 
     bcs = {}
     for ip in range(nt + 1):
         bcs[ij_to_node(ip, nx)] = [0, 1]
+        # non_design_nodes.append(ij_to_node(ip, nx))
+        # non_design_nodes.append(ij_to_node(ip, nx-1))
+
+    offset = int(nx)
+    # for j in range(nx):
+    #     bcs[ij_to_node(0, j)] = [0, 1]
+
+    for j in range(nt + 1, nx):
+        bcs[ij_to_node(nt, j)] = [0]
+
+    # bcs[ij_to_node(0, int(nt/2))] = [0]
 
     forces = {}
+    P = 1.0
+    for jp in range(nt, nt + 1):
+        for ip in range(nx, nx + 1):
+            forces[ij_to_node(ip, jp)] = [0, -P / nm]
+
+    # for jp in range(nt + 1):
+    #     for ip in range(nx, nx + 1):
+    #         forces[ij_to_node(ip, jp)] = [0, -P / nm]
 
     r0 = l / nx * r0_
 
     return conn, X, r0, bcs, forces, non_design_nodes
 
-def create_mbbbeam_domain(r0_=2.1, l=1.0, frac=0.2, nx=100, m0_block_frac=0.1):
+
+def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100):
     """
     _____________|_____________
     |                         |
@@ -2281,17 +2386,26 @@ def create_mbbbeam_domain(r0_=2.1, l=1.0, frac=0.2, nx=100, m0_block_frac=0.1):
     |_________________________|
                 m
     """
-    # if nx is odd, make it even
-    if nx % 2 == 0:
-        nx += 1
-            
+
     m = nx
     n = int(np.ceil((frac * nx)))
+
+    # # make sure m is odd and n is even
+    # if n % 2 == 1:
+    #     n -= 1
+    # if m % 2 == 0:
+    #     m -= 1
     
+    # make sure m and n is even
+    if n % 2 == 0:
+        n -= 1
+    if m % 2 == 0:
+        m -= 1
+
     nelems = m * n
     nnodes = (m + 1) * (n + 1)
 
-    y = np.linspace(0, l*frac, n + 1)
+    y = np.linspace(0, l * frac, n + 1)
     x = np.linspace(0, l, m + 1)
     nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
 
@@ -2310,18 +2424,32 @@ def create_mbbbeam_domain(r0_=2.1, l=1.0, frac=0.2, nx=100, m0_block_frac=0.1):
             conn[i + j * m, 1] = nodes[j, i + 1]
             conn[i + j * m, 2] = nodes[j + 1, i + 1]
             conn[i + j * m, 3] = nodes[j + 1, i]
-       
-    
+
     non_design_nodes = []
     # apply top middle a square block
     # nm = int(np.ceil(2*n * m0_block_frac))
     # for i in range(n - nm+1, n+1):
     #     for j in range((m - nm) // 2 +1, (m + nm) // 2 +1):
     #         non_design_nodes.append(nodes[i, j])
-            
-    bcs = {}    
-    
-    # offset = int(np.ceil(m * 0.05)) 
+
+    bcs = {}
+
+    bcs[nodes[n // 2, 0]] = [0, 1]
+    bcs[nodes[n // 2, m]] = [0, 1]
+    # bcs[nodes[n // 2 + 1, 0]] = [0, 1]
+    # bcs[nodes[n // 2 + 1, m]] = [0, 1]
+
+    # offset = int(np.floor(n * 0.1))
+    # offset = 1
+    # for i in range(n // 2 - offset, n // 2 + offset + 1):
+    #     for j in range(m + 1):
+    #         non_design_nodes.append(nodes[i, j])
+    # non_design_nodes.append(nodes[i, m - j])
+
+    # non_design_nodes.append(nodes[i, 0])
+    # non_design_nodes.append(nodes[i, m])
+
+    # offset = int(np.ceil(m * 0.05))
     # for i in range(offset):
     #     bcs[nodes[0, i]] = [1]
     #     bcs[nodes[0, m-i]] = [1]
@@ -2330,54 +2458,207 @@ def create_mbbbeam_domain(r0_=2.1, l=1.0, frac=0.2, nx=100, m0_block_frac=0.1):
     #         bcs[nodes[0, i]] = [0, 1]
     #     else:
     #         bcs[nodes[0, i]] = [1]
-        # bcs[nodes[i, 0]] = [0]
-        # bcs[nodes[i, m]] = [0]
-        
-    
-    # fix the bottom left corner
-    bcs[nodes[0, 0]] = [0, 1]
-    # fix the bottom right corner
-    bcs[nodes[0, m]] = [1]
-    
+    # bcs[nodes[i, 0]] = [0]
+    # bcs[nodes[i, m]] = [0]
+
+    # # fix the bottom left corner
+    # bcs[nodes[0, 0]] = [0, 1]
+    # # fix the bottom right corner
+    # bcs[nodes[0, m]] = [1]
+
     # bcs[nodes[0, m//2]] = [0, 1]
     # bcs[nodes[0, m//2+1]] = [0, 1]
-    
+
     # force is independent of the mesh size
     P = 1.0
     forces = {}
-    # apply a force at the top middle
-    offset = int(np.ceil(m * 0.01)) 
-    for i in range(offset):
-        forces[nodes[n, m // 2-i]] = [0, -P/(2*offset)]
-        forces[nodes[n, m // 2+1+i]] = [0, -P/(2*offset)]
-    
-    ic(forces)
+    # # apply a force at the top middle
+    # offset = int(np.ceil(m * 0.01))
+    # for i in range(offset):
+    #     forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
+    #     forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
 
     r0 = l / nx * r0_
-    
+    ic(r0)
+    # r0 = 0.05
+
     Ei = []
     Ej = []
+    redu_idx = 0
     
-    for j in range(2*(n+1)):
-        for i in range((m+1)//2):
-            if j % 2 == 0:
-                Ej.extend([i + j*(m+1)//4])
-            else:
-                Ej.extend([i + (m//2 -2*i) + (j-1)*(m+1)//4])
-            Ei.extend([i + j*(m+1)//2])
-            
+    # # 2-way reflection left to right
+    # for j in range(2 * (n + 1)):
+    #     for i in range((m + 1) // 2):
+    #         if j % 2 == 0:
+    #             Ej.extend([i + j * (m + 1) // 4])
+    #         else:
+    #             Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
+    #         Ei.extend([i + j * (m + 1) // 2])
+    
+    # 4-way reflection of x- and y-symmetry axes
+    a = n // 2
+    b = m // 2
+    for i in range(a+1):
+        for j in range(b+1):
+            if nodes[i, j] not in non_design_nodes:
+                Ej.extend(4 * [redu_idx])
+                Ei.extend(
+                    [
+                        nodes[i, j],
+                        nodes[n - i, j],
+                        nodes[i, m - j],
+                        nodes[n - i, m - j],
+                    ]
+                )
+                redu_idx += 1
+
+
+
+    # for j in range(2 * (n + 1)):
+    #     for i in range((m + 1) // 2):
+    #         if j % 2 == 0:
+    #             Ej.extend([i])
+    #         else:
+    #             Ej.extend([i + (m // 2 - 2 * i) ])
+    #         Ei.extend([i + j * (m + 1) // 2])
+
+    # 2-way reflection top to bottom
+    # for j in range(2 * (n + 1)):
+    #     for i in range((m + 1) // 2):
+    #         Ei.extend([i + j * (m + 1) // 2])
+    #         Ej.extend([i])
+
     Ev = np.ones(len(Ei))
     dv_mapping = coo_matrix((Ev, (Ei, Ej)))
-    
-    # # change dv_mapping to np.array
+
+    # change dv_mapping to np.array
     # dv_mapping = np.array(dv_mapping.todense())
     # ic(dv_mapping.shape)
     # ic(dv_mapping)
-    
+
     return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
 
 
-def create_square_domain(r0_, l=1.0, nx=30, m0_block_frac=0.0):
+def create_building_domain(r0_=2.1, l=8.0, frac=0.125, nx=100, m0_block_frac=0.0):
+    """
+    _______
+    |     |
+    |     |
+    |     |
+    |     |
+    |     | n
+    |     |
+    |     |
+    |     |
+    |_____|
+       m
+    """
+
+    m = int(np.ceil((frac * nx)))
+    n = nx
+
+    # make sure number of nodes along x is even
+    if m % 2 == 0:
+        m += 1
+
+    nelems = m * n
+    nnodes = (m + 1) * (n + 1)
+
+    y = np.linspace(0, l, n + 1)
+    x = np.linspace(0, l * frac, m + 1)
+    nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
+
+    ic(nodes.shape)
+    # Set the node locations
+    X = np.zeros((nnodes, 2))
+    for j in range(n + 1):
+        for i in range(m + 1):
+            X[i + j * (m + 1), 0] = x[i]
+            X[i + j * (m + 1), 1] = y[j]
+
+    # Set the connectivity
+    conn = np.zeros((nelems, 4), dtype=int)
+    for j in range(n):
+        for i in range(m):
+            conn[i + j * m, 0] = nodes[j, i]
+            conn[i + j * m, 1] = nodes[j, i + 1]
+            conn[i + j * m, 2] = nodes[j + 1, i + 1]
+            conn[i + j * m, 3] = nodes[j + 1, i]
+
+    non_design_nodes = []
+    # apply top middle a square block
+    nm = int(np.ceil(m * m0_block_frac))
+    if nm % 2 == 1:
+        nm -= 1
+    nm = 2
+
+    # for i in range(n - nm + 1, n + 1):
+    #     for j in range((m - nm) // 2 + 1, (m + nm) // 2 + 1):
+    #         non_design_nodes.append(nodes[i, j])
+
+    # for i in range(n - nm + 1, n + 1):
+    #     for j in range(0, nm):
+    #         non_design_nodes.append(nodes[i, j])
+    # for i in range(n - nm + 1, n + 1):
+    #     for j in range(m - nm + 1, m + 1):
+    #         non_design_nodes.append(nodes[i, j])
+
+    # for i in range(n - nm + 1, n + 1):
+    #     for j in range(0, m + 1):
+    #         non_design_nodes.append(nodes[i, j])
+
+    # h = n // 8
+    # for i in range(1, 9):
+    #     for j in range(m + 1):
+    #         non_design_nodes.append(nodes[i * h, j])
+
+    bcs = {}
+
+    offset = int(np.floor(n * 0.0002))
+    for j in range(m + 1):
+        bcs[nodes[0, j]] = [0, 1]
+
+    # bcs[nodes[0, 0]] = [0, 1]
+    # bcs[nodes[0, m]] = [0, 1]
+
+    # force is independent of the mesh size
+    P = 100.0
+    forces = {}
+    # # apply a force at the top middle
+    # offset = int(np.ceil(m * 0.01))
+    # for i in range(offset):
+    #     forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
+    #     forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
+    forces[nodes[n, m // 2]] = [P, 0]
+
+    r0 = l / nx * r0_
+    ic(r0)
+    # r0 = 0.075
+
+    Ei = []
+    Ej = []
+
+    # 2-way reflection left to right
+    for j in range(2 * (n + 1)):
+        for i in range((m + 1) // 2):
+            if j % 2 == 0:
+                Ej.extend([i + j * (m + 1) // 4])
+            else:
+                Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
+            Ei.extend([i + j * (m + 1) // 2])
+
+    Ev = np.ones(len(Ei))
+    dv_mapping = coo_matrix((Ev, (Ei, Ej)))
+
+    # change dv_mapping to np.array
+    # dv_mapping = np.array(dv_mapping.todense())
+    # ic(dv_mapping.shape)
+    # ic(dv_mapping)
+
+    return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
+
+
+def create_square_domain(r0_, l=8.0, nx=30, m0_block_frac=0.0):
     """
     Args:
         l: length of the square
@@ -2413,173 +2694,42 @@ def create_square_domain(r0_, l=1.0, nx=30, m0_block_frac=0.0):
 
     # We would like the center node or element to be the non-design region
     non_design_nodes = []
-    # offset = int(m0_block_frac * nx * 0.5)
+    # offset = int(m0_block_frac * nx*0.5)
     # for j in range(n // 2 - offset, (n + 1) // 2 + 1 + offset):
     #     for i in range(n // 2 - offset, (n + 1) // 2 + 1 + offset):
     #         non_design_nodes.append(nodes[j, i])
 
-    # # add "x" cross non-design region
-    # for i in range(1, n):
-    #     for j in range(1, n):
-    #         if i == j or i == n - j:
-    #             non_design_nodes.append(nodes[i, j])
-    #         if i == j - 1 or i == n - j - 1:
-    #             non_design_nodes.append(nodes[i, j])
-    #         if i == j + 1 or i == n - j + 1:
-    #             non_design_nodes.append(nodes[i, j])
-
-    # add "+"" cross non-design region
-    # for i in range(1, n):
-    #     for j in range(1, n):
-    #         if i == n//2 or j == n//2:
-    #             non_design_nodes.append(nodes[i, j])
-    # if i == n//2 - 1 or j == n//2 - 1:
-    #     non_design_nodes.append(nodes[i, j])
-    # if i == n//2 + 1 or j == n//2 + 1:
-    #     non_design_nodes.append(nodes[i, j])
-
-    # add corners non-design region
-    # non_design_nodes.append(nodes[0+1, 0+1])
-    # non_design_nodes.append(nodes[0+1, n-1])
-    # non_design_nodes.append(nodes[n-1, 0+1])
-    # non_design_nodes.append(nodes[n-1, n-1])
-
-    # #add "x" cross non-design region close to center
-    # non_design_nodes.append(nodes[n//2, n//2])
-    # non_design_nodes.append(nodes[n//2, n//2+offset])
-    # non_design_nodes.append(nodes[n//2, n//2-offset])
-    # non_design_nodes.append(nodes[n//2+offset, n//2])
-    # non_design_nodes.append(nodes[n//2-offset, n//2])
-
-    # #add "+" cross non-design region close to center
-    # non_design_nodes.append(nodes[n//2+offset, n//2+offset])
-    # non_design_nodes.append(nodes[n//2+offset, n//2-offset])
-    # non_design_nodes.append(nodes[n//2-offset, n//2+offset])
-    # non_design_nodes.append(nodes[n//2-offset, n//2-offset])
-
-    # add four quadrants non-design region
-    # non_design_nodes.append(nodes[n//4, n//4])
-    # non_design_nodes.append(nodes[n//4, n//4*3])
-    # non_design_nodes.append(nodes[n//4*3, n//4])
-    # non_design_nodes.append(nodes[n//4*3, n//4*3])
-
-    # non_design_nodes.append(nodes[n//2, n//16*7])
-    # non_design_nodes.append(nodes[n//2, n//16*9])
-    # non_design_nodes.append(nodes[n//16*7, n//2])
-    # non_design_nodes.append(nodes[n//16*9, n//2])
-
     # Constrain all boundaries
     bcs = {}
-    # for j in range(n + 1):
-    #     bcs[nodes[j, 0]] = [0, 1]
-    #     bcs[nodes[j, m]] = [0, 1]
-    # for i in range(m + 1):
-    #     bcs[nodes[0, i]] = [0, 1]
-    #     bcs[nodes[n, i]] = [0, 1]
-    
-    # fix the bottom left corner
-    # bcs[nodes[0, 0]] = [0, 1]
-    # bcs[nodes[0, m//4]] = [0, 1]
-    # bcs[nodes[0, m//2]] = [0, 1]
-    # bcs[nodes[0, m//4*3]] = [0, 1]
-    # bcs[nodes[0, m]] = [0, 1]
-    
-    # non_design_nodes.append(nodes[0, 0])
-    # non_design_nodes.append(nodes[0, m//4])
-    # non_design_nodes.append(nodes[0, m//2])
-    # non_design_nodes.append(nodes[0, m//4*3])
-    # non_design_nodes.append(nodes[0, m])
-    
-    # bcs[nodes[n//4, 0]] = [0, 1]
-    # bcs[nodes[n//4, m//4]] = [0, 1]
-    # bcs[nodes[n//4, m//2]] = [0, 1]
-    # bcs[nodes[n//4, m//4*3]] = [0, 1]
-    # bcs[nodes[n//4, m]] = [0, 1]
-    
-    # non_design_nodes.append(nodes[n//4, 0])
-    # non_design_nodes.append(nodes[n//4, m//4])
-    # non_design_nodes.append(nodes[n//4, m//2])
-    # non_design_nodes.append(nodes[n//4, m//4*3])
-    # non_design_nodes.append(nodes[n//4, m])
 
-    # bcs[nodes[n//2, 0]] = [0, 1]
-    # bcs[nodes[n//2, m//4]] = [0, 1]
-    # bcs[nodes[n//2, m//2]] = [0, 1]
-    # bcs[nodes[n//2, m//4*3]] = [0, 1]
-    # bcs[nodes[n//2, m]] = [0, 1]
-    
-    # non_design_nodes.append(nodes[n//2, 0])
-    # non_design_nodes.append(nodes[n//2, m//4])
-    # non_design_nodes.append(nodes[n//2, m//2])
-    # non_design_nodes.append(nodes[n//2, m//4*3])
-    # non_design_nodes.append(nodes[n//2, m])
+    offset = int(nx * 0.05)
 
-    # bcs[nodes[n//4*3, 0]] = [0, 1]
-    # bcs[nodes[n//4*3, m//4]] = [0, 1]
-    # bcs[nodes[n//4*3, m//2]] = [0, 1]
-    # bcs[nodes[n//4*3, m//4*3]] = [0, 1]
-    # bcs[nodes[n//4*3, m]] = [0, 1]
-
-    # non_design_nodes.append(nodes[n//4*3, 0])
-    # non_design_nodes.append(nodes[n//4*3, m//4])
-    # non_design_nodes.append(nodes[n//4*3, m//2])
-    # non_design_nodes.append(nodes[n//4*3, m//4*3])
-    # non_design_nodes.append(nodes[n//4*3, m])
-
-    # bcs[nodes[n, 0]] = [0, 1]
-    # bcs[nodes[n, m//4]] = [0, 1]
-    # bcs[nodes[n, m//2]] = [0, 1]
-    # bcs[nodes[n, m//4*3]] = [0, 1]
-    # bcs[nodes[n, m]] = [0, 1]
-    
-    # non_design_nodes.append(nodes[n, 0])
-    # non_design_nodes.append(nodes[n, m//4])
-    # non_design_nodes.append(nodes[n, m//2])
-    # non_design_nodes.append(nodes[n, m//4*3])
-    # non_design_nodes.append(nodes[n, m])
-
-
-    
-    offset = int(nx * 0.1)
-    
     for i in range(offset):
         bcs[nodes[0, i]] = [1]
-        bcs[nodes[0, m-i]] = [1]
+        bcs[nodes[0, m - i]] = [1]
         bcs[nodes[n, i]] = [1]
-        bcs[nodes[n, m-i]] = [1]
-    
+        bcs[nodes[n, m - i]] = [1]
+
     for j in range(offset):
         bcs[nodes[j, 0]] = [0]
         bcs[nodes[j, m]] = [0]
-        bcs[nodes[n-j, 0]] = [0]
-        bcs[nodes[n-j, m]] = [0]
-    
+        bcs[nodes[n - j, 0]] = [0]
+        bcs[nodes[n - j, m]] = [0]
+
     # fix the bottom left corner
     bcs[nodes[0, 0]] = [0, 1]
     # fix the bottom right corner
     bcs[nodes[0, m]] = [0, 1]
-    # fix the top left corner   
+    # fix the top left corner
     bcs[nodes[n, 0]] = [0, 1]
     # fix the top right corner
     bcs[nodes[n, m]] = [0, 1]
-        
-        
-    
-    # non_design_nodes.append(nodes[0, 0])
-    # non_design_nodes.append(nodes[0, m])
-    # non_design_nodes.append(nodes[n, 0])
-    # non_design_nodes.append(nodes[n, m])
-    
-    # non_design_nodes.append(nodes[n//4, m//4])
-    # non_design_nodes.append(nodes[n//4, m//4*3])
-    # non_design_nodes.append(nodes[n//4*3, m//4])
-    # non_design_nodes.append(nodes[n//4*3, m//4*3])
 
-    P = 10.0
+    # P = 10.0
     forces = {}
-    pn = n // 10
-    for j in range(pn):
-        forces[nodes[j, -1]] = [0, -P / pn]
+    # pn = n // 10
+    # for j in range(pn):
+    #     forces[nodes[j, -1]] = [0, -P / pn]
 
     r0 = l / nx * r0_
 
@@ -2635,13 +2785,13 @@ def visualize_domain(prefix, X, bcs, non_design_nodes=None, forces=None):
 
     ax.scatter(X[:, 0], X[:, 1], color="black", s=markersize)
 
-    if bcs: 
+    if bcs:
         for i, v in bcs.items():
             if len(v) == 2:
                 ax.scatter(X[i, 0], X[i, 1], color="red", s=markersize)
             else:
                 ax.scatter(X[i, 0], X[i, 1], color="g", s=markersize)
-    
+
     if forces:
         for i, v in forces.items():
             ax.scatter(X[i, 0], X[i, 1], color="orange", s=markersize)
@@ -2649,7 +2799,7 @@ def visualize_domain(prefix, X, bcs, non_design_nodes=None, forces=None):
     if non_design_nodes:
         m0_X = np.array([X[i, :] for i in non_design_nodes])
         ax.scatter(m0_X[:, 0], m0_X[:, 1], color="blue", s=markersize)
-    
+
     fig.savefig(os.path.join(prefix, "domain.png"), dpi=500, bbox_inches="tight")
     return
 
@@ -2667,6 +2817,7 @@ def get_paropt_default_options(prefix, algorithm="tr", maxit=1000):
         "tr_adaptive_gamma_update": True,
         "tr_max_iterations": maxit,
         "mma_max_iterations": maxit,
+        "mma_init_asymptote_offset": 0.2,
         "max_major_iters": 100,
         "penalty_gamma": 1e3,
         "qn_subspace_size": 10,
@@ -2689,7 +2840,11 @@ def parse_cmd_args():
     p.add_argument("--prefix", default="result", type=str, help="result folder")
 
     # Analysis
-    p.add_argument("--domain", default="square", choices=["square", "lbracket", "mbbbeam"])
+    p.add_argument(
+        "--domain",
+        default="square",
+        choices=["square", "lbracket", "beam", "building"],
+    )
     p.add_argument(
         "--assume-same-element",
         action="store_true",
@@ -2716,7 +2871,7 @@ def parse_cmd_args():
     p.add_argument("--ks-rho", default=100, type=int, help="ks aggregation parameter")
     p.add_argument(
         "--ptype-K",
-        default="ramp",
+        default="simp",
         choices=["ramp", "simp"],
         help="material penalization for stiffness matrix",
     )
@@ -2729,16 +2884,14 @@ def parse_cmd_args():
     p.add_argument("--p", default=3.0, type=float, help="SIMP penalization parameter")
     p.add_argument("--q", default=5.0, type=float, help="RAMP penalization parameter")
     p.add_argument(
-        "--rho0-K", default=10e-3, type=float, help="rho offset to prevent singular K"
+        "--rho0-K", default=1e-3, type=float, help="rho offset to prevent singular K"
     )
     p.add_argument(
         "--rho0-M", default=1e-7, type=float, help="rho offset to prevent singular M"
     )
 
-    p.add_argument(
-        "--m0", default=20.0, type=float, help="magnitude of non-design mass"
-    )
-    p.add_argument("--r0", default=2.1, type=float, help="filter radius = r0 * lx / nx")
+    p.add_argument("--m0", default=0.0, type=float, help="magnitude of non-design mass")
+    p.add_argument("--r0", default=1.0, type=float, help="filter radius = r0 * lx / nx")
 
     # Optimization
     p.add_argument(
@@ -2759,14 +2912,14 @@ def parse_cmd_args():
     p.add_argument(
         "--objf",
         default="frequency",
-        choices=["frequency", "stress", "volume", "compliance"],
+        choices=["frequency", "stress", "volume", "compliance", "displacement"],
         help="objective function",
     )
     p.add_argument(
         "--confs",
-        default="volume",
+        default="volume_ub",
         nargs="*",
-        choices=["volume", "frequency", "stress"],
+        choices=["volume_ub", "volume_lb", "frequency", "stress", "displacement"],
         help="constraint functions",
     )
     p.add_argument(
@@ -2782,78 +2935,154 @@ def parse_cmd_args():
         help='Upper bound for stress constraint, only effective when "stress" is in the confs',
     )
     p.add_argument(
-        "--vol-frac",
-        default=0.6,
+        "--vol-frac-ub",
+        default=None,
         type=float,
-        help='volume fraction, only effective when "volume" is in the confs',
+        help='volume fraction, only effective when "volume_ub" is in the confs',
+    )
+    p.add_argument(
+        "--vol-frac-lb",
+        default=None,
+        type=float,
+        help='volume fraction, only effective when "volume_lb" is in the confs',
     )
     p.add_argument(
         "--stress-scale",
-        default=0.001,
+        default=1e-9,
         type=float,
         help='scale the stress objective obj = stress * scale, only effective when objf is "stress"',
     )
     p.add_argument(
-        "--maxit", default=300, type=int, help="maximum number of iterations"
+        "--dis-ub",
+        default=None,
+        type=float,
+        help='displacement constraint, only effective when "displacement" is in the confs',
+    )
+    p.add_argument(
+        "--mode",
+        default=2,
+        type=int,
+        help='mode number, only effective when "displacement" is in the confs',
+    )
+    p.add_argument(
+        "--maxit", default=200, type=int, help="maximum number of iterations"
     )
     p.add_argument(
         "--grad-check", action="store_true", help="perform gradient check and exit"
+    )
+    p.add_argument(
+        "--proj",
+        default=False,
+        type=bool,
+        help="projector for filter",
     )
     args = p.parse_args()
 
     return args
 
 
-def conf_check(args):
-    # this is the list of all possible configurations
-    if args.domain == "square":
-        cases = [  # (objf, confs)
-            ("frequency", ["volume"]),
-            ("volume", ["frequency"]),
-            ("frequency", ["volume", "stress"]),
-            ("volume", ["frequency", "stress"]),
-            ("stress", ["volume", "frequency"]),
-            ("compliance", ["stress"]),
-        ]
-        if (args.objf, args.confs) not in cases:
-            raise ValueError("This configuration cannot get a meaningful result")
-
-    return
-
-
 def create_folder(args):
     if not os.path.isdir(args.prefix):
         os.mkdir(args.prefix)
-
     if args.confs == ["stress", "frequency"]:
         args.confs = ["frequency", "stress"]
-    if args.confs == ["frequency", "volume"]:
-        args.confs = ["volume", "frequency"]
-    if args.confs == ["stress", "volume"]:
-        args.confs = ["volume", "stress"]
+    if args.confs == ["frequency", "volume_ub"]:
+        args.confs = ["volume_ub", "frequency"]
+    if args.confs == ["stress", "volume_ub"]:
+        args.confs = ["volume_ub", "stress"]
+    if args.confs == ["volume_ub", "volume_lb"]:
+        args.confs = ["volume_lb", "volume_ub"]
+    if args.confs == ["volume_ub", "displacement"]:
+        args.confs = ["displacement", "volume_ub"]
 
-    name = f"{args.objf}{args.confs}"
-
+    name = f"{args.domain}"
     if not os.path.isdir(os.path.join(args.prefix, name)):
         os.mkdir(os.path.join(args.prefix, name))
     args.prefix = os.path.join(args.prefix, name)
 
-    # check if the configuration is valid
-    # conf_check(args)
+    # make a folder inside each domain folder to store the results of each run
+    name2 = f"{args.objf}{args.confs}"
+    if not os.path.isdir(os.path.join(args.prefix, name2)):
+        os.mkdir(os.path.join(args.prefix, name2))
+    args.prefix = os.path.join(args.prefix, name2)
 
     # create a folder inside the result folder to store the results of each run
     if args.confs == ["frequency", "stress"]:
-        args.prefix = os.path.join(args.prefix, f"{args.omega_lb}_{args.stress_ub}")
-    elif args.confs == ["volume", "frequency"]:
-        args.prefix = os.path.join(args.prefix, f"{args.vol_frac}_{args.omega_lb}")
-    elif args.confs == ["volume", "stress"]:
-        args.prefix = os.path.join(args.prefix, f"{args.vol_frac}_{args.stress_ub}")
-    elif args.confs == ["volume"]:
-        args.prefix = os.path.join(args.prefix, "volume_frac=" + f"{args.vol_frac}")
+        args.prefix = os.path.join(
+            args.prefix, "freq=" + f"{args.omega_lb}, s=" + f"{args.stress_ub}"
+        )
+    elif args.confs == ["volume_ub", "frequency"]:
+        args.prefix = os.path.join(
+            args.prefix, "freq=" + f"{args.omega_lb}, vol=" + f"{args.vol_frac_ub} "
+        )
+    elif args.confs == ["volume_ub", "stress"]:
+        args.prefix = os.path.join(
+            args.prefix,
+            "nx="
+            + f"{args.nx}, vol="
+            + f"{args.vol_frac_ub}, s="
+            + f"{args.stress_ub}, r0="
+            + f"{args.r0}, K="
+            + f"{args.ptype_K}, M="
+            + f"{args.ptype_M}",
+        )
+    elif args.confs == ["volume_lb", "volume_ub"]:
+        args.prefix = os.path.join(
+            args.prefix, "vol=" + f"{args.vol_frac_lb}_{args.vol_frac_ub}"
+        )
+    elif args.confs == ["volume_ub"]:
+        args.prefix = os.path.join(
+            args.prefix,
+            "nx="
+            + f"{args.nx}, vol="
+            + f"{args.vol_frac_ub}, r0="
+            + f"{args.r0}, K="
+            + f"{args.ptype_K}, M="
+            + f"{args.ptype_M}",
+        )
+    elif args.confs == ["volume_lb"]:
+        args.prefix = os.path.join(args.prefix, "vol=" + f"{args.vol_frac_lb}")
     elif args.confs == ["frequency"]:
-        args.prefix = os.path.join(args.prefix, "frequency_lb=" + f"{args.omega_lb}")
+        args.prefix = os.path.join(args.prefix, "freq=" + f"{args.omega_lb}")
     elif args.confs == ["stress"]:
-        args.prefix = os.path.join(args.prefix, "stress_ub=" + f"{args.stress_ub}")
+        args.prefix = os.path.join(args.prefix, "s=" + f"{args.stress_ub}")
+    elif args.confs == ["frequency", "volume_lb", "volume_ub"]:
+        args.prefix = os.path.join(
+            args.prefix,
+            f"{args.vol_frac_lb}_{args.vol_frac_ub}_{args.omega_lb}",
+        )
+    elif args.confs == ["displacement", "volume_ub"]:
+        args.prefix = os.path.join(
+            args.prefix,
+            "nx="
+            + f"{args.nx}, vol="
+            + f"{args.vol_frac_ub}, dis="
+            + f"{args.dis_ub}, mode="
+            + f"{args.mode}, r0="
+            + f"{args.r0}, K="
+            + f"{args.ptype_K}, M="
+            + f"{args.ptype_M}",
+        )
+    elif args.confs == ["volume_ub", "displacement", "stress"]:
+        args.prefix = os.path.join(
+            args.prefix,
+            "nx="
+            + f"{args.nx}, vol="
+            + f"{args.vol_frac_ub}, dis="
+            + f"{args.dis_ub}, mode="
+            + f"{args.mode}, s="
+            + f"{args.stress_ub}, r0="
+            + f"{args.r0}, K="
+            + f"{args.ptype_K}, M="
+            + f"{args.ptype_M}",
+        )
+    elif args.confs == ["stress", "volume_lb", "volume_ub"]:
+        args.prefix = os.path.join(
+            args.prefix,
+            f"{args.vol_frac_lb}_{args.vol_frac_ub}_{args.stress_ub}",
+        )
+    elif args.confs == ["displacement"]:
+        args.prefix = os.path.join(args.prefix, f"{args.dis_ub}")
 
     # if there is already a folder with the same name, delete it, otherwise create a new folder
     if os.path.isdir(args.prefix):
@@ -2865,7 +3094,6 @@ def create_folder(args):
 
 def main(args):
     args = create_folder(args)
-
     # Set up logger
     Logger.set_log_path(os.path.join(args.prefix, "stdout.log"))
     timer_set_log_path(os.path.join(args.prefix, "profiler.log"))
@@ -2885,16 +3113,70 @@ def main(args):
             r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
         )
         dv_mapping = None
-    elif args.domain == "mbbbeam":
-        conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_mbbbeam_domain(
+    elif args.domain == "beam":
+        conn, X, r0, bcs, forces, non_design_nodes, dv_mapping = create_beam_domain(
+            r0_=args.r0, nx=args.nx
+        )
+    elif args.domain == "building":
+        (
+            conn,
+            X,
+            r0,
+            bcs,
+            forces,
+            non_design_nodes,
+            dv_mapping,
+        ) = create_building_domain(
             r0_=args.r0, nx=args.nx, m0_block_frac=args.m0_block_frac
         )
 
     # Check the mesh
     visualize_domain(args.prefix, X, bcs, non_design_nodes, forces)
 
+    # for there is displacement constraint, we need to use the displacement constraint
+    if "beam" in args.domain:
+        m = args.nx
+        n = int(np.ceil((0.125 * args.nx)))
+    elif "building" in args.domain:
+        m = int(np.ceil((0.125 * args.nx)))
+        n = args.nx
+    elif "square" in args.domain:
+        m = args.nx
+        n = args.nx
+    else:
+        raise ValueError("Not supported domain")
+
+    D_index = None
+    ic(m, n)
+    for conf in args.confs:
+        if conf == "displacement":
+            if args.domain == "beam":
+                if args.mode == 1:
+                    # node_loc=(0, m * 0.5), y direction
+                    D_index = 2 * (m // 2 - 1) + 1
+                elif args.mode == 2:
+                    # node_loc=(n, m * 0.36), y direction
+                    # D_index = 2 * int((n * m - m * 0.64)) + 1
+                    D_index = 2 * int((n * m - m * 0.5)) + 1
+                else:
+                    # node_loc=(n * 0.5, m * 0.5), y direction
+                    D_index = n * m - 1
+            if args.domain == "square":
+                if args.mode == 1:
+                    # node_loc=(0.75*n, 0.75*m), x direction
+                    D_index = 2 * int(190760)
+                elif args.mode == 2:
+                    # node_loc=(181, 408), y direction
+                    D_index = 2 * int((181 * (m+1) + 408)) + 1
+                elif args.mode == 3:
+                    D_index = [2 * 207605, 2 * 207605 + 1]
+                elif args.mode == 4:
+                    D_index = [2 * 91100, 2 * 91100 + 1]
+                elif args.mode == 5:
+                    D_index = [2 * 190760, 2 * 190760 + 1]
+
     # Create the filter
-    fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=False)
+    fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=args.proj)
     # Create analysis
     analysis = TopologyAnalysis(
         fltr,
@@ -2902,6 +3184,8 @@ def main(args):
         X,
         bcs,
         forces,
+        m,
+        D_index,
         ptype_K=args.ptype_K,
         ptype_M=args.ptype_M,
         rho0_K=args.rho0_K,
@@ -2926,9 +3210,12 @@ def main(args):
         confs=args.confs,
         omega_lb=args.omega_lb,
         stress_ub=args.stress_ub,
-        vol_frac=args.vol_frac,
+        vol_frac_ub=args.vol_frac_ub,
+        vol_frac_lb=args.vol_frac_lb,
         stress_scale=args.stress_scale,
+        dis_ub=args.dis_ub,
         grad_check=args.grad_check,
+        domain=args.domain,
     )
 
     # Print info
