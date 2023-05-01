@@ -4,7 +4,7 @@
 This repository contains the code used to generate the results in the paper "Topology Optimization using an Eigenvector Aggregate" by Bao Li, Yicong Fu and Graeme J. Kennedy. 
 
 ## Contents
-- `topo_opt.py` is the main file that contains the code for the topology optimization for the beam and square plate examples. The function `topo_opt` is used to run the optimization. The function `topo_opt` takes the following arguments:
+- `topo_opt.py` is the main file that contains the code for the topology optimization for the beam and square plate examples. The function `parse_cmd_args` takes the following arguments:
   - For the problem parameters:
     - `domain` is the domain of the problem, which can be `beam` or `plate`.
     - `objf` is the objective function, which is set to be `frequency` by default.
