@@ -1,7 +1,7 @@
 #!/bin/zsh
 # create a directory for the results if it does not exist
-if [ ! -d result ]; then
-  mkdir result
+if [ ! -d output ]; then
+  mkdir output
 fi
 
 # ======================================================================

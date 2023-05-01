@@ -15,7 +15,7 @@ from scipy import sparse, spatial
 from scipy.linalg import eigh
 from scipy.sparse import coo_matrix, linalg
 
-from utils import time_this, timer_set_log_path
+from other.utils import time_this, timer_set_log_path
 
 
 class Logger:
