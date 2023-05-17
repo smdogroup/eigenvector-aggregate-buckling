@@ -1,5 +1,5 @@
 import matplotlib as mpl
-from matplotlib import cm
+from matplotlib import cm, ticker
 from matplotlib.lines import Line2D
 import matplotlib.pylab as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -536,12 +536,12 @@ class EulerBeam:
 
         # Form the augmented linear system of equations
         for k in range(self.Np):
-            # Compute B * vk = D * qk
+            # Compute B * uk = D * qk
             bk = np.dot(self.D, QN[:, k])
-            vk = np.linalg.solve(B, -eta[k] * bk)
-            dfdx += self.get_mass_matrix_deriv(QN[:, k], vk)
+            uk = np.linalg.solve(B, -eta[k] * bk)
+            dfdx += self.get_mass_matrix_deriv(QN[:, k], uk)
 
-            # Solve the augmented system of equations for wk
+            # Solve the augmented system of equations for vk
             Ak = A - lam[k] * B
             Ck = np.dot(B, QN)
 
@@ -554,24 +554,24 @@ class EulerBeam:
 
             # Solve the first block linear system of equations
             sol = np.linalg.solve(mat, b)
-            wk = sol[: self.ndof]
+            vk = sol[: self.ndof]
 
             # Compute the contributions from the derivative from Adot
-            dfdx += 2.0 * self.get_stiffness_matrix_deriv(x, QN[:, k], wk)
+            dfdx += 2.0 * self.get_stiffness_matrix_deriv(x, QN[:, k], vk)
 
             # Add the contributions to the derivative from Bdot here...
-            dfdx -= lam[k] * self.get_mass_matrix_deriv(QN[:, k], wk)
+            dfdx -= lam[k] * self.get_mass_matrix_deriv(QN[:, k], vk)
 
             # Now, compute the remaining contributions to the derivative from
             # B by solving the second auxiliary system
-            dk = np.dot(A, vk)
+            dk = np.dot(A, uk)
             b[: self.ndof] = dk
 
             sol = np.linalg.solve(mat, b)
-            uk = sol[: self.ndof]
+            wk = sol[: self.ndof]
 
             # Compute the contributions from the derivative
-            dfdx -= self.get_mass_matrix_deriv(QN[:, k], uk)
+            dfdx -= self.get_mass_matrix_deriv(QN[:, k], wk)
 
         return dfdx
 
@@ -1192,10 +1192,10 @@ class EulerBeam:
             weight="bold",
         )
         ax.text(
-            1.01,
+            1.02,
             0.0,
             0.25,
-            "$\omega_{opt\_c} = 660.90$ rad/s",
+            "$\omega_{opt, c} = 661.16$ rad/s",
             horizontalalignment="right",
             verticalalignment="top",
         )
@@ -1286,10 +1286,10 @@ class EulerBeam:
             weight="bold",
         )
         ax.text(
-            1.0,
+            1.005,
             0.0,
-            0.25,
-            "$\omega_{opt\_b} = 440.57$ rad/s",
+            0.255,
+            "$\omega_{opt, b} = 440.57$ rad/s",
             horizontalalignment="right",
             verticalalignment="top",
         )
@@ -1299,6 +1299,20 @@ class EulerBeam:
         return ax
 
 
+def colorbar(mappable, **kwargs):
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    last_axes = plt.gca()
+    ax = mappable.axes
+    fig = ax.figure
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.1)
+    cbar = fig.colorbar(mappable, cax=cax, **kwargs)
+    plt.sca(last_axes)
+    return cbar
+
+
 np.random.seed(12345)
 
 
@@ -1306,7 +1320,7 @@ def main(problem, finalise=False):
     print("Running problem {}".format(problem))
     if problem == "plot_E":
         set_beam = {
-            "nelems": 25,
+            "nelems": 50,
             "ndvs": 10,
             "L": 2.0,
             "t": 0.005,  # 5 mm
@@ -1328,7 +1342,7 @@ def main(problem, finalise=False):
             set_beam["L"],
             set_beam["t"],
             set_beam["N"],
-            ksrho=0.1 * (1.0 / lam[0]),
+            ksrho=0.001 * (1.0 / lam[0]),
             E=set_beam["E"],
             density=set_beam["density"],
         )
@@ -1338,25 +1352,15 @@ def main(problem, finalise=False):
         with plt.style.context(["nature"]):
             fig = plt.figure(figsize=(3.3, 3.3))
             ax = plt.gca()
-            E = np.where(E == 0, 1e-300, E)
+            E = np.abs(E)
+            E = (E) / (np.max(E))
             E = np.log10(np.abs(E))
-            plt.contourf(E, E.shape[0], cmap="coolwarm")
-            plt.gca().invert_yaxis()
-            ax.xaxis.tick_top()
-            ax.yaxis.set_ticks_position("left")
-            ax.tick_params(direction="out")
-            ax.tick_params(which="minor", direction="out")
-            ax.set_aspect("equal")
-            cax = fig.add_axes(
-                [
-                    ax.get_position().x1 + 0.05,
-                    ax.get_position().y0,
-                    0.02,
-                    ax.get_position().height,
-                ]
+            E = np.where(E < -15, -15, E)
+            mts = ax.matshow(E, cmap="coolwarm")
+            ax.tick_params(
+                axis="x", which="both", bottom=False, top=True, labelbottom=False
             )
-            m = plt.cm.ScalarMappable(cmap="coolwarm")
-            cb = plt.colorbar(m, shrink=1, aspect=1, cax=cax)
+            colorbar(mts, label="$\log_{10}(E / E_{max}$)")
             plt.savefig("output/tube/E.png", bbox_inches="tight", dpi=1000)
 
     if problem == "accuracy_analysis":
@@ -1481,7 +1485,7 @@ def main(problem, finalise=False):
                     ax.yaxis.set_ticks_position("left")
                     ax.text(
                         -0.1,
-                        1.1,
+                        1.05,
                         text[n],
                         transform=ax.transAxes,
                         horizontalalignment="left",
@@ -1538,8 +1542,6 @@ def main(problem, finalise=False):
                 bbox_inches="tight",
                 pad_inches=0.0,
             )
-
-                
 
     elif problem == "optimization_eigenvalue":
         set_beam = {
@@ -1605,10 +1607,10 @@ def main(problem, finalise=False):
                 weight="bold",
             )
             ax.text(
-                1.01,
+                1.02,
                 0.0,
                 0.275,
-                "$\omega_{opt\_a} = 730.34$ rad/s",
+                "$\omega_{opt, a} = 730.34$ rad/s",
                 horizontalalignment="right",
                 verticalalignment="top",
             )
@@ -1830,5 +1832,5 @@ if __name__ == "__main__":
 
     for p in problem:
         main(p)
-        
-    plt.show()
+
+    # plt.show()

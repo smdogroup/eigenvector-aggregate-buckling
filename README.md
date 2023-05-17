@@ -7,20 +7,20 @@ This repository contains the code used to generate the results in the paper "Top
 - `tube_opt.py` is the main file that contains the code for the 2D tube optimization example. There are four problems in the tube example as follows:
   - `plot_E` is used to plot the E matrix shown in Figure 2 in the paper.
   - `accuracy_analysis` is used to plot the accuracy of the approximate eigenvector derivatives shown in section 8.1.1 in the paper.
-  - `optimization_eigenvalue` is a function that runs the optimization for the frequency maximization with a volume constraint problem.
-  - `optimization_displacement` is a function that runs the optimization for the frequency maximization with a volume constraint and displacement constraint problem.
-  - `optimization_stress` is a function that runs the optimization for the frequency maximization with a volume constraint and stress constraint problem.
+  - `optimization_eigenvalue` is a function that runs the optimization for the fundamental frequency maximization with a volume constraint problem.
+  - `optimization_displacement` is a function that runs the optimization for the fundamental frequency maximization with a volume constraint and displacement constraint problem.
+  - `optimization_stress` is a function that runs the optimization for the fundamental frequency maximization with a volume constraint and stress constraint problem.
 - `topo_opt.py` is the main file that contains the code for the topology optimization for the beam and square plate examples. The function `parse_cmd_args` takes the following arguments:
   - For the problem parameters:
     - `domain` is the domain of the problem, which can be `beam` or `square`.
     - `objf` is the objective function, which is set to be `frequency` by default.
-    - `confs` is the constraint function, which is set to `volume` by default.
+    - `confs` is the constraint function, which is set to `volume_ub` by default.
     - `vol-frac-ub` is the upper bound of the volume fraction constraint.
     - `stress-ub` is the upper bound of the stress constraint.
     - `dis-ub` is the upper bound of the displacement constraint.
   - For the topology optimization parameters:
     - `nx` is the number of elements along the x direction.
-    - `filer` is the density filter, which can be `spectral` or `helmholtz`, with corresponding filter radius `r0` which is set to be `2.1` by default.
+    - `filer` is the density filter, which can be `spectral` or `helmholtz`, with corresponding filter radius `r0` which is set to be `2.1` (2.1 times the element size) by default.
     - `ptype-K` is the material penalization method for the stiffness matrix K, which can be `SIMP` or `RAMP`, with corresponding penalization parameters `p` and `q`. It is set to `SIMP` with `p=3` by default.
     - `ptype-M` is the material penalization method for the mass matrix M, which can be `MSIMP`, `RAMP`, or `LINEAR`.
     - `optimizer` is the optimizer used to solve the optimization problem, which can be `pmma` or `tr`, where `pmma` is the MMA method and `tr` is the trust region method.
@@ -33,9 +33,9 @@ This repository contains the code used to generate the results in the paper "Top
 
 ## Usage
 The code is written in Python 3. To run the code, you need to install the following packages:
-- [ParOpt](https://github.com/smdogroup/paropt) is a parallel gradient-based optimizer. The dependencies of ParOpt are listed [MPI](https://www.open-mpi.org/), [BLAS](http://www.netlib.org/blas/), [LAPACK](http://www.netlib.org/lapack/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/), [Cython](https://cython.org/), [numpy](https://numpy.org/), [scipy](https://www.scipy.org/)
+- [ParOpt](https://github.com/smdogroup/paropt) (version 2.0.2 is recommended) is a parallel gradient-based optimizer. The dependencies of ParOpt are listed [MPI](https://www.open-mpi.org/), [BLAS](http://www.netlib.org/blas/), [LAPACK](http://www.netlib.org/lapack/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/), [Cython](https://cython.org/), [numpy](https://numpy.org/), [scipy](https://www.scipy.org/)
 - [scienceplots](https://github.com/garrettj403/SciencePlots) which is a plotting library
-- [matplotlib](https://matplotlib.org/), [numpy](https://numpy.org/), [scipy](https://www.scipy.org/), [mpmath](http://mpmath.org/)
+- [matplotlib](https://matplotlib.org/), [numpy](https://numpy.org/), [scipy](https://www.scipy.org/), [mpmath](http://mpmath.org/), [icecream](https://github.com/gruns/icecream)
 ```
 ./run.sh
 ```
