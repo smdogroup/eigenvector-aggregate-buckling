@@ -190,4 +190,3 @@ with plt.style.context(["nature"]):
 
 
 plt.savefig("output/simple_example/seyranian_plot.pdf", bbox_inches="tight", pad_inches=0.0)
-plt.show()

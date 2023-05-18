@@ -1317,7 +1317,6 @@ np.random.seed(12345)
 
 
 def main(problem, finalise=False):
-    print("Running problem {}".format(problem))
     if problem == "plot_E":
         set_beam = {
             "nelems": 50,
@@ -1823,7 +1822,7 @@ def main(problem, finalise=False):
 
 if __name__ == "__main__":
     problem = [
-        "plot_E",
+        # "plot_E",
         "accuracy_analysis",
         "optimization_eigenvalue",
         "optimization_displacement",
@@ -1831,6 +1830,6 @@ if __name__ == "__main__":
     ]
 
     for p in problem:
+        print("Running", p)
         main(p)
-
-    # plt.show()
+        print("Done! \n")

@@ -3094,7 +3094,7 @@ def main(args):
         raise ValueError("Not supported domain")
 
     D_index = None
-    ic(m, n)
+    ic(args.domain, args.confs, m, n)
     for conf in args.confs:
         if conf == "displacement":
             if args.domain == "beam":
