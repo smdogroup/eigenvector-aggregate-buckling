@@ -612,9 +612,9 @@ if __name__ == "__main__":
     # dir_result2 = "final_results/mbbbeam/nx=500, vol=0.5, dis=0.3, mode=2, r0=1.0, K=simp, M=msimp/"
     # dir_result3 = "final_results/mbbbeam/nx=500, vol=0.5, dis=0.3, mode=2, s=20000000000000.0, r0=1.0, K=simp, M=msimp/"
 
-    dir_result1 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"
-    dir_result2 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, r0=2.1, K=simp, M=linear/"
-    dir_result3 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, r0=2.1, K=simp, M=linear/"
+    dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"
+    dir_result2 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, r0=2.1, K=simp, M=linear/"
+    dir_result3 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, r0=2.1, K=simp, M=linear/"
     
     # dir_result1 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
     # dir_result2 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
@@ -636,11 +636,11 @@ if __name__ == "__main__":
     
     with plt.style.context(["nature"]):
         plot_4(3, rho, stress, phi0, phi1, phi2)
-        plt.savefig("final_results/mbbbeam/mbbbeam_stress_new_17.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
+        plt.savefig("../output/final_results/mbbbeam/mbbbeam_stress_new_17.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
         
-    dir_result1 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
-    dir_result2 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
-    dir_result3 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
+    dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
+    dir_result2 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
+    dir_result3 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
     _, vol, dis,stress_iter, _, omega, _, _, _, _, _, _ = assmble_data(3, 500)
     with plt.style.context(["nature"]):
         plot_3(omega, vol, dis, stress_iter)
