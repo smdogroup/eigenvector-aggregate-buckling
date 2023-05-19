@@ -1,7 +1,7 @@
 # Eigenvector Aggregate
 
 ## Description
-Eigenvector aggregate is a method to approximate the eigenvector derivatives of the eigenvalue problem used in topology optimization. The method is described in the following paper "Topology Optimization using an Eigenvector Aggregate" by Bao Li, Yicong Fu and Graeme J. Kennedy (2021). The paper is available on (To be added).
+Eigenvector aggregate is a method to approximate the eigenvector derivatives of the eigenvalue problem used in topology optimization. The method is described in the following paper "Topology Optimization using an Eigenvector Aggregate" by Bao Li, Yicong Fu and Graeme J. Kennedy. The paper is available on (To be added).
 
 ## Contents
 - `simple_example.py` contains the code for the simple example in paper section 3.1.
