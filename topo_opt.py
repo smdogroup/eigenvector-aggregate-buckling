@@ -1045,7 +1045,11 @@ class TopologyAnalysis:
                     s = np.einsum("nij,njk,nk -> ni", C, Be, ue)
 
                     # Compute the derivative of the stress w.r.t. u
-                    dfds = np.einsum("n,nijl,nj,jl -> ni", detJ, Te, psie, phie)
+                    dfds = np.einsum(
+                        "n,nijl,nj,nl -> ni", detJ, Te, psie[:, ::2], phie[:, ::2]
+                    ) + np.einsum(
+                        "n,nijl,nj,nl -> ni", detJ, Te, psie[:, 1::2], phie[:, 1::2]
+                    )
 
                     # Add up contributions to d( psi^{T} * G(x, u) * phi ) / du
                     dfdue += np.einsum("nij,nik,nk -> nj", Be, C, dfds)
@@ -1054,9 +1058,9 @@ class TopologyAnalysis:
                     dfdC += np.einsum("ni,njk,nk -> nij", dfds, Be, ue)
 
         dfdu = np.zeros(2 * self.nnodes)
-        np.add.at(dfdu, 2 * self.conn, dfdue)
-        np.add.at(dfdu, 2 * self.conn + 1, dfdue)
-        dfdur = self.reduced_vector(dfdu)
+        np.add.at(dfdu, 2 * self.conn, dfdue[:, 0::2])
+        np.add.at(dfdu, 2 * self.conn + 1, dfdue[:, 1::2])
+        dfdur = self.reduce_vector(dfdu)
 
         # Compute the adjoint for K * adj = d ( psi^{T} * G(u, x) * phi ) / du
         adjr = solver(dfdur)
@@ -1341,7 +1345,7 @@ class TopologyAnalysis:
         Q = np.zeros((self.nvars, k))
         for i in range(k):
             Q[self.reduced, i] = Qr[:, i]
-            
+
         # Save vtk output data
         if nodal_sols is not None:
             nodal_sols["x"] = np.array(x)
@@ -2205,7 +2209,6 @@ class TopOptProb:
             omega = self.analysis.solve_buckling(
                 self.xfull, k=6, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
             )
-            
 
         # Evaluate objectives
         if self.objf == "volume":
@@ -2446,13 +2449,19 @@ class TopOptProb:
                 g[:] = self.analysis.eval_area_gradient(self.xfull)[self.design_nodes]
             elif self.objf == "frequency":
                 if self.prob == "natural_frequency":
-                    g[:] = -0.01 * self.analysis.ks_omega_derivative(self.xfull)[
-                        self.design_nodes
-                    ]
+                    g[:] = (
+                        -0.01
+                        * self.analysis.ks_omega_derivative(self.xfull)[
+                            self.design_nodes
+                        ]
+                    )
                 elif self.prob == "buckling":
-                    g[:] = -0.01 * self.analysis.ks_buckling_derivative(self.xfull)[
-                        self.design_nodes
-                    ]
+                    g[:] = (
+                        -0.01
+                        * self.analysis.ks_buckling_derivative(self.xfull)[
+                            self.design_nodes
+                        ]
+                    )
             elif self.objf == "compliance":
                 g[:] = self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
             elif self.objf == "displacement":
@@ -2554,7 +2563,10 @@ except:
 class ParOptProb(ParOpt.Problem):
     def __init__(self, comm, prob: TopOptProb) -> None:
         self.prob = prob
-        super().__init__(comm, prob.ndv, prob.ncon)
+        try:
+            super().__init__(comm, prob.ndv, prob.ncon)
+        except:
+            super().__init__(comm, nvars=prob.ndv, ncon=prob.ncon)
         return
 
     def getVarsAndBounds(self, x, lb, ub):
@@ -2836,7 +2848,7 @@ def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100):
 
     # bcs[nodes[n // 2, 0]] = [0, 1]
     # bcs[nodes[n // 2, m]] = [0, 1]
-    
+
     # fix the bottom left and right
     offset = int(np.ceil(m * 0.02))
     for i in range(offset):
