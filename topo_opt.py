@@ -1352,8 +1352,8 @@ class TopologyAnalysis:
                 nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
 
         # Save the eigenvalues and eigenvectors
-        self.buckling_eigs = eigs
-        self.buckling_Q = Q
+        self.eigs = eigs
+        self.Q = Q
 
         return eigs
 
@@ -1361,8 +1361,8 @@ class TopologyAnalysis:
         """
         Compute the smoothed approximation of the smallest eigenvalue
         """
-        c = np.min(self.buckling_eigs)
-        eta = np.exp(-ks_rho * (self.buckling_eigs - c))
+        c = np.min(self.eigs)
+        eta = np.exp(-ks_rho * (self.eigs - c))
         a = np.sum(eta)
         ks_min = c - np.log(a) / ks_rho
 
@@ -1372,8 +1372,8 @@ class TopologyAnalysis:
         # Compute the density at each node
         rho = self.fltr.apply(x)
 
-        c = np.min(self.buckling_eigs)
-        eta = np.exp(-ks_rho * (self.buckling_eigs - c))
+        c = np.min(self.eigs)
+        eta = np.exp(-ks_rho * (self.eigs - c))
         a = np.sum(eta)
         eta *= 1.0 / a
 
@@ -1386,14 +1386,14 @@ class TopologyAnalysis:
         u = self.full_vector(ur)
 
         dfdrho = np.zeros(self.nnodes)
-        Q = self.buckling_Q
+        Q = self.Q
 
-        for i in range(len(self.buckling_eigs)):
+        for i in range(len(self.eigs)):
             kx = self.stiffness_matrix_derivative(rho, Q[:, i], Q[:, i])
             dfdrho += eta[i] * kx
 
             gx = self.stress_stiffness_derivative(rho, u, Q[:, i], Q[:, i], Kfact)
-            dfdrho += self.buckling_eigs[i] * eta[i] * gx
+            dfdrho += self.eigs[i] * eta[i] * gx
 
         return self.fltr.applyGradient(dfdrho, x)
 
