@@ -1308,7 +1308,7 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
-    def solve_buckling(self, x, k=5, sigma=1.0):
+    def solve_buckling(self, x, k=5, sigma=1.0, nodal_sols=None, nodal_vecs=None):
         if k > len(self.reduced):
             k = len(self.reduced)
 
@@ -1325,7 +1325,7 @@ class TopologyAnalysis:
         u = self.full_vector(ur)
 
         # Find the gemoetric stiffness matrix
-        G = self.assemble_stress_stiffness(u)
+        G = self.assemble_stress_stiffness(rho, u)
         Gr = self.reduce_matrix(G)
 
         # Find the eigenvalues closest to zero. This uses a shift and
@@ -1341,6 +1341,15 @@ class TopologyAnalysis:
         Q = np.zeros((self.nvars, k))
         for i in range(k):
             Q[self.reduced, i] = Qr[:, i]
+            
+        # Save vtk output data
+        if nodal_sols is not None:
+            nodal_sols["x"] = np.array(x)
+            nodal_sols["rho"] = np.array(rho)
+
+        if nodal_vecs is not None:
+            for i in range(k):
+                nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
 
         # Save the eigenvalues and eigenvectors
         self.buckling_eigs = eigs
@@ -2070,6 +2079,7 @@ class TopOptProb:
         prefix="output",
         dv_mapping=None,  # If provided, optimizer controls reduced design variable xr only
         lb=1e-6,
+        prob="natural_frequency",
         objf="frequency",
         confs="volume_ub",
         omega_lb=None,
@@ -2085,6 +2095,7 @@ class TopOptProb:
         self.design_nodes = np.ones(len(self.xfull), dtype=bool)
         self.design_nodes[self.non_design_nodes] = False
         self.dv_mapping = dv_mapping
+        self.prob = prob
         self.objf = objf
         self.confs = confs
         self.omega_lb = omega_lb
@@ -2186,9 +2197,15 @@ class TopOptProb:
             self.xfull[self.design_nodes] = x[:]
 
         # Solve the genrealized eigenvalue problem
-        omega = self.analysis.solve_eigenvalue_problem(
-            self.xfull, k=6, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
-        )
+        if self.prob == "natural_frequency":
+            omega = self.analysis.solve_eigenvalue_problem(
+                self.xfull, k=6, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
+            )
+        elif self.prob == "buckling":
+            omega = self.analysis.solve_buckling(
+                self.xfull, k=6, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
+            )
+            
 
         # Evaluate objectives
         if self.objf == "volume":
@@ -2199,7 +2216,10 @@ class TopOptProb:
             foi["area"] = area
 
         elif self.objf == "frequency":
-            omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            if self.prob == "natural_frequency":
+                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            elif self.prob == "buckling":
+                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho)
             obj = -0.01 * omega_ks
             foi["omega_ks"] = omega_ks
         elif self.objf == "compliance":
@@ -2224,10 +2244,10 @@ class TopOptProb:
             area = self.analysis.eval_area(self.xfull)
             con.append(self.fixed_area_ub - area)
             foi["area"] = area / np.sum(self.area_gradient)
-            stress_ks = self.analysis.eigenvector_stress(
-                self.xfull, cell_sols=vtk_cell_sols
-            )
-            foi["stress_ks"] = stress_ks
+            # stress_ks = self.analysis.eigenvector_stress(
+            #     self.xfull, cell_sols=vtk_cell_sols
+            # )
+            # foi["stress_ks"] = stress_ks
 
         if "volume_lb" in self.confs:
             assert self.fixed_area_lb is not None
@@ -2238,7 +2258,10 @@ class TopOptProb:
 
         if "frequency" in self.confs:
             assert self.omega_lb is not None
-            omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            if self.prob == "natural_frequency":
+                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            elif self.prob == "buckling":
+                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho)
             con.append(omega_ks - self.omega_lb)
             foi["omega_ks"] = omega_ks
 
@@ -2261,7 +2284,10 @@ class TopOptProb:
             stress_ks = self.analysis.eigenvector_stress(
                 self.xfull, cell_sols=vtk_cell_sols
             )
-            omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            if self.prob == "natural_frequency":
+                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
+            elif self.prob == "buckling":
+                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho)
             foi["stress_ks"] = stress_ks
             foi["omega_ks"] = omega_ks
 
@@ -2349,9 +2375,14 @@ class TopOptProb:
                     self.analysis.eval_area_gradient(self.xfull)
                 )
             elif self.objf == "frequency":
-                g[:] = -0.01 * self.dv_mapping.T.dot(
-                    self.analysis.ks_omega_derivative(self.xfull)
-                )
+                if self.prob == "natural_frequency":
+                    g[:] = self.dv_mapping.T.dot(
+                        self.analysis.ks_omega_derivative(self.xfull)
+                    )
+                elif self.prob == "buckling":
+                    g[:] = self.dv_mapping.T.dot(
+                        self.analysis.ks_buckling_derivative(self.xfull)
+                    )
             elif self.objf == "compliance":
                 g[:] = self.dv_mapping.T.dot(
                     self.analysis.compliance_gradient(self.xfull)
@@ -2382,9 +2413,14 @@ class TopOptProb:
                 index += 1
 
             if "frequency" in self.confs:
-                A[index][:] = self.dv_mapping.T.dot(
-                    self.analysis.ks_omega_derivative(self.xfull)
-                )
+                if self.prob == "natural_frequency":
+                    A[index][:] = self.dv_mapping.T.dot(
+                        self.analysis.ks_omega_derivative(self.xfull)
+                    )
+                elif self.prob == "buckling":
+                    A[index][:] = self.dv_mapping.T.dot(
+                        self.analysis.ks_buckling_derivative(self.xfull)
+                    )
                 index += 1
 
             if "stress" in self.confs:
@@ -2409,10 +2445,14 @@ class TopOptProb:
             if self.objf == "volume":
                 g[:] = self.analysis.eval_area_gradient(self.xfull)[self.design_nodes]
             elif self.objf == "frequency":
-                g[:] = (
-                    -0.01
-                    * self.analysis.ks_omega_derivative(self.xfull)[self.design_nodes]
-                )
+                if self.prob == "natural_frequency":
+                    g[:] = -0.01 * self.analysis.ks_omega_derivative(self.xfull)[
+                        self.design_nodes
+                    ]
+                elif self.prob == "buckling":
+                    g[:] = -0.01 * self.analysis.ks_buckling_derivative(self.xfull)[
+                        self.design_nodes
+                    ]
             elif self.objf == "compliance":
                 g[:] = self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
             elif self.objf == "displacement":
@@ -2445,9 +2485,14 @@ class TopOptProb:
                 index += 1
 
             if "frequency" in self.confs:
-                A[index][:] = self.analysis.ks_omega_derivative(self.xfull)[
-                    self.design_nodes
-                ]
+                if self.prob == "natural_frequency":
+                    A[index][:] = self.analysis.ks_omega_derivative(self.xfull)[
+                        self.design_nodes
+                    ]
+                elif self.prob == "buckling":
+                    A[index][:] = self.analysis.ks_buckling_derivative(self.xfull)[
+                        self.design_nodes
+                    ]
                 index += 1
 
             if "stress" in self.confs:
@@ -2789,17 +2834,23 @@ def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100):
 
     bcs = {}
 
-    bcs[nodes[n // 2, 0]] = [0, 1]
-    bcs[nodes[n // 2, m]] = [0, 1]
+    # bcs[nodes[n // 2, 0]] = [0, 1]
+    # bcs[nodes[n // 2, m]] = [0, 1]
+    
+    # fix the bottom left and right
+    offset = int(np.ceil(m * 0.02))
+    for i in range(offset):
+        bcs[nodes[0, i]] = [0, 1]
+        bcs[nodes[0, m - i]] = [0, 1]
 
     # force is independent of the mesh size
-    P = 1.0
+    P = 100.0
     forces = {}
-    # # apply a force at the top middle
-    # offset = int(np.ceil(m * 0.01))
-    # for i in range(offset):
-    #     forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
-    #     forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
+    # apply a force at the top middle
+    offset = int(np.ceil(m * 0.01))
+    for i in range(offset):
+        forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
+        forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
 
     r0 = l / nx * r0_
     ic(r0)
@@ -2808,31 +2859,31 @@ def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100):
     Ej = []
     redu_idx = 0
 
-    # # 2-way reflection left to right
-    # for j in range(2 * (n + 1)):
-    #     for i in range((m + 1) // 2):
-    #         if j % 2 == 0:
-    #             Ej.extend([i + j * (m + 1) // 4])
-    #         else:
-    #             Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
-    #         Ei.extend([i + j * (m + 1) // 2])
+    # 2-way reflection left to right
+    for j in range(2 * (n + 1)):
+        for i in range((m + 1) // 2):
+            if j % 2 == 0:
+                Ej.extend([i + j * (m + 1) // 4])
+            else:
+                Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
+            Ei.extend([i + j * (m + 1) // 2])
 
-    # 4-way reflection of x- and y-symmetry axes
-    a = n // 2
-    b = m // 2
-    for i in range(a + 1):
-        for j in range(b + 1):
-            if nodes[i, j] not in non_design_nodes:
-                Ej.extend(4 * [redu_idx])
-                Ei.extend(
-                    [
-                        nodes[i, j],
-                        nodes[n - i, j],
-                        nodes[i, m - j],
-                        nodes[n - i, m - j],
-                    ]
-                )
-                redu_idx += 1
+    # # 4-way reflection of x- and y-symmetry axes
+    # a = n // 2
+    # b = m // 2
+    # for i in range(a + 1):
+    #     for j in range(b + 1):
+    #         if nodes[i, j] not in non_design_nodes:
+    #             Ej.extend(4 * [redu_idx])
+    #             Ei.extend(
+    #                 [
+    #                     nodes[i, j],
+    #                     nodes[n - i, j],
+    #                     nodes[i, m - j],
+    #                     nodes[n - i, m - j],
+    #                 ]
+    #             )
+    #             redu_idx += 1
 
     Ev = np.ones(len(Ei))
     dv_mapping = coo_matrix((Ev, (Ei, Ej)))
@@ -3154,6 +3205,11 @@ def parse_cmd_args():
         choices=["square", "beam", "lbracket", "building"],
     )
     p.add_argument(
+        "--problem",
+        default="natural_frequency",
+        choices=["natural_frequency", "buckling"],
+    )
+    p.add_argument(
         "--assume-same-element",
         action="store_true",
         help="assume all elements have identical shape",
@@ -3455,7 +3511,7 @@ def main(args):
         raise ValueError("Not supported domain")
 
     D_index = None
-    ic(args.domain, args.confs, m, n)
+    ic(args.domain, args.objf, args.confs, m, n)
     for conf in args.confs:
         if conf == "displacement":
             if args.domain == "beam":
@@ -3509,6 +3565,7 @@ def main(args):
         prefix=args.prefix,
         dv_mapping=dv_mapping,
         lb=args.lb,
+        prob=args.problem,
         objf=args.objf,
         confs=args.confs,
         omega_lb=args.omega_lb,
