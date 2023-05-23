@@ -70,6 +70,49 @@ def _populate_Be(nelems, xi, eta, xe, ye, Be):
     return detJ
 
 
+def _populate_Be_and_Te(nelems, xi, eta, xe, ye, Be, Te):
+    """
+    Populate B matrices for all elements at a quadrature point
+    """
+    J = np.zeros((nelems, 2, 2))
+    invJ = np.zeros(J.shape)
+
+    Nxi = 0.25 * np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
+    Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+
+    # Compute the Jacobian transformation at each quadrature points
+    J[:, 0, 0] = np.dot(xe, Nxi)
+    J[:, 1, 0] = np.dot(ye, Nxi)
+    J[:, 0, 1] = np.dot(xe, Neta)
+    J[:, 1, 1] = np.dot(ye, Neta)
+
+    # Compute the inverse of the Jacobian
+    detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
+    invJ[:, 0, 0] = J[:, 1, 1] / detJ
+    invJ[:, 0, 1] = -J[:, 0, 1] / detJ
+    invJ[:, 1, 0] = -J[:, 1, 0] / detJ
+    invJ[:, 1, 1] = J[:, 0, 0] / detJ
+
+    # Compute the derivative of the shape functions w.r.t. xi and eta
+    # [Nx, Ny] = [Nxi, Neta]*invJ
+    Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
+    Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
+
+    # Set the B matrix for each element
+    Be[:, 0, ::2] = Nx
+    Be[:, 1, 1::2] = Ny
+    Be[:, 2, ::2] = Ny
+    Be[:, 2, 1::2] = Nx
+
+    # Set the entries for the stress stiffening matrix
+    for i in range(nelems):
+        Te[i, 0, :, :] = np.outer(Nx[i, :], Nx[i, :])
+        Te[i, 1, :, :] = np.outer(Ny[i, :], Ny[i, :])
+        Te[i, 2, :, :] = np.outer(Nx[i, :], Ny[i, :]) + np.outer(Ny[i, :], Nx[i, :])
+
+    return detJ
+
+
 def _populate_Be_single(xi, eta, xe, ye, Be):
     """
     Populate B matrix for a single element at a quadrature point
@@ -100,6 +143,48 @@ def _populate_Be_single(xi, eta, xe, ye, Be):
     Be[1, 1::2] = Ny
     Be[2, ::2] = Ny
     Be[2, 1::2] = Nx
+
+    return detJ
+
+
+def _populate_Be_and_Te_single(xi, eta, xe, ye, Be, Te):
+    """
+    Populate B matrices for all elements at a quadrature point
+    """
+    J = np.zeros((2, 2))
+    invJ = np.zeros(J.shape)
+
+    Nxi = 0.25 * np.array([-(1.0 - eta), (1.0 - eta), (1.0 + eta), -(1.0 + eta)])
+    Neta = 0.25 * np.array([-(1.0 - xi), -(1.0 + xi), (1.0 + xi), (1.0 - xi)])
+
+    # Compute the Jacobian transformation at each quadrature points
+    J[0, 0] = np.dot(xe, Nxi)
+    J[1, 0] = np.dot(ye, Nxi)
+    J[0, 1] = np.dot(xe, Neta)
+    J[1, 1] = np.dot(ye, Neta)
+
+    # Compute the inverse of the Jacobian
+    detJ = J[0, 0] * J[1, 1] - J[0, 1] * J[1, 0]
+    invJ[0, 0] = J[1, 1] / detJ
+    invJ[0, 1] = -J[0, 1] / detJ
+    invJ[1, 0] = -J[1, 0] / detJ
+    invJ[1, 1] = J[0, 0] / detJ
+
+    # Compute the derivative of the shape functions w.r.t. xi and eta
+    # [Nx, Ny] = [Nxi, Neta]*invJ
+    Nx = np.outer(invJ[0, 0], Nxi) + np.outer(invJ[1, 0], Neta)
+    Ny = np.outer(invJ[0, 1], Nxi) + np.outer(invJ[1, 1], Neta)
+
+    # Set the B matrix for each element
+    Be[0, ::2] = Nx
+    Be[1, 1::2] = Ny
+    Be[2, ::2] = Ny
+    Be[2, 1::2] = Nx
+
+    # Set the entries for the stress stiffening matrix
+    Te[0, :, :] = np.outer(Nx, Nx)
+    Te[1, :, :] = np.outer(Ny, Ny)
+    Te[2, :, :] = np.outer(Nx, Ny) + np.outer(Ny, Nx)
 
     return detJ
 
@@ -800,6 +885,101 @@ class TopologyAnalysis:
 
         return dfdrho
 
+    def assemble_stress_stiffness(self, rho, u):
+        """
+        Compute the stress stiffness matrix for buckling, given the displacement path u
+        """
+
+        # Average the density to get the element-wise density
+        rhoE = 0.25 * (
+            rho[self.conn[:, 0]]
+            + rho[self.conn[:, 1]]
+            + rho[self.conn[:, 2]]
+            + rho[self.conn[:, 3]]
+        )
+
+        # Get the element-wise solution variables
+        ue = np.zeros((self.nelems, 8))
+        ue[:, ::2] = u[2 * self.conn]
+        ue[:, 1::2] = u[2 * self.conn + 1]
+
+        # Compute the element stiffnesses
+        if self.ptype_K == "simp":
+            C = np.outer(rhoE ** (self.p + 1) + self.rho0_K, self.C0)
+        else:  # ramp
+            C = np.outer(
+                rhoE / (1.0 + (self.q + 1) * (1.0 - rhoE)) + self.rho0_K, self.C0
+            )
+
+        C = C.reshape((self.nelems, 3, 3))
+
+        # Compute the element stiffness matrix
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+
+        # Assemble all of the the 8 x 8 element stiffness matrix
+        Ge = np.zeros((self.nelems, 8, 8))
+
+        if self.assume_same_element:
+            Be_ = np.zeros((3, 8))
+            Te_ = np.zeros((3, 4, 4))
+
+            # Compute the x and y coordinates of the first element
+            xe_ = self.X[self.conn[0], 0]
+            ye_ = self.X[self.conn[0], 1]
+
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_Be_single(xi, eta, xe_, ye_, Be_)
+
+                    # This is a fancy (and fast) way to compute the element matrices
+                    Ke += detJ * np.einsum("ij,nik,kl -> njl", Be_, C, Be_)
+
+            pass
+        else:
+            Be = np.zeros((self.nelems, 3, 8))
+            Te = np.zeros((self.nelems, 3, 4, 4))
+
+            # Compute the x and y coordinates of each element
+            xe = self.X[self.conn, 0]
+            ye = self.X[self.conn, 1]
+
+            for j in range(2):
+                for i in range(2):
+                    xi = gauss_pts[i]
+                    eta = gauss_pts[j]
+                    detJ = _populate_Be_and_Te(self.nelems, xi, eta, xe, ye, Be, Te)
+
+                    # Compute the stresses in each element
+                    s = np.einsum("nij,njk,nk -> ni", C, Be, ue)
+
+                    # G0e =
+                    # s[0] * np.outer(Nx, Nx) +
+                    # s[1] * np.outer(Ny, Ny) +
+                    # s[2] * (np.outer(Nx, Ny) + np.outer(Ny, Nx))
+                    G0e = np.einsum("n,ni,nijl -> njl", detJ, s, Te)
+                    Ge[:, 0::2, 0::2] += G0e
+                    Ge[:, 1::2, 1::2] += G0e
+
+        G = sparse.coo_matrix((Ge.flatten(), (self.i, self.j)))
+        G = G.tocsr()
+
+        return G
+
+    def stress_stffness_derivative(self, rho, psi, phi, solver):
+        """
+        Compute the derivative of psi^{T} * G(u, x) * phi using the adjoint method.
+
+        Note "solver" returns the solution of the system of equations
+
+        K * sol = rhs
+
+        Given the right-hand-side rhs. ie. sol = solver(rhs)
+        """
+
+        pass
+
     def reduce_vector(self, forces):
         """
         Eliminate essential boundary conditions from the vector
@@ -1026,6 +1206,45 @@ class TopologyAnalysis:
             dfdrho -= (omega[i] ** 2 * eta[i] / (2 * omega[i])) * mx
 
         return self.fltr.applyGradient(dfdrho, x)
+
+    def solve_buckling(self, x, k=5, sigma=1.0):
+        if k > len(self.reduced):
+            k = len(self.reduced)
+
+        # Compute the density at each node
+        rho = self.fltr.apply(x)
+
+        K = self.assemble_stiffness_matrix(rho)
+        Kr = self.reduce_matrix(K)
+
+        # Compute the solution path
+        Kfact = linalg.factorized(Kr)
+        ur = Kfact(self.fr)
+        u = self.full_vector(ur)
+
+        # Find the gemoetric stiffness matrix
+        G = self.assemble_stress_stiffness(u)
+        Gr = self.reduce_matrix(G)
+
+        # Find the eigenvalues closest to zero. This uses a shift and
+        # invert strategy around sigma = 0, which means that the largest
+        # magnitude values are closest to zero.
+        if k == len(self.reduced):
+            eigs, Qr = eigh(Gr.todense(), Kr.todense())
+        else:
+            eigs, Qr = sparse.linalg.eigsh(
+                Gr, M=Kr, k=k, sigma=sigma, which="LM", tol=1e-10
+            )
+
+        Q = np.zeros((self.nvars, k))
+        for i in range(k):
+            Q[self.reduced, i] = Qr[:, i]
+
+        # Save the eigenvalues and eigenvectors
+        self.eigs = eigs
+        self.Q = Q
+
+        return eigs
 
     @time_this
     def eigenvector_displacement(self, ks_rho=100.0):
@@ -3110,11 +3329,11 @@ def main(args):
             if args.domain == "square":
                 if args.mode == 1:
                     # node_loc=(0.75*n, 0.75*m), x direction
-                    indx = int((0.75 * n * (m+1) + 0.75 * m))
+                    indx = int((0.75 * n * (m + 1) + 0.75 * m))
                     ic(indx)
                     D_index = [2 * indx, 2 * indx + 1]
                 elif args.mode == 2:
-                    indx = int((0.67 * n * (m+1) + 0.67 * m))
+                    indx = int((0.67 * n * (m + 1) + 0.67 * m))
                     D_index = [2 * indx, 2 * indx + 1]
 
     # Create the filter
