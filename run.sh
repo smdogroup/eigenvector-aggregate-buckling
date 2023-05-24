@@ -26,7 +26,7 @@ fi
 
 # ###################### beam ######################
 echo "Running beam problem, check log file in output/beam"
-python3 topo_opt.py --domain beam --prob buckling --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.5 --omega-lb 1 --maxit 100
+python3 topo_opt.py --domain beam --prob buckling --objf compliance --confs volume_ub frequency --nx 10 --r0 1.0 --vol-frac-ub 0.5 --omega-lb 30 --maxit 100
 # echo "Finished, press enter to continue..."
 # read ans
 

@@ -968,6 +968,7 @@ class TopologyAnalysis:
                     Ge[:, 0::2, 0::2] += G0e
                     Ge[:, 1::2, 1::2] += G0e
 
+        # Assemble the global stiffness matrix
         G = sparse.coo_matrix((Ge.flatten(), (self.i, self.j)))
         G = G.tocsr()
 
@@ -1066,9 +1067,6 @@ class TopologyAnalysis:
         adjr = solver(dfdur)
         adj = self.full_vector(adjr)
 
-        # Compute the
-        dfdrho -= self.stiffness_matrix_derivative(rho, adj, u)
-
         dfdrhoE = np.zeros(self.nelems)
         for i in range(3):
             for j in range(3):
@@ -1083,7 +1081,52 @@ class TopologyAnalysis:
             np.add.at(dfdrho, self.conn[:, i], dfdrhoE)
         dfdrho *= 0.25
 
+        # Compute the derivative of the stiffness matrix w.r.t. rho
+        dfdrho -= self.stiffness_matrix_derivative(rho, adj, u)
+        
         return dfdrho
+    
+    def check_buckling(self, rho, psi, phi, dh=1e-6):
+        K = self.assemble_stiffness_matrix(rho)
+        Kr = self.reduce_matrix(K)
+
+        # Compute the solution path
+        fr = self.reduce_vector(self.f)
+        Kfact = linalg.factorized(Kr)
+        ur = Kfact(fr)
+        u = self.full_vector(ur)
+        
+        # Find the gemoetric stiffness matrix
+        G = self.assemble_stress_stiffness(rho, u)
+        Gr = self.reduce_matrix(G)
+        
+        gx = self.stress_stiffness_derivative(rho, u, psi, phi, Kfact)
+        
+        f0 = np.dot(psi, G @ phi)
+        p_rho = np.random.uniform(size=rho.shape)
+        rho_1 = rho + dh * p_rho
+        exact = np.dot(gx, p_rho)
+        
+        K = self.assemble_stiffness_matrix(rho_1)
+        Kr = self.reduce_matrix(K)
+
+        # Compute the solution path
+        fr = self.reduce_vector(self.f)
+        Kfact = linalg.factorized(Kr)
+        ur = Kfact(fr)
+        u = self.full_vector(ur)
+        
+        # Find the gemoetric stiffness matrix
+        G = self.assemble_stress_stiffness(rho_1, u)
+        Gr = self.reduce_matrix(G)
+        
+        f1 = np.dot(psi, G @ phi)
+        fd = (f1 - f0) / dh
+        
+        print("Exact: ", exact)
+        print("FD: ", fd)
+        print("Error: ", np.abs(exact - fd)/np.abs(exact))
+        
 
     def reduce_vector(self, forces):
         """
@@ -1312,7 +1355,7 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
-    def solve_buckling(self, x, k=5, sigma=1.0, nodal_sols=None, nodal_vecs=None):
+    def solve_buckling(self, x, k=5, sigma=1000, nodal_sols=None, nodal_vecs=None):
         if k > len(self.reduced):
             k = len(self.reduced)
 
@@ -1336,11 +1379,19 @@ class TopologyAnalysis:
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
         if k == len(self.reduced):
-            eigs, Qr = eigh(Gr.todense(), Kr.todense())
+            # eigs, Qr = eigh(Kr.todense(), Gr.todense())
+            pass
         else:
             eigs, Qr = sparse.linalg.eigsh(
-                Gr, M=Kr, k=k, sigma=sigma, mode="buckling", which="LM", tol=1e-10
+                Kr, M=Gr, k=k, sigma=-sigma, mode="buckling", which="SM", tol=1e-10
             )
+     
+        eigs *= -1
+        R = Kr @ Qr[:, 0] + eigs[0] * Gr @ Qr[:, 0]
+        
+        self.QGQ = np.zeros(k)
+        for i in range(k):
+            self.QGQ[i] = np.dot(Qr[:, i], Gr @ Qr[:, i])
 
         Q = np.zeros((self.nvars, k))
         for i in range(k):
@@ -1358,6 +1409,8 @@ class TopologyAnalysis:
         # Save the eigenvalues and eigenvectors
         self.eigs = eigs
         self.Q = Q
+        
+        self.check_buckling(rho, Q[:,0], Q[:,0])
 
         return eigs
 
@@ -1394,10 +1447,8 @@ class TopologyAnalysis:
 
         for i in range(len(self.eigs)):
             kx = self.stiffness_matrix_derivative(rho, Q[:, i], Q[:, i])
-            dfdrho += eta[i] * kx
-
             gx = self.stress_stiffness_derivative(rho, u, Q[:, i], Q[:, i], Kfact)
-            dfdrho += self.eigs[i] * eta[i] * gx
+            dfdrho -= eta[i] * (kx + self.eigs[i] * gx) / self.QGQ[i]
 
         return self.fltr.applyGradient(dfdrho, x)
 
@@ -2223,7 +2274,7 @@ class TopOptProb:
                 omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
             elif self.prob == "buckling":
                 omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho)
-            obj = -0.01 * omega_ks
+            obj = -1 * omega_ks
             foi["omega_ks"] = omega_ks
         elif self.objf == "compliance":
             compliance = self.analysis.compliance(self.xfull)
@@ -2450,15 +2501,13 @@ class TopOptProb:
             elif self.objf == "frequency":
                 if self.prob == "natural_frequency":
                     g[:] = (
-                        -0.01
-                        * self.analysis.ks_omega_derivative(self.xfull)[
+                        -self.analysis.ks_omega_derivative(self.xfull)[
                             self.design_nodes
                         ]
                     )
                 elif self.prob == "buckling":
                     g[:] = (
-                        -0.01
-                        * self.analysis.ks_buckling_derivative(self.xfull)[
+                        -self.analysis.ks_buckling_derivative(self.xfull)[
                             self.design_nodes
                         ]
                     )
@@ -3620,10 +3669,10 @@ def main(args):
 
         paroptprob = ParOptProb(MPI.COMM_SELF, topo)
 
-        if args.grad_check:
-            for i in range(5):
-                paroptprob.checkGradients(1e-6)
-            exit(0)
+        # if args.grad_check:
+        for i in range(5):
+            paroptprob.checkGradients(1e-6)
+        exit(0)
 
         if args.optimizer == "pmma":
             algorithm = "mma"
