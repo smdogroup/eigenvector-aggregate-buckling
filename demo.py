@@ -1,10 +1,11 @@
+from icecream import ic
 import matplotlib.pylab as plt
 from mpl_toolkits.mplot3d import Axes3D, proj3d
 import mpmath as mp
 import numpy as np
 from scipy.linalg import eigh, expm
 from scipy.optimize import minimize
-
+from scipy import sparse, spatial
 
 def rand_symm_mat(n=10, eig_low=0.1, eig_high=100.0, nrepeat=1):
     # Randomly generated matrix that will be used to generate the eigenvectors
@@ -180,8 +181,8 @@ def deriv_approx(A, B, D, Adot, Bdot, Ddot=None, ndvs=1, rho=1.0, N=5):
 
 # Set parameters
 rho = 1000.0
-N = 10
-n = 100
+N = 5
+n = 30
 dh = 1e-30
 ndvs = 5
 
@@ -191,21 +192,57 @@ x = 0.1 * np.ones(ndvs)
 p = np.random.uniform(size=ndvs)
 
 A = rand_symm_mat(n)
-B = rand_symm_mat(n)
+B = rand_symm_mat(n, eig_low=-10, eig_high=10.0)
 Adot = rand_symm_mat(n)
 Bdot = rand_symm_mat(n)
 Ddot = rand_symm_mat(n)
 D = rand_symm_mat(n)
 
-lam, Q = eigh(A, B)
+# check if some eigenvalues of B are negative
+ic(np.any(np.linalg.eigvals(B) < 0))
+
+# set positive infinity to be the largest eigenvalue of B
+sigma = np.power(10.0, 10.0)
+
+lam1, Q = sparse.linalg.eigsh(A, M=B, k=n-1, sigma=np.power(10.0, 10.0), which="LA", mode="buckling")
+lam2, Q = sparse.linalg.eigsh(A, M=B, k=1, sigma=-np.power(10.0, 10.0), which="LA", mode="buckling")
+# combine lam1 and lam2
+lam = np.concatenate((lam1, lam2))
+ic(lam)
+
+# lam, Q = sparse.linalg.eigsh(A, M=B, k=N, sigma=-np.power(10.0, 10.0), which="SM", mode="buckling")
+lam, Q = sparse.linalg.eigsh(A, M=B, k=N, sigma=-np.power(10.0, 0.0), which="LA", mode="buckling")
+
+ic(lam)
+lam *= -1.0
+R = A @ Q[:, -1] + lam[-1] * B @ Q[:, -1]
+# check that the residual is small
+ic(R)
+ic(np.linalg.norm(R))
+ic(np.allclose(R, np.zeros_like(R), atol=1e-8))
+# check if A - lam[0] * B is singular
+ic(np.linalg.cond(A - lam[0] * B) < 1e-8)
+
+ic(lam)
+# re-order the eigenvalues and eigenvectors by magnitude
+idx = np.argsort(np.abs(lam))
+lam = lam[idx]
+Q = Q[:, idx]
+ic(lam)
+
+# lam = - 1 / lam
+# ic(lam)
+
+# lam, Q = sparse.linalg.eigsh(B, M=A, k=N, sigma=1.0, which="LM", mode="buckling")
+# ic(lam)
 
 eta = np.exp(-rho * (lam - np.min(lam)))
 eta = eta / np.sum(eta)
 
 times = []
 
-ans = np.dot(deriv(rho, A, B, D, Adot, Bdot, Ddot,ndvs=ndvs), p)
-ans_approx = np.dot(deriv_approx(A, B, D, Adot, Bdot,Ddot, ndvs=ndvs, rho=rho, N=N), p)
+ans = np.dot(deriv(rho, A, B, D, Adot, Bdot, Ddot, ndvs=ndvs), p)
+ans_approx = np.dot(deriv_approx(A, B, D, Adot, Bdot, Ddot, ndvs=ndvs, rho=rho, N=N), p)
 
 print("ans = ", ans)
 print("ans_approx = ", ans_approx)

@@ -7,3 +7,5 @@ __pycache__
 .DS_Store
 *.png
 *.html
+.vscode
+build
