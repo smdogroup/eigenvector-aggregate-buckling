@@ -4,6 +4,7 @@ import multiprocessing as multiprocessing
 import os
 import shutil as shutil
 from shutil import rmtree
+import time
 from timeit import default_timer as timer
 
 from icecream import ic
@@ -17,6 +18,8 @@ from scipy.linalg import eigh
 from scipy.sparse import coo_matrix, linalg
 
 from other.utils import time_this, timer_set_log_path
+
+# import stiffness
 
 
 class Logger:
@@ -48,7 +51,6 @@ def _populate_Be(nelems, xi, eta, xe, ye, Be):
     J[:, 1, 0] = np.dot(ye, Nxi)
     J[:, 0, 1] = np.dot(xe, Neta)
     J[:, 1, 1] = np.dot(ye, Neta)
-
     # Compute the inverse of the Jacobian
     detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
     invJ[:, 0, 0] = J[:, 1, 1] / detJ
@@ -261,7 +263,7 @@ class NodeFilter:
     """
 
     def __init__(
-        self, conn, X, r0=1.0, ftype="spatial", beta=6.0, eta=0.5, projection=False
+        self, conn, X, r0=1.0, ftype="spatial", beta=2.0, eta=0.5, projection=False
     ):
         """
         Create a filter
@@ -480,7 +482,7 @@ class TopologyAnalysis:
         forces={},
         m=None,
         D_index=None,
-        E=10.0 * 1e6,
+        E=1.0,
         nu=0.3,
         ptype_K="ramp",
         ptype_M="ramp",
@@ -597,6 +599,8 @@ class TopologyAnalysis:
         Assemble the stiffness matrix
         """
 
+        # time_start = time.time()
+
         # Average the density to get the element-wise density
         rhoE = 0.25 * (
             rho[self.conn[:, 0]]
@@ -607,10 +611,11 @@ class TopologyAnalysis:
 
         # Compute the element stiffnesses
         if self.ptype_K == "simp":
-            C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
+            rhoE = rhoE**self.p + self.rho0_K
         else:  # ramp
-            C = np.outer(rhoE / (1.0 + self.q * (1.0 - rhoE)) + self.rho0_K, self.C0)
+            rhoE = rhoE / (1.0 + self.q * (1.0 - rhoE)) + self.rho0_K
 
+        C = np.outer(rhoE, self.C0)
         C = C.reshape((self.nelems, 3, 3))
 
         # Compute the element stiffness matrix
@@ -641,7 +646,6 @@ class TopologyAnalysis:
             # Compute the x and y coordinates of each element
             xe = self.X[self.conn, 0]
             ye = self.X[self.conn, 1]
-
             for j in range(2):
                 for i in range(2):
                     xi = gauss_pts[i]
@@ -651,11 +655,32 @@ class TopologyAnalysis:
                     # This is a fancy (and fast) way to compute the element matrices
                     Ke += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
 
+        # time_end = time.time()
+        # print("Python: ", time_end - time_start)
+
         K = sparse.coo_matrix((Ke.flatten(), (self.i, self.j)))
         K = K.tocsr()
 
         if self.K0 is not None:
             K += self.K0
+
+        # time_start = time.time()
+
+        # Ke2 = stiffness.assemble_stiffness_matrix(
+        #     self.X, self.conn, rho, self.C0, self.rho0_K, self.ptype_K, self.p, self.q
+        # )
+
+        # time_end = time.time()
+        # print("Cython: ", time_end - time_start)
+
+        # K2 = sparse.coo_matrix((Ke2.flatten(), (self.i, self.j)))
+        # K2 = K2.tocsr()
+
+        # if self.K0 is not None:
+        #     K2 += self.K0
+
+        # # check if K and K2 are the same
+        # ic(np.allclose(K.toarray(), K2.toarray()))
 
         return K
 
@@ -908,7 +933,7 @@ class TopologyAnalysis:
 
         # Compute the element stiffnesses
         if self.ptype_K == "simp":
-            C = np.outer(rhoE ** (self.p + 1) + self.rho0_K, self.C0)
+            C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
         else:  # ramp
             C = np.outer(
                 rhoE / (1.0 + (self.q + 1) * (1.0 - rhoE)) + self.rho0_K, self.C0
@@ -1001,7 +1026,7 @@ class TopologyAnalysis:
 
         # Compute the element stiffnesses
         if self.ptype_K == "simp":
-            C = np.outer(rhoE ** (self.p + 1) + self.rho0_K, self.C0)
+            C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
         else:  # ramp
             C = np.outer(
                 rhoE / (1.0 + (self.q + 1) * (1.0 - rhoE)) + self.rho0_K, self.C0
@@ -1076,7 +1101,7 @@ class TopologyAnalysis:
                 dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
         if self.ptype_K == "simp":
-            dfdrhoE[:] *= (self.p + 1) * rhoE**self.p
+            dfdrhoE[:] *= self.p * rhoE ** (self.p - 1)
         else:  # ramp
             dfdrhoE[:] *= (2.0 + self.q) / (1.0 + (self.q + 1.0) * (1.0 - rhoE)) ** 2
 
@@ -1325,7 +1350,7 @@ class TopologyAnalysis:
 
         3. Determine N
         """
-        ks_rho = self.nnodes / np.abs(lam[0])
+        ks_rho = 1000 / np.abs(lam[0])
 
         lam_min = np.min(lam)
         eta = np.exp(-ks_rho * (lam - lam_min))
@@ -1393,9 +1418,7 @@ class TopologyAnalysis:
 
         return self.fltr.applyGradient(dfdrho, x)
 
-    def solve_buckling(
-        self, x, k=5, sigma=np.power(10.0, 0.0), nodal_sols=None, nodal_vecs=None
-    ):
+    def solve_buckling(self, x, k=5, sigma=0.001, nodal_sols=None, nodal_vecs=None):
         if k > len(self.reduced):
             k = len(self.reduced)
 
@@ -1427,7 +1450,7 @@ class TopologyAnalysis:
             # ic("Gr is symmetric: ", np.allclose(Gr.todense(), Gr.todense().T))
             # ic("Kr is symmetric: ", np.allclose(Kr.todense(), Kr.todense().T))
             # ic("Kr is positive definite: ", np.all(np.linalg.eigvals(Kr.todense()) > 0))
-
+            # set target eigenvalue small enough to get the smallest eigenvalues
             eigs, Qr = sparse.linalg.eigsh(
                 Kr, M=Gr, k=k, sigma=-sigma, mode="buckling", which="LA", tol=1e-10
             )
@@ -2558,7 +2581,10 @@ class TopOptProb:
         confs="volume_ub",
         omega_lb=None,
         stress_ub=None,
+        compliance_ub=None,
+        frequency_scale=1e-2,
         stress_scale=1e-12,
+        compliance_scale=1e6,
         grad_check=False,
         domain="square",
     ):
@@ -2574,7 +2600,10 @@ class TopOptProb:
         self.confs = confs
         self.omega_lb = omega_lb
         self.stress_ub = stress_ub
+        self.compliance_ub = compliance_ub
+        self.frequency_scale = frequency_scale
         self.stress_scale = stress_scale
+        self.compliance_scale = compliance_scale
         self.lb = lb
         self.grad_check = grad_check
         self.domain = domain
@@ -2692,6 +2721,7 @@ class TopOptProb:
                 self.domain == "beam"
                 or self.domain == "building"
                 or self.domain == "leg"
+                or self.domain == "rhombus"
             ):
                 area *= 1 / np.sum(self.area_gradient)
             foi["area"] = area
@@ -2700,11 +2730,11 @@ class TopOptProb:
                 omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
             elif self.prob == "buckling":
                 omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho)
-            obj = -0.01 * omega_ks
+            obj = -self.frequency_scale * omega_ks
             foi["omega_ks"] = omega_ks
         elif self.objf == "compliance":
             compliance = self.analysis.compliance(self.xfull)
-            obj = compliance
+            obj = self.compliance_scale * compliance
             foi["compliance"] = compliance
         elif self.objf == "displacement":
             displacement = self.analysis.eigenvector_displacement(ks_rho=self.ks_rho)
@@ -2759,6 +2789,12 @@ class TopOptProb:
             displacement = self.analysis.eigenvector_displacement(ks_rho=self.ks_rho)
             con.append(self.fixed_dis_ub - displacement)
             foi["displacement"] = displacement
+
+        if "compliance" in self.confs:
+            assert self.compliance_ub is not None
+            compliance = self.analysis.compliance(self.xfull)
+            con.append(1.0 - compliance / self.compliance_ub)
+            foi["compliance"] = compliance
 
         # Evaluate all quantities of interest
         if eval_all:
@@ -2857,15 +2893,15 @@ class TopOptProb:
                 )
             elif self.objf == "frequency":
                 if self.prob == "natural_frequency":
-                    g[:] = -0.01 * self.dv_mapping.T.dot(
+                    g[:] = -self.frequency_scale * self.dv_mapping.T.dot(
                         self.analysis.ks_omega_derivative(self.xfull)
                     )
                 elif self.prob == "buckling":
-                    g[:] = -0.01 * self.dv_mapping.T.dot(
+                    g[:] = -self.frequency_scale * self.dv_mapping.T.dot(
                         self.analysis.ks_buckling_derivative(self.xfull)
                     )
             elif self.objf == "compliance":
-                g[:] = self.dv_mapping.T.dot(
+                g[:] = self.compliance_scale * self.dv_mapping.T.dot(
                     self.analysis.compliance_gradient(self.xfull)
                 )
             elif self.objf == "displacement":
@@ -2923,6 +2959,15 @@ class TopOptProb:
                 )
                 index += 1
 
+            if "compliance" in self.confs:
+                A[index][:] = (
+                    -self.dv_mapping.T.dot(
+                        self.analysis.compliance_gradient(self.xfull)
+                    )
+                    / self.compliance_ub
+                )
+                index += 1
+
         else:
             # Populate the nodal variable for analysis
             self.xfull[self.design_nodes] = x[:]
@@ -2932,20 +2977,23 @@ class TopOptProb:
             elif self.objf == "frequency":
                 if self.prob == "natural_frequency":
                     g[:] = (
-                        -0.01
+                        -self.frequency_scale
                         * self.analysis.ks_omega_derivative(self.xfull)[
                             self.design_nodes
                         ]
                     )
                 elif self.prob == "buckling":
                     g[:] = (
-                        -0.01
+                        -self.frequency_scale
                         * self.analysis.ks_buckling_derivative(self.xfull)[
                             self.design_nodes
                         ]
                     )
             elif self.objf == "compliance":
-                g[:] = self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
+                g[:] = (
+                    self.compliance_scale
+                    * self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
+                )
             elif self.objf == "displacement":
                 g[:] = (
                     10
@@ -3001,6 +3049,13 @@ class TopOptProb:
                         self.xfull, self.ks_rho
                     )[self.design_nodes]
                     / self.disp_ub
+                )
+                index += 1
+
+            if "compliance" in self.confs:
+                A[index][:] = (
+                    -self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
+                    / self.compliance_ub
                 )
                 index += 1
 
@@ -3391,7 +3446,73 @@ def create_beam_domain(r0_=2.1, l=8.0, frac=0.125, nx=100, prob="natural_frequen
     return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
 
 
-def create_building_domain(r0_=2.1, l=8.0, frac=2, nx=100, m0_block_frac=0.0):
+def create_rhombus_domain(r0_=2.1, l=2.0, frac=3, nx=100):
+    """
+    __________________________|
+    |                         |
+    |                         | n = nx
+    |_________________________|
+            m = 3 * nx
+    """
+
+    m = int(frac * nx)
+    n = nx
+
+    nelems = m * n
+    nnodes = (m + 1) * (n + 1)
+
+    y = np.linspace(0, l, n + 1)
+    x = np.linspace(0, l * frac, m + 1)
+    nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
+
+    # Set the node locations
+    X = np.zeros((nnodes, 2))
+    for j in range(n + 1):
+        for i in range(m + 1):
+            X[i + j * (m + 1), 0] = x[i]
+            X[i + j * (m + 1), 1] = y[j]
+
+    # Set the connectivity
+    conn = np.zeros((nelems, 4), dtype=int)
+    for j in range(n):
+        for i in range(m):
+            conn[i + j * m, 0] = nodes[j, i]
+            conn[i + j * m, 1] = nodes[j, i + 1]
+            conn[i + j * m, 2] = nodes[j + 1, i + 1]
+            conn[i + j * m, 3] = nodes[j + 1, i]
+
+    non_design_nodes = []
+    # apply top middle a square block
+    # nm = int(np.ceil(2*n * m0_block_frac))
+    # for i in range(n - nm+1, n+1):
+    #     for j in range((m - nm) // 2 +1, (m + nm) // 2 +1):
+    #         non_design_nodes.append(nodes[i, j])
+
+    bcs = {}
+    forces = {}
+    # fix the bottom left and right
+    offset = int(np.ceil(n / 20))
+    for i in range(offset):
+        bcs[nodes[0, i]] = [0, 1]
+        bcs[nodes[0, int(2 * n) + i]] = [1]
+
+    # bcs[nodes[0, 0]] = [0, 1]
+    # bcs[nodes[0, int(2*n)]] = [1]
+
+    # force is independent of the mesh size apply a force at the top middle
+    P = 1000.0
+    offset = int(np.ceil(n / 20))
+    # offset = 1
+    for i in range(offset):
+        forces[nodes[n, m - i]] = [0, -P / offset]
+
+    r0 = l / nx * r0_
+    ic(r0)
+
+    return conn, X, r0, bcs, forces, non_design_nodes
+
+
+def create_building_domain(r0_=2.1, l=1.0, frac=2, nx=100, m0_block_frac=0.0):
     """
     _______
     |     |
@@ -3466,8 +3587,6 @@ def create_building_domain(r0_=2.1, l=8.0, frac=2, nx=100, m0_block_frac=0.0):
     #         non_design_nodes.append(nodes[i * h, j])
 
     bcs = {}
-
-    offset = int(np.floor(n * 0.0002))
     for j in range(m + 1):
         bcs[nodes[0, j]] = [0, 1]
 
@@ -3475,15 +3594,13 @@ def create_building_domain(r0_=2.1, l=8.0, frac=2, nx=100, m0_block_frac=0.0):
     # bcs[nodes[0, m]] = [0, 1]
 
     # force is independent of the mesh size
-    P = 10000.0
+    P = 1e-3
     forces = {}
     # apply a force at the top middle
-    offset = int(np.floor(m / 20))
+    offset = int(np.floor(m / 30))
     for i in range(offset):
         forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
         forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
-    # forces[nodes[n, m // 2]] = [P, 0]
-    # forces[nodes[n, m // 2 + 1]] = [P, 0]
 
     r0 = l / nx * r0_
     ic(r0)
@@ -3755,7 +3872,7 @@ def get_paropt_default_options(prefix, algorithm="tr", maxit=1000):
         "penalty_gamma": 1e3,
         "qn_subspace_size": 10,
         "qn_type": "bfgs",
-        "abs_res_tol": 1e-16,
+        "abs_res_tol": 1e-8,
         "starting_point_strategy": "affine_step",
         # "barrier_strategy": "mehrotra_predictor_corrector",
         "barrier_strategy": "mehrotra",
@@ -3779,7 +3896,7 @@ def parse_cmd_args():
     p.add_argument(
         "--domain",
         default="square",
-        choices=["square", "beam", "lbracket", "building", "leg"],
+        choices=["square", "beam", "lbracket", "building", "leg", "rhombus"],
     )
     p.add_argument(
         "--problem",
@@ -3810,11 +3927,11 @@ def parse_cmd_args():
         help="density filter type",
     )
     p.add_argument(
-        "--ks-rho", default=100.0, type=float, help="ks aggregation parameter"
+        "--ks-rho", default=160.0, type=float, help="ks aggregation parameter"
     )
     p.add_argument(
         "--ks-rho-stress",
-        default=2.5e-6,
+        default=30,
         type=float,
         help="stress ks aggregation parameter",
     )
@@ -3868,7 +3985,14 @@ def parse_cmd_args():
         "--confs",
         default="volume_ub",
         nargs="*",
-        choices=["volume_ub", "volume_lb", "frequency", "stress", "displacement"],
+        choices=[
+            "volume_ub",
+            "volume_lb",
+            "frequency",
+            "stress",
+            "displacement",
+            "compliance",
+        ],
         help="constraint functions",
     )
     p.add_argument(
@@ -3884,6 +4008,12 @@ def parse_cmd_args():
         help='Upper bound for stress constraint, only effective when "stress" is in the confs',
     )
     p.add_argument(
+        "--compliance-ub",
+        default=None,
+        type=float,
+        help='Upper bound for compliance constraint, only effective when "compliance" is in the confs',
+    )
+    p.add_argument(
         "--vol-frac-ub",
         default=None,
         type=float,
@@ -3896,10 +4026,22 @@ def parse_cmd_args():
         help='volume fraction, only effective when "volume_lb" is in the confs',
     )
     p.add_argument(
+        "--frequency-scale",
+        default=3.5,
+        type=float,
+        help='scale the frequency objective obj = frequency * scale, only effective when objf is "frequency"',
+    )
+    p.add_argument(
         "--stress-scale",
-        default=1e-12,
+        default=1.0,
         type=float,
         help='scale the stress objective obj = stress * scale, only effective when objf is "stress"',
+    )
+    p.add_argument(
+        "--compliance-scale",
+        default=1e7,
+        type=float,
+        help='scale the compliance objective obj = compliance * scale, only effective when objf is "compliance"',
     )
     p.add_argument(
         "--dis-ub",
@@ -3981,6 +4123,15 @@ def create_folder(args):
         m = f"{args.m0_block_frac:.2f}"
         args.prefix = args.prefix + ", m0=" + m
 
+    if "frequency" in args.confs:
+        if args.omega_lb != 0.0:
+            w = f"{args.omega_lb}"
+            args.prefix = args.prefix + ", w=" + w
+
+    if "compliance" in args.confs:
+        c = f"{args.compliance_ub:.2f}"
+        args.prefix = args.prefix + ", c=" + c
+
     if "displacement" in args.confs:
         if args.mode != 1:
             args.prefix = args.prefix + ", mode=" + str(args.mode)
@@ -3988,17 +4139,12 @@ def create_folder(args):
         args.prefix = args.prefix + ", d=" + d
 
     if "stress" in args.confs:
-        s = f"{args.stress_ub/ 1e6}"
+        s = f"{args.stress_ub}"
         args.prefix = args.prefix + ", s=" + s
-
-    if "frequency" in args.confs:
-        if args.omega_lb != 0.0:
-            w = f"{args.omega_lb}"
-            args.prefix = args.prefix + ", w=" + w
 
     r = f"{args.r0}"
     args.prefix = args.prefix + ", r=" + r
-    
+
     if args.proj:
         args.prefix = args.prefix + ", proj"
 
@@ -4084,6 +4230,11 @@ def main(args):
             r0_=args.r0, nx=args.nx
         )
         dv_mapping = None
+    elif args.domain == "rhombus":
+        conn, X, r0, bcs, forces, non_design_nodes = create_rhombus_domain(
+            r0_=args.r0, nx=args.nx
+        )
+        dv_mapping = None
 
     # Check the mesh
     visualize_domain(args.prefix, X, bcs, non_design_nodes, forces)
@@ -4097,6 +4248,9 @@ def main(args):
         n = int(np.ceil((2 * args.nx)))
     elif "square" in args.domain:
         m = args.nx
+        n = args.nx
+    elif "rhombus" in args.domain:
+        m = int(3 * args.nx)
         n = args.nx
     else:
         raise ValueError("Not supported domain")
@@ -4147,9 +4301,11 @@ def main(args):
         prob=args.problem,
     )
 
-    if args.stress_ub is not None:
-        args.ks_rho_stress = 10.0 / args.stress_ub
-    
+    # if args.stress_ub is not None:
+    #     args.ks_rho_stress = 100.0 / args.stress_ub
+    if args.compliance_ub is not None and args.domain == "building":
+        args.compliance_ub = args.compliance_ub * 8.85 * 1e-6
+
     # Create optimization problem
     topo = TopOptProb(
         analysis,
@@ -4166,9 +4322,12 @@ def main(args):
         confs=args.confs,
         omega_lb=args.omega_lb,
         stress_ub=args.stress_ub,
+        compliance_ub=args.compliance_ub,
         vol_frac_ub=args.vol_frac_ub,
         vol_frac_lb=args.vol_frac_lb,
+        frequency_scale=args.frequency_scale,
         stress_scale=args.stress_scale,
+        compliance_scale=args.compliance_scale,
         dis_ub=args.dis_ub,
         grad_check=args.grad_check,
         domain=args.domain,
