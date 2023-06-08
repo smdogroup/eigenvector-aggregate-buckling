@@ -57,13 +57,24 @@ fi
 
 
 # ###################### building ######################
-# python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub --nx 200 --r0 1.0 --vol-frac-ub 0.25 --maxit 100 --note speedup
+# python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.25 --maxit 100
 
-# python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub frequency --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500
+# python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub --nx 2 --r0 1.0 --vol-frac-ub 0.25 --maxit 500 --grad-check
 
-python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6 --note ks_rho=160
+# python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 
+
+python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub compliance --nx 100 --r0 1.0 --vol-frac-ub 0.25 --compliance-ub 280 --maxit 500 --note p=3,offset=30 --grad-check
+ 
+
+# python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6 --note ks_rho=160
 
 # ###################### leg ######################
 # python3 topo_opt.py --domain leg --problem buckling --objf compliance --confs volume_ub --nx 50 --r0 1.1 --vol-frac-ub 0.2 --maxit 100
 
 # python3 topo_opt.py --domain leg --problem buckling --objf compliance --confs volume_ub frequency --nx 50 --r0 1.0 --vol-frac-ub 0.2 --omega-lb 600 --maxit 500 
+
+
+# ###################### rhombus ######################
+# python3 topo_opt.py --domain rhombus --problem buckling --objf compliance --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.3 --maxit 100 --note f=1,v=0.3,f=1000
+
+# python3 topo_opt.py --domain rhombus --problem buckling --objf compliance --confs volume_ub frequency  --nx 50 --r0 1.0 --vol-frac-ub 0.3 --omega-lb 200 --maxit 100 --note f=1,v=0.3,f=1000
