@@ -9,6 +9,5 @@ __pycache__
 *.html
 .vscode
 build
-*.txt
 *test*
 *darwin*
