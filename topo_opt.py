@@ -704,7 +704,7 @@ class TopologyAnalysis:
                 self.q,
             )
             time_end = time.time()
-            print("Cython: ", time_end - time_start)
+            print("kokkos: ", time_end - time_start)
 
             K2 = sparse.coo_matrix((Ke2.flatten(), (self.i, self.j)))
             K2 = K2.tocsr()
