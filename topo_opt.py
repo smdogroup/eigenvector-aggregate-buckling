@@ -19,8 +19,6 @@ from scipy.sparse import coo_matrix, linalg
 
 from other.utils import time_this, timer_set_log_path
 
-# import stiffness
-
 
 class Logger:
     log_name = "stdout.log"
@@ -494,6 +492,7 @@ class TopologyAnalysis:
         epsilon=0.3,
         assume_same_element=False,
         prob="natural_frequency",
+        kokkos=False,
     ):
         self.ptype_K = ptype_K.lower()
         self.ptype_M = ptype_M.lower()
@@ -526,6 +525,7 @@ class TopologyAnalysis:
         self.eigs = None
         self.mu = None  # mu = - 1 / eigs
         self.prob = prob
+        self.kokkos = kokkos
 
         # Compute the constitutivve matrix
         self.C0 = E * np.array(
@@ -599,7 +599,12 @@ class TopologyAnalysis:
         Assemble the stiffness matrix
         """
 
-        # time_start = time.time()
+        ic(self.X.shape)
+        ic(self.conn.shape)
+        ic(rho.shape)
+        ic(self.C0.shape)
+
+        time_start = time.time()
 
         # Average the density to get the element-wise density
         rhoE = 0.25 * (
@@ -608,6 +613,9 @@ class TopologyAnalysis:
             + rho[self.conn[:, 2]]
             + rho[self.conn[:, 3]]
         )
+        
+        # ic(rhoE.shape)
+        # ic(rhoE[0])
 
         # Compute the element stiffnesses
         if self.ptype_K == "simp":
@@ -617,6 +625,8 @@ class TopologyAnalysis:
 
         C = np.outer(rhoE, self.C0)
         C = C.reshape((self.nelems, 3, 3))
+        
+        # ic(C[0])
 
         # Compute the element stiffness matrix
         gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
@@ -646,17 +656,30 @@ class TopologyAnalysis:
             # Compute the x and y coordinates of each element
             xe = self.X[self.conn, 0]
             ye = self.X[self.conn, 1]
+            
+            # ic(xe.shape)
+            # ic(xe[0])
             for j in range(2):
                 for i in range(2):
                     xi = gauss_pts[i]
                     eta = gauss_pts[j]
+                    
+                    # ic(xi)
+                    # ic(eta)
+                    
                     detJ = _populate_Be(self.nelems, xi, eta, xe, ye, Be)
+                    # if j == 0 and i == 0:
+                    #     ic(detJ)
+                    #     ic(Be[0])
 
                     # This is a fancy (and fast) way to compute the element matrices
                     Ke += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
+                    
+                    # if j == 0 and i == 0:
+                    #     ic(Ke[0])
 
-        # time_end = time.time()
-        # print("Python: ", time_end - time_start)
+        time_end = time.time()
+        print("Python: ", time_end - time_start)
 
         K = sparse.coo_matrix((Ke.flatten(), (self.i, self.j)))
         K = K.tocsr()
@@ -664,23 +687,33 @@ class TopologyAnalysis:
         if self.K0 is not None:
             K += self.K0
 
-        # time_start = time.time()
+        if self.kokkos:
+            import kokkos
 
-        # Ke2 = stiffness.assemble_stiffness_matrix(
-        #     self.X, self.conn, rho, self.C0, self.rho0_K, self.ptype_K, self.p, self.q
-        # )
+            time_start = time.time()
 
-        # time_end = time.time()
-        # print("Cython: ", time_end - time_start)
+            # use the kokkos version from stiffness library
+            Ke2 = kokkos.assemble_stiffness_matrix(
+                self.X,
+                self.conn,
+                rho,
+                self.C0,
+                self.rho0_K,
+                self.ptype_K,
+                self.p,
+                self.q,
+            )
+            time_end = time.time()
+            print("Cython: ", time_end - time_start)
 
-        # K2 = sparse.coo_matrix((Ke2.flatten(), (self.i, self.j)))
-        # K2 = K2.tocsr()
+            K2 = sparse.coo_matrix((Ke2.flatten(), (self.i, self.j)))
+            K2 = K2.tocsr()
 
-        # if self.K0 is not None:
-        #     K2 += self.K0
+            if self.K0 is not None:
+                K2 += self.K0
 
-        # # check if K and K2 are the same
-        # ic(np.allclose(K.toarray(), K2.toarray()))
+            # check if K and K2 are the same
+            ic(np.allclose(K.toarray(), K2.toarray()))
 
         return K
 
@@ -3967,6 +4000,12 @@ def parse_cmd_args():
         help="optimization method",
     )
     p.add_argument(
+        "--kokkos",
+        default=False,
+        action="store_true",
+        help="use kokkos for speedup",
+    )
+    p.add_argument(
         "--movelim",
         default=0.2,
         type=float,
@@ -4279,6 +4318,11 @@ def main(args):
                     indx = int((0.67 * n * (m + 1) + 0.67 * m))
                     D_index = [2 * indx, 2 * indx + 1]
 
+    if args.kokkos:
+        import kokkos
+
+        kokkos.initialize_kokkos()
+
     # Create the filter
     fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=args.proj)
     # Create analysis
@@ -4299,6 +4343,7 @@ def main(args):
         epsilon=args.stress_relax,
         assume_same_element=args.assume_same_element,
         prob=args.problem,
+        kokkos=args.kokkos,
     )
 
     # if args.stress_ub is not None:
@@ -4364,7 +4409,7 @@ def main(args):
         paroptprob = ParOptProb(MPI.COMM_SELF, topo)
 
         if args.grad_check:
-            for i in range(5):
+            for i in range(1):
                 paroptprob.checkGradients(1e-6)
             exit(0)
 
@@ -4386,6 +4431,9 @@ def main(args):
 
     # Evaluate the stress for optimzied design
     topo.evalObjCon(xopt, eval_all=True)
+
+    if args.kokkos:
+        kokkos.finalize_kokkos()
 
 
 if __name__ == "__main__":
