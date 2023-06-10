@@ -112,7 +112,7 @@ View3D<T> computeStressStiffnesses(const View2D<T>& X, const View2D<int>& conn,
                                    const std::string& ptype_K, const double p,
                                    const double q) {
   const int nelems = conn.extent(0);
-  View1D<T> rhoE("rhoE", nelems);
+  // View1D<T> rhoE("rhoE", nelems);
   View3D<T> C("C", nelems, 3, 3);
   View2D<T> xe("xe", nelems, 4);
   View2D<T> ye("ye", nelems, 4);
@@ -121,42 +121,37 @@ View3D<T> computeStressStiffnesses(const View2D<T>& X, const View2D<int>& conn,
   View4D<T> Te("Te", nelems, 3, 4, 4);
   View3D<T> Ge("Ge", nelems, 8, 8);
 
-  Kokkos::parallel_for(
-      "AverageDensity", RangePolicy(0, nelems), KOKKOS_LAMBDA(const int i) {
-        rhoE(i) = 0.25 * (rho(conn(i, 0)) + rho(conn(i, 1)) + rho(conn(i, 2)) +
-                          rho(conn(i, 3)));
-      });
-
-  // Compute the element stiffnesses
-  if (ptype_K == "simp") {
-    Kokkos::parallel_for(
-        nelems,
-        KOKKOS_LAMBDA(int i) { rhoE(i) = std::pow(rhoE(i), p) + rho0_K; });
-  } else {  // ramp
-    Kokkos::parallel_for(
-        nelems, KOKKOS_LAMBDA(int i) {
-          rhoE(i) = rhoE(i) / (1.0 + q * (1.0 - rhoE(i)));
-        });
-  }
-
-  // C = outer(rhoE, C0)
-  for (int j = 0; j < 3; ++j) {
-    for (int k = 0; k < 3; ++k) {
-      auto C_jk = Kokkos::subview(C, Kokkos::ALL(), j, k);
-      KokkosBlas::scal(C_jk, C0(j, k), rhoE);
-    }
-  }
-
-  // Compute the element stiffness matrix
+  // Compute Gauss quadrature with a 2-point quadrature rule
   const double gauss_pts[2] = {-1.0 / sqrt(3.0), 1.0 / sqrt(3.0)};
 
-  // ue[:, ::2] = u[2 * self.conn], ue[:, 1 ::2] = u[2 * self.conn + 1]
-  // xe = X[self.conn, 0], ye = X[self.conn, 1]
+  // Prepare the shape functions
   Kokkos::parallel_for(
-      RangePolicy(0, nelems), KOKKOS_LAMBDA(const int i) {
+      nelems, KOKKOS_LAMBDA(const int i) {
+        // Average the density to get the element - wise density
+        T rhoE_i = 0.25 * (rho(conn(i, 0)) + rho(conn(i, 1)) + rho(conn(i, 2)) +
+                           rho(conn(i, 3)));
+
+        // Compute the constitutivve matrix
+        for (int j = 0; j < 3; j++) {
+          for (int k = 0; k < 3; k++) {
+            if (ptype_K == "simp") {
+              C(i, j, k) = (std::pow(rhoE_i, p) + rho0_K) * C0(j, k);
+            } else if (ptype_K == "ramp") {
+              C(i, j, k) = (rhoE_i / (1.0 + q * (1.0 - rhoE_i))) * C0(j, k);
+            } else {
+              std::cout << "Unknown ptype_K: " << ptype_K << std::endl;
+            }
+          }
+        }
+
+        // Get the element-wise solution variables
+        // Compute the x and y coordinates of each element
         for (int j = 0; j < 4; ++j) {
+          // xe = X[self.conn, 0], ye = X[self.conn, 1]
           xe(i, j) = X(conn(i, j), 0);
           ye(i, j) = X(conn(i, j), 1);
+
+          // ue[:, ::2] = u[2 * self.conn], ue[:, 1 ::2] = u[2 * self.conn + 1]
           ue(i, j * 2) = u(conn(i, j) * 2);
           ue(i, j * 2 + 1) = u(conn(i, j) * 2 + 1);
         }
@@ -169,34 +164,31 @@ View3D<T> computeStressStiffnesses(const View2D<T>& X, const View2D<int>& conn,
 
       auto detJ = populateBeTe(xi, eta, xe, ye, Be, Te);
 
+      tick("G");
       // Compute the stresses in each element
       // s = np.einsum("nij,njk,nk -> ni", C, Be, ue)
-      View2D<T> s("s", nelems, 3);
-      Kokkos::parallel_for(
-          "ComputeStress", RangePolicy(0, nelems), KOKKOS_LAMBDA(const int n) {
-            for (int i = 0; i < 3; i++) {
-              for (int k = 0; k < 8; k++) {
-                for (int j = 0; j < 3; j++) {
-                  s(n, i) += C(n, i, j) * Be(n, j, k) * ue(n, k);
-                }
-              }
-            }
-          });
-
       // G0e = np.einsum("n,ni,nijl -> njl", detJ, s, Te)
       // Ge[:, 0 ::2, 0 ::2] += G0e, Ge[:, 1 ::2, 1 ::2] += G0e
       Kokkos::parallel_for(
-          "ComputeGe", RangePolicy(0, nelems), KOKKOS_LAMBDA(const int n) {
-            for (int j = 0; j < 4; j++) {
-              for (int l = 0; l < 4; l++) {
-                for (int i = 0; i < 3; i++) {
-                  T temp = detJ(n) * s(n, i) * Te(n, i, j, l);
+          "ComputeStress", RangePolicy(0, nelems), KOKKOS_LAMBDA(const int n) {
+            for (int i = 0; i < 3; i++) {
+              T s_ni = 0.0;
+              for (int k = 0; k < 8; k++) {
+                for (int j = 0; j < 3; j++) {
+                  s_ni += C(n, i, j) * Be(n, j, k) * ue(n, k);
+                }
+              }
+
+              for (int j = 0; j < 4; j++) {
+                for (int l = 0; l < 4; l++) {
+                  T temp = detJ(n) * s_ni * Te(n, i, j, l);
                   Ge(n, j * 2, l * 2) += temp;
                   Ge(n, j * 2 + 1, l * 2 + 1) += temp;
                 }
               }
             }
           });
+      tock("G");
     };
   };
 

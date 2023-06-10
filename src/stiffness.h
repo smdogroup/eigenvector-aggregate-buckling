@@ -97,46 +97,39 @@ View3D<T> computeStiffnessesMatrix(const View2D<T>& X, const View2D<int>& conn,
                                    const T rho0_K, const std::string& ptype_K,
                                    const double p, const double q) {
   const int nelems = conn.extent(0);
-  View1D<T> rhoE("rhoE", nelems);
   View3D<T> C("C", nelems, 3, 3);
   View2D<T> xe("xe", nelems, 4);
   View2D<T> ye("ye", nelems, 4);
   View3D<T> Be("Be", nelems, 3, 8);
   View3D<T> Ke("Ke", nelems, 8, 8);
 
-  Kokkos::parallel_for(
-      "AverageDensity", RangePolicy(0, nelems), KOKKOS_LAMBDA(const int i) {
-        rhoE(i) = 0.25 * (rho(conn(i, 0)) + rho(conn(i, 1)) + rho(conn(i, 2)) +
-                          rho(conn(i, 3)));
-      });
-
-  // Compute the element stiffnesses
-  if (ptype_K == "simp") {
-    Kokkos::parallel_for(
-        nelems,
-        KOKKOS_LAMBDA(int i) { rhoE(i) = std::pow(rhoE(i), p) + rho0_K; });
-  } else {  // ramp
-    Kokkos::parallel_for(
-        nelems, KOKKOS_LAMBDA(int i) {
-          rhoE(i) = rhoE(i) / (1.0 + q * (1.0 - rhoE(i)));
-        });
-  }
-
-  // C = outer(rhoE, C0)
-  for (int j = 0; j < 3; ++j) {
-    for (int k = 0; k < 3; ++k) {
-      auto C_jk = Kokkos::subview(C, Kokkos::ALL(), j, k);
-      KokkosBlas::scal(C_jk, C0(j, k), rhoE);
-    }
-  }
-
-  // Compute the element stiffness matrix
+  // Compute Gauss quadrature with a 2-point quadrature rule
   const double gauss_pts[2] = {-1.0 / sqrt(3.0), 1.0 / sqrt(3.0)};
 
+  // Prepare the shape functions
   Kokkos::parallel_for(
-      "ComputeElementCoordinates", RangePolicy(0, nelems),
-      KOKKOS_LAMBDA(const int i) {
+      nelems, KOKKOS_LAMBDA(const int i) {
+        // Average the density to get the element - wise density
+        T rhoE_i = 0.25 * (rho(conn(i, 0)) + rho(conn(i, 1)) + rho(conn(i, 2)) +
+                           rho(conn(i, 3)));
+
+        // Compute the constitutivve matrix
+        for (int j = 0; j < 3; j++) {
+          for (int k = 0; k < 3; k++) {
+            if (ptype_K == "simp") {
+              C(i, j, k) = (std::pow(rhoE_i, p) + rho0_K) * C0(j, k);
+            } else if (ptype_K == "ramp") {
+              C(i, j, k) = (rhoE_i / (1.0 + q * (1.0 - rhoE_i))) * C0(j, k);
+            } else {
+              std::cout << "Unknown ptype_K: " << ptype_K << std::endl;
+            }
+          }
+        }
+
+        // Get the element-wise solution variables
+        // Compute the x and y coordinates of each element
         for (int j = 0; j < 4; ++j) {
+          // xe = X[self.conn, 0], ye = X[self.conn, 1]
           xe(i, j) = X(conn(i, j), 0);
           ye(i, j) = X(conn(i, j), 1);
         }
