@@ -598,10 +598,10 @@ class TopologyAnalysis:
         """
         Assemble the stiffness matrix
         """
-
+        
+        ic(self.nelems)
         ic(self.X.shape)
         ic(self.conn.shape)
-        ic(rho.shape)
         ic(self.C0.shape)
 
         time_start = time.time()
@@ -950,6 +950,13 @@ class TopologyAnalysis:
         """
         Compute the stress stiffness matrix for buckling, given the displacement path u
         """
+        ic(self.nelems)
+        ic(self.X.shape)
+        ic(self.conn.shape)
+        ic(rho.shape)
+        ic(self.C0.shape)
+        
+        time_start = time.time()
 
         # Average the density to get the element-wise density
         rhoE = 0.25 * (
@@ -1028,10 +1035,39 @@ class TopologyAnalysis:
                     G0e = np.einsum("n,ni,nijl -> njl", detJ, s, Te)
                     Ge[:, 0::2, 0::2] += G0e
                     Ge[:, 1::2, 1::2] += G0e
+                    
+        time_end = time.time()
+        print("Python: ", time_end - time_start)
 
         # Assemble the global stiffness matrix
         G = sparse.coo_matrix((Ge.flatten(), (self.i, self.j)))
         G = G.tocsr()
+        
+        if self.kokkos:
+            import kokkos
+
+            time_start = time.time()
+
+            # use the kokkos version from stiffness library
+            Ge2 = kokkos.assemble_stress_stiffness(
+                self.X,
+                self.conn,
+                rho,
+                u,
+                self.C0,
+                self.rho0_K,
+                self.ptype_K,
+                self.p,
+                self.q,
+            )
+            time_end = time.time()
+            print("kokkos: ", time_end - time_start)
+
+            G2 = sparse.coo_matrix((Ge2.flatten(), (self.i, self.j)))
+            G2 = G2.tocsr()
+            
+            # check if K and K2 are the same
+            ic(np.allclose(G.toarray(), G2.toarray()))
 
         return G
 

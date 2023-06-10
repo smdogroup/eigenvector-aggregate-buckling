@@ -63,7 +63,7 @@ fi
 
 # python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 
 
-python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub compliance --nx 50 --r0 1.0 --vol-frac-ub 0.25 --compliance-ub 280 --maxit 500 --note p=3,offset=30 --grad-check --kokkos
+python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub compliance --nx 50 --r0 1.0 --vol-frac-ub 0.25 --compliance-ub 280 --maxit 500 --note p=3,offset=30 --kokkos
  
 
 # python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6 --note ks_rho=160
