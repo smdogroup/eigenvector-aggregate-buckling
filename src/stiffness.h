@@ -1,4 +1,5 @@
-#pragma once
+#ifndef STIFFNESS_H
+#define STIFFNESS_H
 
 #include <KokkosBlas1_axpby.hpp>
 #include <KokkosBlas1_mult.hpp>
@@ -8,11 +9,13 @@
 #include <KokkosBlas2_gemv.hpp>
 #include <Kokkos_Core.hpp>
 
+#include "toolkit.h"
 #include "wrapper.h"
 
 template <typename T>
-auto populateBe(int nelems, T xi, T eta, const View2D<T>& xe,
-                const View2D<T>& ye, View3D<T>& Be) {
+auto populateBe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
+                View3D<T>& Be) {
+  const int nelems = xe.extent(0);
   View1D<T> detJ("detJ", nelems);
   View1D<T> invdetJ("invdetJ", nelems);
   View3D<T> J("J", nelems, 2, 2);
@@ -89,15 +92,16 @@ auto populateBe(int nelems, T xi, T eta, const View2D<T>& xe,
 }
 
 template <typename T>
-View3D<T> computeElementStiffnesses(const View2D<T>& X, const View2D<int>& conn,
-                                    const View1D<T>& rho, const View2D<T>& C0,
-                                    const T rho0_K, const std::string& ptype_K,
-                                    const double p, const double q) {
+View3D<T> computeStiffnessesMatrix(const View2D<T>& X, const View2D<int>& conn,
+                                   const View1D<T>& rho, const View2D<T>& C0,
+                                   const T rho0_K, const std::string& ptype_K,
+                                   const double p, const double q) {
   const int nelems = conn.extent(0);
-  const int num_nodes = conn.extent(1);
-
   View1D<T> rhoE("rhoE", nelems);
   View3D<T> C("C", nelems, 3, 3);
+  View2D<T> xe("xe", nelems, 4);
+  View2D<T> ye("ye", nelems, 4);
+  View3D<T> Be("Be", nelems, 3, 8);
   View3D<T> Ke("Ke", nelems, 8, 8);
 
   Kokkos::parallel_for(
@@ -127,15 +131,12 @@ View3D<T> computeElementStiffnesses(const View2D<T>& X, const View2D<int>& conn,
   }
 
   // Compute the element stiffness matrix
-  const T gauss_pts[2] = {-1.0 / sqrt(3.0), 1.0 / sqrt(3.0)};
-
-  View2D<T> xe("xe", nelems, num_nodes);
-  View2D<T> ye("ye", nelems, num_nodes);
+  const double gauss_pts[2] = {-1.0 / sqrt(3.0), 1.0 / sqrt(3.0)};
 
   Kokkos::parallel_for(
       "ComputeElementCoordinates", RangePolicy(0, nelems),
       KOKKOS_LAMBDA(const int i) {
-        for (int j = 0; j < num_nodes; ++j) {
+        for (int j = 0; j < 4; ++j) {
           xe(i, j) = X(conn(i, j), 0);
           ye(i, j) = X(conn(i, j), 1);
         }
@@ -146,9 +147,9 @@ View3D<T> computeElementStiffnesses(const View2D<T>& X, const View2D<int>& conn,
       T xi = gauss_pts[ii];
       T eta = gauss_pts[jj];
 
-      View3D<T> Be("Be", nelems, 3, 8);
-      auto detJ = populateBe(nelems, xi, eta, xe, ye, Be);
+      auto detJ = populateBe(xi, eta, xe, ye, Be);
 
+      // Ke += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
       Kokkos::parallel_for(
           "ComputeKe", RangePolicy(0, nelems), KOKKOS_LAMBDA(const int n) {
             for (int j = 0; j < 8; j++) {
@@ -181,7 +182,9 @@ py::array_t<T> assembleStiffnessMatrix(
   auto C0 = numpyArrayToView2D<T>(C0_py);
 
   auto Ke =
-      computeElementStiffnesses<T>(X, conn, rho, C0, rho0_K, ptype_K, p, q);
+      computeStiffnessesMatrix<T>(X, conn, rho, C0, rho0_K, ptype_K, p, q);
 
   return viewToNumpyArray3D<T>(Ke);
 }
+
+#endif  // STIFFNESS_H
