@@ -722,7 +722,8 @@ class TopologyAnalysis:
         """
         Compute the derivative of the stiffness matrix times the vectors psi and u
         """
-
+        print("Computing the stiffness matrix derivative")
+        time_start = time.time()
         # Average the density to get the element-wise density
         rhoE = 0.25 * (
             rho[self.conn[:, 0]]
@@ -771,7 +772,7 @@ class TopologyAnalysis:
                     detJ = _populate_Be(self.nelems, xi, eta, xe, ye, Be)
 
                     dfdC += np.einsum("n,nim,njl,nm,nl -> nij", detJ, Be, Be, psie, ue)
-
+        
         dfdrhoE = np.zeros(self.nelems)
         for i in range(3):
             for j in range(3):
@@ -786,6 +787,30 @@ class TopologyAnalysis:
         for i in range(4):
             np.add.at(dfdrho, self.conn[:, i], dfdrhoE)
         dfdrho *= 0.25
+        
+        time_end = time.time()
+        print("Python: ", time_end - time_start)
+        
+        if self.kokkos:
+            import kokkos
+
+            time_start = time.time()
+            dG = kokkos.stiffness_matrix_derivative(
+                self.X,
+                self.conn,
+                rho,
+                u,
+                psi,
+                self.C0,
+                self.ptype_K,
+                self.p,
+                self.q,
+            )
+            time_end = time.time()
+            print("kokkos: ", time_end - time_start)
+            
+            # check if dfdrho and dG are the same
+            ic(np.allclose(dfdrho, dG))
 
         return dfdrho
 
@@ -4358,6 +4383,7 @@ def main(args):
         import kokkos
 
         kokkos.initialize_kokkos()
+        
 
     # Create the filter
     fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=args.proj)
