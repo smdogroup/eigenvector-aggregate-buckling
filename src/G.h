@@ -9,8 +9,8 @@
 #include <KokkosBlas2_gemv.hpp>
 #include <Kokkos_Core.hpp>
 
+#include "converter.h"
 #include "toolkit.h"
-#include "wrapper.h"
 
 template <typename T>
 auto populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
@@ -106,13 +106,11 @@ auto populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
 }
 
 template <typename T>
-View3D<T> computeStressStiffnesses(const View2D<T>& X, const View2D<int>& conn,
-                                   const View1D<T>& rho, const View1D<T>& u,
-                                   const View2D<T>& C0, const T rho0_K,
-                                   const std::string& ptype_K, const double p,
-                                   const double q) {
+View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn,
+                   const View1D<T>& rho, const View1D<T>& u,
+                   const View2D<T>& C0, const T rho0_K,
+                   const std::string& ptype_K, const double p, const double q) {
   const int nelems = conn.extent(0);
-  // View1D<T> rhoE("rhoE", nelems);
   View3D<T> C("C", nelems, 3, 3);
   View2D<T> xe("xe", nelems, 4);
   View2D<T> ye("ye", nelems, 4);
@@ -139,7 +137,7 @@ View3D<T> computeStressStiffnesses(const View2D<T>& X, const View2D<int>& conn,
             } else if (ptype_K == "ramp") {
               C(i, j, k) = (rhoE_i / (1.0 + q * (1.0 - rhoE_i))) * C0(j, k);
             } else {
-              std::cout << "Unknown ptype_K: " << ptype_K << std::endl;
+              std::cout << "Penalty type not supported" << std::endl;
             }
           }
         }
@@ -164,7 +162,6 @@ View3D<T> computeStressStiffnesses(const View2D<T>& X, const View2D<int>& conn,
 
       auto detJ = populateBeTe(xi, eta, xe, ye, Be, Te);
 
-      tick("G");
       // Compute the stresses in each element
       // s = np.einsum("nij,njk,nk -> ni", C, Be, ue)
       // G0e = np.einsum("n,ni,nijl -> njl", detJ, s, Te)
@@ -188,7 +185,6 @@ View3D<T> computeStressStiffnesses(const View2D<T>& X, const View2D<int>& conn,
               }
             }
           });
-      tock("G");
     };
   };
 
@@ -199,18 +195,17 @@ View3D<T> computeStressStiffnesses(const View2D<T>& X, const View2D<int>& conn,
 // convertPyArrayToView and then call the function computeElementStiffnesses
 // to compute the element stiffnesses
 template <typename T>
-py::array_t<T> assembleStressStiffness(
-    py::array_t<T> X_py, py::array_t<int> conn_py, py::array_t<T> rho_py,
-    py::array_t<T> u_py, py::array_t<T> C0_py, T rho0_K, std::string ptype_K,
-    double p, double q) {
+py::array_t<T> assembleG(py::array_t<T> X_py, py::array_t<int> conn_py,
+                         py::array_t<T> rho_py, py::array_t<T> u_py,
+                         py::array_t<T> C0_py, T rho0_K, std::string ptype_K,
+                         double p, double q) {
   auto X = numpyArrayToView2D<T>(X_py);
   auto conn = numpyArrayToView2D<int>(conn_py);
   auto rho = numpyArrayToView1D<T>(rho_py);
   auto u = numpyArrayToView1D<T>(u_py);
   auto C0 = numpyArrayToView2D<T>(C0_py);
 
-  auto Ge =
-      computeStressStiffnesses<T>(X, conn, rho, u, C0, rho0_K, ptype_K, p, q);
+  auto Ge = computeG<T>(X, conn, rho, u, C0, rho0_K, ptype_K, p, q);
 
   return viewToNumpyArray3D<T>(Ge);
 }

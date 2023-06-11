@@ -14,7 +14,7 @@ find_package(Kokkos REQUIRED)
 find_package(KokkosKernels REQUIRED)
 
 # Set the source files and add module
-set(SOURCE_FILES src/kokkos.cpp)
+set(SOURCE_FILES src/warpper.cpp)
 pybind11_add_module(kokkos MODULE ${SOURCE_FILES})
 
 # Set the output directory for the shared library
