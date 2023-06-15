@@ -2,13 +2,14 @@
 #define TOOLKIT_H
 
 // Macro to print the line number with pass status
-#define check() printLineStatus(__LINE__, true)
+#define checks() printLineStatus(__LINE__, true)
 
 #define tick(msg) startTimer(msg);
 #define tock(...) reportTimer(__VA_ARGS__);
 
 #include <Kokkos_Core.hpp>
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 
 typedef std::chrono::high_resolution_clock Clock;

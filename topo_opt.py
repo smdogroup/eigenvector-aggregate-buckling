@@ -598,7 +598,6 @@ class TopologyAnalysis:
         """
         Assemble the stiffness matrix
         """
-        
         ic(self.nelems)
         ic(self.X.shape)
         ic(self.conn.shape)
@@ -681,14 +680,64 @@ class TopologyAnalysis:
         time_end = time.time()
         print("Python: ", time_end - time_start)
 
+        ic(self.i.shape)
+        ic(self.j.shape)
+        # print all elements of self.i
+        print("self.i: ")
+        # ic(self.i[:100])
+        # ic(self.j[:100])
+        
+        # ic(Ke.flatten()[:100])
+        
+        
         K = sparse.coo_matrix((Ke.flatten(), (self.i, self.j)))
         K = K.tocsr()
-
+        
+        
+        # # # print the row map
+        # ic(K.indptr)
+        # # print column indices
+        # ic(K.indices[:100])
+        # # print first 100 elements of the matrix
+        # ic(K.data[:100])
+        
+        # ic(Ke.flatten().shape)
+        # ic(Ke.flatten()[100:200])
+        # print the size of the matrix
+        ic(self.nnodes)
+        ic(K.shape)
+        ic(self.K0)
         if self.K0 is not None:
             K += self.K0
 
         if self.kokkos:
             import kokkos
+            
+            f = np.ones(K.shape[0])
+
+            
+            u = sparse.linalg.spsolve(K, f)
+
+            
+            
+            
+            # ic(self.reduced)
+            Kr = self.reduce_matrix(K)
+            fr = self.reduce_vector(self.f)
+            
+            ic(Kr.shape)
+            
+            fr = np.ones(Kr.shape[0])
+            time_start = time.time()
+            ur = sparse.linalg.spsolve(Kr, fr)
+            time_end = time.time()
+            duration = time_end - time_start
+            ic("scipy: ", duration)
+            # ic(ur)
+            ic(Kr.data.shape)
+            u = self.full_vector(ur)
+            # ic(fr)
+            # ic(ur)
 
             time_start = time.time()
 
@@ -698,10 +747,15 @@ class TopologyAnalysis:
                 self.conn,
                 rho,
                 self.C0,
+                self.reduced,
                 self.rho0_K,
                 self.ptype_K,
                 self.p,
                 self.q,
+                Kr.indptr,
+                Kr.indices,
+                Kr.data,
+                fr,
             )
             time_end = time.time()
             print("kokkos: ", time_end - time_start)
@@ -980,7 +1034,6 @@ class TopologyAnalysis:
         ic(self.conn.shape)
         ic(rho.shape)
         ic(self.C0.shape)
-        
         time_start = time.time()
 
         # Average the density to get the element-wise density
@@ -1183,6 +1236,10 @@ class TopologyAnalysis:
         dfdu = np.zeros(2 * self.nnodes)
         np.add.at(dfdu, 2 * self.conn, dfdue[:, 0::2])
         np.add.at(dfdu, 2 * self.conn + 1, dfdue[:, 1::2])
+
+        # convert self.reduced to a numpy array
+        # self.reduced = np.array(self.reduced)
+        
         dfdur = self.reduce_vector(dfdu)
 
         # Compute the adjoint for K * adj = d ( psi^{T} * G(u, x) * phi ) / du
@@ -1858,7 +1915,7 @@ class TopologyAnalysis:
             A = self.assemble_stiffness_matrix(rho)
             B = self.assemble_mass_matrix(rho)
             Br = self.reduce_matrix(B)
-            Bfact = linalg.factorized(Br)
+            # Bfact = linalg.factorized(Br)
 
             def dA(q1, q2):
                 return self.stiffness_matrix_derivative(rho, q1, q2)
