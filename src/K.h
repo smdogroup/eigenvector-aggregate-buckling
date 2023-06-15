@@ -7,18 +7,22 @@
 #include <KokkosBlas1_scal.hpp>
 #include <KokkosBlas1_update.hpp>
 #include <KokkosBlas2_gemv.hpp>
-#include <KokkosSparse_gmres.hpp>
 #include <Kokkos_Core.hpp>
-#include <Kokkos_Sort.hpp>
-#include <tuple>
-#include <vector>
+#include <cstring>
 
-#include "KokkosKernels_default_types.hpp"
-#include "KokkosSparse_CrsMatrix.hpp"
-#include "KokkosSparse_IOUtils.hpp"
-#include "KokkosSparse_spmv.hpp"
 #include "converter.h"
 #include "toolkit.h"
+
+// #include <KokkosSparse_gmres.hpp>
+// #include <Kokkos_Sort.hpp>
+// #include <tuple>
+// #include <vector>
+
+// #include "KokkosKernels_default_types.hpp"
+// #include "KokkosSparse_CrsMatrix.hpp"
+// #include "KokkosSparse_IOUtils.hpp"
+// #include "KokkosSparse_spmv.hpp"
+
 
 // struct CompareSparseEntry {
 //   KOKKOS_INLINE_FUNCTION
@@ -244,9 +248,9 @@ View3D<T> computeK(const View2D<T>& X, const View2D<int>& conn,
         const char* ramp = "ramp";
         for (int i = 0; i < 3; i++) {
           for (int j = 0; j < 3; j++) {
-            if (ptype_K == simp) {
+            if (strcmp(ptype_K, simp) == 0) {
               C(n, i, j) = (std::pow(rhoE_n, p) + rho0_K) * C0(i, j);
-            } else if (ptype_K == ramp) {
+            } else if (strcmp(ptype_K, ramp) == 0) {
               C(n, i, j) = (rhoE_n / (1.0 + q * (1.0 - rhoE_n))) * C0(i, j);
             } else {
               printf("Penalty type not supported\n");
@@ -287,44 +291,44 @@ View3D<T> computeK(const View2D<T>& X, const View2D<int>& conn,
     };
   };
 
-  Kokkos::Timer timer;
+  // Kokkos::Timer timer;
 
-  // Set up the i-j indices for the matrix - these are the row and column
-  // indices in the stiffness matrix
-  // self.var = np.zeros((self.conn.shape[0], 8), dtype=int)
-  // self.var[:, ::2] = 2 * self.conn self.var[:, 1::2] = 2 * self.conn + 1
+  // // Set up the i-j indices for the matrix - these are the row and column
+  // // indices in the stiffness matrix
+  // // self.var = np.zeros((self.conn.shape[0], 8), dtype=int)
+  // // self.var[:, ::2] = 2 * self.conn self.var[:, 1::2] = 2 * self.conn + 1
 
-  View2D<int> var("var", nelems, 8);
-  Kokkos::parallel_for(
-      nelems, KOKKOS_LAMBDA(const int n) {
-        for (int i = 0; i < 4; i++) {
-          var(n, i * 2) = 2 * conn(n, i);
-          var(n, i * 2 + 1) = 2 * conn(n, i) + 1;
-        }
-      });
+  // View2D<int> var("var", nelems, 8);
+  // Kokkos::parallel_for(
+  //     nelems, KOKKOS_LAMBDA(const int n) {
+  //       for (int i = 0; i < 4; i++) {
+  //         var(n, i * 2) = 2 * conn(n, i);
+  //         var(n, i * 2 + 1) = 2 * conn(n, i) + 1;
+  //       }
+  //     });
 
-  View1D<int> i_index("i", nelems * 64);
-  View1D<int> j_index("j", nelems * 64);
-  Kokkos::parallel_for(
-      nelems, KOKKOS_LAMBDA(const int n) {
-        for (int ii = 0; ii < 8; ii++) {
-          for (int jj = 0; jj < 8; jj++) {
-            i_index(n * 64 + ii * 8 + jj) = var(n, ii);
-            j_index(n * 64 + ii * 8 + jj) = var(n, jj);
-          }
-        }
-      });
+  // View1D<int> i_index("i", nelems * 64);
+  // View1D<int> j_index("j", nelems * 64);
+  // Kokkos::parallel_for(
+  //     nelems, KOKKOS_LAMBDA(const int n) {
+  //       for (int ii = 0; ii < 8; ii++) {
+  //         for (int jj = 0; jj < 8; jj++) {
+  //           i_index(n * 64 + ii * 8 + jj) = var(n, ii);
+  //           j_index(n * 64 + ii * 8 + jj) = var(n, jj);
+  //         }
+  //       }
+  //     });
 
-  // Ke.flatten()
-  View1D<T> Ke_flat("Ke_flat", nelems * 64);
-  Kokkos::parallel_for(
-      nelems, KOKKOS_LAMBDA(const int n) {
-        for (int ii = 0; ii < 8; ii++) {
-          for (int jj = 0; jj < 8; jj++) {
-            Ke_flat(n * 64 + ii * 8 + jj) = Ke(n, ii, jj);
-          }
-        }
-      });
+  // // Ke.flatten()
+  // View1D<T> Ke_flat("Ke_flat", nelems * 64);
+  // Kokkos::parallel_for(
+  //     nelems, KOKKOS_LAMBDA(const int n) {
+  //       for (int ii = 0; ii < 8; ii++) {
+  //         for (int jj = 0; jj < 8; jj++) {
+  //           Ke_flat(n * 64 + ii * 8 + jj) = Ke(n, ii, jj);
+  //         }
+  //       }
+  //     });
 
   // int num_rows = 2 * nnodes;
   // int num_cols = 2 * nnodes;
@@ -688,9 +692,9 @@ View1D<T> computeKDerivative(const View2D<T>& X, const View2D<int>& conn,
         // Penalize the stiffness matrix
         const char* simp = "simp";
         const char* ramp = "ramp";
-        if (ptype_K == simp) {
+        if (strcmp(ptype_K, simp) == 0) {
           drhoE_n *= p * pow(rhoE_n, p - 1.0);
-        } else if (ptype_K == ramp) {
+        } else if (strcmp(ptype_K, ramp) == 0) {
           drhoE_n *= (1.0 + q) / pow((1.0 + q * (1.0 - rhoE_n)), 2.0);
         } else {
           printf("Penalty type not supported\n");

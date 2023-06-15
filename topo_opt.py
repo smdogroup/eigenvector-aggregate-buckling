@@ -18,6 +18,12 @@ from scipy.linalg import eigh
 from scipy.sparse import coo_matrix, linalg
 
 from other.utils import time_this, timer_set_log_path
+import inspect # for debug
+
+# defind a function to print line number
+def check():
+    print(inspect.currentframe().f_back.f_lineno)
+    return
 
 
 class Logger:
@@ -4436,10 +4442,10 @@ def main(args):
                     indx = int((0.67 * n * (m + 1) + 0.67 * m))
                     D_index = [2 * indx, 2 * indx + 1]
 
-    # if args.kokkos:
-    #     import kokkos
+    if args.kokkos:
+        import kokkos
 
-    #     kokkos.initialize_kokkos()
+        kokkos.initialize_kokkos()
         
 
     # Create the filter
@@ -4551,8 +4557,8 @@ def main(args):
     # Evaluate the stress for optimzied design
     topo.evalObjCon(xopt, eval_all=True)
 
-    # if args.kokkos:
-    #     kokkos.finalize_kokkos()
+    if args.kokkos:
+        kokkos.finalize_kokkos()
 
 
 if __name__ == "__main__":

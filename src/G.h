@@ -8,6 +8,7 @@
 #include <KokkosBlas1_update.hpp>
 #include <KokkosBlas2_gemv.hpp>
 #include <Kokkos_Core.hpp>
+#include <cstring>
 
 #include "converter.h"
 #include "toolkit.h"
@@ -134,9 +135,9 @@ View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn,
         const char* ramp = "ramp";
         for (int i = 0; i < 3; i++) {
           for (int k = 0; k < 3; k++) {
-            if (ptype_K == simp) {
+            if (strcmp(ptype_K, simp) == 0) {
               C(n, i, k) = (std::pow(rhoE_n, p) + rho0_K) * C0(i, k);
-            } else if (ptype_K == ramp) {
+            } else if (strcmp(ptype_K, ramp) == 0) {
               C(n, i, k) = (rhoE_n / (1.0 + q * (1.0 - rhoE_n))) * C0(i, k);
             } else {
               printf("Penalty type not supported\n");
@@ -240,9 +241,9 @@ View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
         const char* ramp = "ramp";
         for (int i = 0; i < 3; i++) {
           for (int j = 0; j < 3; j++) {
-            if (ptype_K == simp) {
+            if (strcmp(ptype_K, simp) == 0) {
               C(n, i, j) = (std::pow(rhoE(n), p) + rho0_K) * C0(i, j);
-            } else if (ptype_K == ramp) {
+            } else if (strcmp(ptype_K, ramp) == 0) {
               C(n, i, j) = (rhoE(n) / (1.0 + q * (1.0 - rhoE(n)))) * C0(i, j);
             } else {
               printf("Penalty type not supported\n");
