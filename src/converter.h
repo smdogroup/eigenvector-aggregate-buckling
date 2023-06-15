@@ -56,9 +56,8 @@ void initializeKokkos() { Kokkos::initialize(); }
 void finalizeKokkos() { Kokkos::finalize(); }
 
 template <typename T>
-auto numpyArrayToView1D(const py::array_t<T, py::array::c_style>& array) {
+View1D<T> numpyArrayToView1D(const py::array_t<T, py::array::c_style>& array) {
   py::buffer_info info = array.request();
-  const int numDims = info.ndim;
   T* data_ptr = static_cast<T*>(info.ptr);
 
 #ifdef KOKKOS_ENABLE_CUDA
@@ -75,9 +74,8 @@ auto numpyArrayToView1D(const py::array_t<T, py::array::c_style>& array) {
 }
 
 template <typename T>
-auto numpyArrayToView2D(const py::array_t<T, py::array::c_style>& array) {
+View2D<T> numpyArrayToView2D(const py::array_t<T, py::array::c_style>& array) {
   py::buffer_info info = array.request();
-  const int numDims = info.ndim;
   T* data_ptr = static_cast<T*>(info.ptr);
 
 #ifdef KOKKOS_ENABLE_CUDA
@@ -95,9 +93,8 @@ auto numpyArrayToView2D(const py::array_t<T, py::array::c_style>& array) {
 }
 
 template <typename T>
-auto numpyArrayToView3D(const py::array_t<T, py::array::c_style>& array) {
+View3D<T> numpyArrayToView3D(const py::array_t<T, py::array::c_style>& array) {
   py::buffer_info info = array.request();
-  const int numDims = info.ndim;
   T* data_ptr = static_cast<T*>(info.ptr);
 
 #ifdef KOKKOS_ENABLE_CUDA
@@ -115,9 +112,8 @@ auto numpyArrayToView3D(const py::array_t<T, py::array::c_style>& array) {
 }
 
 template <typename T>
-auto numpyArrayToView4D(const py::array_t<T, py::array::c_style>& array) {
+View4D<T> numpyArrayToView4D(const py::array_t<T, py::array::c_style>& array) {
   py::buffer_info info = array.request();
-  const int numDims = info.ndim;
   T* data_ptr = static_cast<T*>(info.ptr);
 
 #ifdef KOKKOS_ENABLE_CUDA
@@ -137,7 +133,7 @@ auto numpyArrayToView4D(const py::array_t<T, py::array::c_style>& array) {
 }
 
 template <typename T>
-auto viewToNumpyArray1D(const View1D<T>& view) {
+py::array_t<T, py::array::c_style> viewToNumpyArray1D(const View1D<T>& view) {
   auto shape = view.extent(0);
   auto result = py::array_t<T>(shape);
   py::buffer_info buf = result.request();
@@ -155,7 +151,7 @@ auto viewToNumpyArray1D(const View1D<T>& view) {
 }
 
 template <typename T>
-auto viewToNumpyArray2D(const View2D<T>& view) {
+py::array_t<T, py::array::c_style> viewToNumpyArray2D(const View2D<T>& view) {
   auto shape = view.extent(0), shape1 = view.extent(1);
   auto result = py::array_t<T>(shape * shape1);
   py::buffer_info buf = result.request();
@@ -173,7 +169,7 @@ auto viewToNumpyArray2D(const View2D<T>& view) {
 }
 
 template <typename T>
-auto viewToNumpyArray3D(const View3D<T>& view) {
+py::array_t<T, py::array::c_style> viewToNumpyArray3D(const View3D<T>& view) {
   auto shape = view.extent(0), shape1 = view.extent(1), shape2 = view.extent(2);
   auto result = py::array_t<T>(shape * shape1 * shape2);
   py::buffer_info buf = result.request();
@@ -191,7 +187,7 @@ auto viewToNumpyArray3D(const View3D<T>& view) {
 }
 
 template <typename T>
-auto viewToNumpyArray4D(const View4D<T>& view) {
+py::array_t<T, py::array::c_style> viewToNumpyArray4D(const View4D<T>& view) {
   auto shape = view.extent(0), shape1 = view.extent(1), shape2 = view.extent(2),
        shape3 = view.extent(3);
   auto result = py::array_t<T>(shape * shape1 * shape2 * shape3);

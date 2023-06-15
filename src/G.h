@@ -13,8 +13,8 @@
 #include "toolkit.h"
 
 template <typename T>
-auto populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
-                  View3D<T>& Be, View4D<T>& Te) {
+View1D<T> populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
+                       View3D<T>& Be, View4D<T>& Te) {
   const int nelems = xe.extent(0);
   View1D<T> detJ("detJ", nelems);
   View1D<T> invdetJ("invdetJ", nelems);
@@ -108,8 +108,8 @@ auto populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
 template <typename T>
 View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn,
                    const View1D<T>& rho, const View1D<T>& u,
-                   const View2D<T>& C0, const T rho0_K,
-                   const std::string& ptype_K, const double p, const double q) {
+                   const View2D<T>& C0, const T rho0_K, const char* ptype_K,
+                   const double p, const double q) {
   const int nelems = conn.extent(0);
   View3D<T> C("C", nelems, 3, 3);
   View2D<T> xe("xe", nelems, 4);
@@ -130,8 +130,8 @@ View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn,
                            rho(conn(n, 3)));
 
         // Compute the constitutivve matrix
-        std::string simp = "simp";
-        std::string ramp = "ramp";
+        const char* simp = "simp";
+        const char* ramp = "ramp";
         for (int i = 0; i < 3; i++) {
           for (int k = 0; k < 3; k++) {
             if (ptype_K == simp) {
@@ -140,7 +140,6 @@ View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn,
               C(n, i, k) = (rhoE_n / (1.0 + q * (1.0 - rhoE_n))) * C0(i, k);
             } else {
               printf("Penalty type not supported\n");
-              exit(1);
             }
           }
         }
@@ -204,7 +203,7 @@ View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
                              const View1D<T>& rho, const View1D<T>& u,
                              const View1D<T>& psi, const View1D<T>& phi,
                              const View2D<T>& C0, const View1D<T>& reduced,
-                             const T rho0_K, const std::string& ptype_K,
+                             const T rho0_K, const char* ptype_K,
                              const double p, const double q) {
   const int nelems = conn.extent(0);
   const int nnodes = X.extent(0);
@@ -237,8 +236,8 @@ View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
                           rho(conn(n, 3)));
 
         // Compute the constitutivve matrix
-        std::string simp = "simp";
-        std::string ramp = "ramp";
+        const char* simp = "simp";
+        const char* ramp = "ramp";
         for (int i = 0; i < 3; i++) {
           for (int j = 0; j < 3; j++) {
             if (ptype_K == simp) {
@@ -247,7 +246,6 @@ View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
               C(n, i, j) = (rhoE(n) / (1.0 + q * (1.0 - rhoE(n)))) * C0(i, j);
             } else {
               printf("Penalty type not supported\n");
-              exit(1);
             }
           }
         }

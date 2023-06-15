@@ -13,7 +13,11 @@ find_package(pybind11 REQUIRED)
 find_package(Kokkos REQUIRED)
 find_package(KokkosKernels REQUIRED)
 
-set(PYTHON_VERSION python3.11)
+# set(PYTHON_VERSION python3.11)
+
+# build shared library
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+SET(CMAKE_UNITY_BUILD OFF)
 
 # Set the source files and add module
 set(SOURCE_FILES src/warpper.cpp)
@@ -31,8 +35,8 @@ target_link_libraries(kokkos PRIVATE Kokkos::kokkos Kokkos::kokkoskernels pybind
 # Add optimization flags specific to the target architecture
 target_compile_options(kokkos PRIVATE -march=native -mtune=native -O3)
 
-set_target_properties(kokkos PROPERTIES
-    OUTPUT_NAME "kokkos"
-    PREFIX ""
-    SUFFIX "${PYTHON_VERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}"
-)
+# set_target_properties(kokkos PROPERTIES
+#     OUTPUT_NAME "kokkos"
+#     PREFIX ""
+#     SUFFIX "${PYTHON_VERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+# )

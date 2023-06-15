@@ -4436,10 +4436,10 @@ def main(args):
                     indx = int((0.67 * n * (m + 1) + 0.67 * m))
                     D_index = [2 * indx, 2 * indx + 1]
 
-    if args.kokkos:
-        import kokkos
+    # if args.kokkos:
+    #     import kokkos
 
-        kokkos.initialize_kokkos()
+    #     kokkos.initialize_kokkos()
         
 
     # Create the filter
@@ -4551,8 +4551,8 @@ def main(args):
     # Evaluate the stress for optimzied design
     topo.evalObjCon(xopt, eval_all=True)
 
-    if args.kokkos:
-        kokkos.finalize_kokkos()
+    # if args.kokkos:
+    #     kokkos.finalize_kokkos()
 
 
 if __name__ == "__main__":

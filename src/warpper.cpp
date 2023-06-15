@@ -17,10 +17,11 @@ template <typename T>
 py::array_t<T> assembleK(py::array_t<T> X_py, py::array_t<int> conn_py,
                          py::array_t<T> rho_py, py::array_t<T> C0_py,
                          py::array_t<int> reduced_py, T rho0_K,
-                         std::string ptype_K, double p, double q,
+                         const char* ptype_K, double p, double q,
                          py::array_t<int> indptr_py,
                          py::array_t<int> indices_py, py::array_t<T> data_py,
                          py::array_t<T> b_py) {
+  Kokkos::initialize();
   auto X = numpyArrayToView2D<T>(X_py);
   auto conn = numpyArrayToView2D<int>(conn_py);
   auto rho = numpyArrayToView1D<T>(rho_py);
@@ -31,10 +32,12 @@ py::array_t<T> assembleK(py::array_t<T> X_py, py::array_t<int> conn_py,
   View1D<T> data = numpyArrayToView1D<T>(data_py);
   View1D<T> b = numpyArrayToView1D<T>(b_py);
 
-  auto Ke = computeK<T>(X, conn, rho, C0, reduced, rho0_K, ptype_K, p, q,
-                        indptr, indices, data, b);
+  View3D<T> Ke = computeK<T>(X, conn, rho, C0, reduced, rho0_K, ptype_K, p, q,
+                             indptr, indices, data, b);
 
-  return viewToNumpyArray3D<T>(Ke);
+  py::array_t<T> Ke_py = viewToNumpyArray3D<T>(Ke);
+  Kokkos::finalize();
+  return Ke_py;
 }
 
 template <typename T>
@@ -42,7 +45,8 @@ py::array_t<T> assembleKDerivative(py::array_t<T> X_py,
                                    py::array_t<int> conn_py,
                                    py::array_t<T> rho_py, py::array_t<T> u_py,
                                    py::array_t<T> psi_py, py::array_t<T> C0_py,
-                                   std::string ptype_K, double p, double q) {
+                                   const char* ptype_K, double p, double q) {
+  Kokkos::initialize();
   auto X = numpyArrayToView2D<T>(X_py);
   auto conn = numpyArrayToView2D<int>(conn_py);
   auto rho = numpyArrayToView1D<T>(rho_py);
@@ -50,9 +54,11 @@ py::array_t<T> assembleKDerivative(py::array_t<T> X_py,
   auto psi = numpyArrayToView1D<T>(psi_py);
   auto C0 = numpyArrayToView2D<T>(C0_py);
 
-  auto dK = computeKDerivative<T>(X, conn, rho, u, psi, C0, ptype_K, p, q);
+  View1D<T> dK = computeKDerivative<T>(X, conn, rho, u, psi, C0, ptype_K, p, q);
 
-  return viewToNumpyArray1D<T>(dK);
+  py::array_t<T> dK_py = viewToNumpyArray1D<T>(dK);
+  Kokkos::finalize();
+  return dK_py;
 }
 
 // convert the data from pyarray to kokkos view by calling the function
@@ -61,17 +67,19 @@ py::array_t<T> assembleKDerivative(py::array_t<T> X_py,
 template <typename T>
 py::array_t<T> assembleG(py::array_t<T> X_py, py::array_t<int> conn_py,
                          py::array_t<T> rho_py, py::array_t<T> u_py,
-                         py::array_t<T> C0_py, T rho0_K, std::string ptype_K,
+                         py::array_t<T> C0_py, T rho0_K, const char* ptype_K,
                          double p, double q) {
+  Kokkos::initialize();
   auto X = numpyArrayToView2D<T>(X_py);
   auto conn = numpyArrayToView2D<int>(conn_py);
   auto rho = numpyArrayToView1D<T>(rho_py);
   auto u = numpyArrayToView1D<T>(u_py);
   auto C0 = numpyArrayToView2D<T>(C0_py);
 
-  auto Ge = computeG<T>(X, conn, rho, u, C0, rho0_K, ptype_K, p, q);
-
-  return viewToNumpyArray3D<T>(Ge);
+  View3D<T> Ge = computeG<T>(X, conn, rho, u, C0, rho0_K, ptype_K, p, q);
+  py::array_t<T> Ge_py = viewToNumpyArray3D<T>(Ge);
+  Kokkos::finalize();
+  return Ge_py;
 }
 
 template <typename T>
@@ -81,7 +89,8 @@ py::array_t<T> assembleGDerivative(py::array_t<T> X_py,
                                    py::array_t<T> psi_py, py::array_t<T> phi_py,
                                    py::array_t<T> C0_py,
                                    py::array_t<T> reduced_py, T rho0_K,
-                                   std::string ptype_K, double p, double q) {
+                                   const char* ptype_K, double p, double q) {
+  Kokkos::initialize();
   auto X = numpyArrayToView2D<T>(X_py);
   auto conn = numpyArrayToView2D<int>(conn_py);
   auto rho = numpyArrayToView1D<T>(rho_py);
@@ -91,10 +100,11 @@ py::array_t<T> assembleGDerivative(py::array_t<T> X_py,
   auto C0 = numpyArrayToView2D<T>(C0_py);
   auto reduced = numpyArrayToView1D<T>(reduced_py);
 
-  auto dG = computeGDerivative<T>(X, conn, rho, u, psi, phi, C0, reduced,
-                                  rho0_K, ptype_K, p, q);
-
-  return viewToNumpyArray1D<T>(dG);
+  View1D<T> dG = computeGDerivative<T>(X, conn, rho, u, psi, phi, C0, reduced,
+                                       rho0_K, ptype_K, p, q);
+  py::array_t<T> dG_py = viewToNumpyArray1D<T>(dG);
+  Kokkos::finalize();
+  return dG_py;
 }
 
 PYBIND11_MODULE(kokkos, m) {
