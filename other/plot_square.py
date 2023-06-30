@@ -883,8 +883,14 @@ def plot_6(rho, dis, vol, stress_iter, stress, omega, phi0):
             if i == 1:
                 ic((phi0[j][a, a][0] ** 2 + phi0[j][a, a][1] ** 2))
                 ic((phi0[j][a, b][0] ** 2 + phi0[j][a, b][1] ** 2))
-                ic((phi0[j][b, a][0] ** 2 + phi0[j][b, a][1] ** 2))
-                ic((phi0[j][b, b][0] ** 2 + phi0[j][b, b][1] ** 2))
+                # ic((phi0[j][b, a][0] ** 2 + phi0[j][b, a][1] ** 2))
+                # ic((phi0[j][b, b][0] ** 2 + phi0[j][b, b][1] ** 2))
+                d1 = np.sqrt(phi0[j][a, a][0] ** 2 + phi0[j][a, a][1] ** 2)
+                d2 = np.sqrt(phi0[j][a, b][0] ** 2 + phi0[j][a, b][1] ** 2)
+                ic(d1)
+                ic(d2)
+                ic((d1 ** 2 + d2 ** 2)*0.5)
+                
                 a1 = (phi0[j][a, a][0] ** 2 + phi0[j][a, a][1] ** 2) * 0.5 + (
                     phi1[j][a, a][0] ** 2 + phi1[j][a, a][1] ** 2
                 ) * 0.5
@@ -935,12 +941,12 @@ def plot_6(rho, dis, vol, stress_iter, stress, omega, phi0):
     for ax in axs[3, :]:
         ax.set_anchor("S")
 
-    plt.savefig(
-        "../output/final_results/square/square_stress_new.png",
-        bbox_inches="tight",
-        dpi=300,
-        pad_inches=0.0,
-    )
+    # plt.savefig(
+    #     "../output/final_results/square/square_stress_new.png",
+    #     bbox_inches="tight",
+    #     dpi=300,
+    #     pad_inches=0.0,
+    # )
 
     fig, axs = plt.subplots(1, ncol, figsize=(7, 2), constrained_layout=True)
     text1 = [
@@ -968,12 +974,12 @@ def plot_6(rho, dis, vol, stress_iter, stress, omega, phi0):
         #     ha="center",
         #     fontweight="bold",
         # )
-    plt.savefig(
-        "../output/final_results/square/square_dis_stress_1.png",
-        bbox_inches="tight",
-        dpi=500,
-        pad_inches=0.0,
-    )
+    # plt.savefig(
+    #     "../output/final_results/square/square_dis_stress_1.png",
+    #     bbox_inches="tight",
+    #     dpi=500,
+    #     pad_inches=0.0,
+    # )
 
     fig, axs = plt.subplots(1, ncol, figsize=(7, 2), constrained_layout=True)
     text2 = [
@@ -1002,12 +1008,12 @@ def plot_6(rho, dis, vol, stress_iter, stress, omega, phi0):
         #     ha="center",
         #     fontweight="bold",
         # )
-    plt.savefig(
-        "../output/final_results/square/square_dis_stress_2.png",
-        bbox_inches="tight",
-        dpi=500,
-        pad_inches=0.0,
-    )
+    # plt.savefig(
+    #     "../output/final_results/square/square_dis_stress_2.png",
+    #     bbox_inches="tight",
+    #     dpi=500,
+    #     pad_inches=0.0,
+    # )
 
     fig, axs = plt.subplots(1, ncol, figsize=(7, 2), constrained_layout=True)
     for j in range(ncol):
@@ -1057,12 +1063,12 @@ def plot_6(rho, dis, vol, stress_iter, stress, omega, phi0):
         # )
     for ax in axs:
         ax.set_anchor("S")
-    plt.savefig(
-        "../output/final_results/square/square_dis_stress_3.png",
-        bbox_inches="tight",
-        dpi=300,
-        pad_inches=0.0,
-    )
+    # plt.savefig(
+    #     "../output/final_results/square/square_dis_stress_3.png",
+    #     bbox_inches="tight",
+    #     dpi=300,
+    #     pad_inches=0.0,
+    # )
 
     fig, axs = plt.subplots(
         1,
@@ -1101,12 +1107,12 @@ def plot_6(rho, dis, vol, stress_iter, stress, omega, phi0):
         )
     for ax in axs:
         ax.set_anchor("S")
-    plt.savefig(
-        "../output/final_results/square/square_dis_stress_4.png",
-        bbox_inches="tight",
-        dpi=400,
-        pad_inches=0.0,
-    )
+    # plt.savefig(
+    #     "../output/final_results/square/square_dis_stress_4.png",
+    #     bbox_inches="tight",
+    #     dpi=400,
+    #     pad_inches=0.0,
+    # )
 
 
 def plot_7(rho, dis, vol, stress_iter, stress, omega, phi0):
@@ -1521,24 +1527,24 @@ if __name__ == "__main__":
     with plt.style.context(["nature"]):
         plot_6(rho, dis, vol, stress_iter, stress, omega, phi0)
 
-    dir_result1 = "../output/final_results/square/p, d=0.054/"
-    dir_result2 = "../output/final_results/square/p, s=3.6/"
-    (
-        rho,
-        vol,
-        dis,
-        stress_iter,
-        stress,
-        omega,
-        phi0,
-        phi1,
-        phi2,
-        phi3,
-        phi4,
-        phi5,
-    ) = assmble_data(2, 1000)
-    with plt.style.context(["nature"]):
-        plot_7(rho, dis, vol, stress_iter, stress, omega, phi0)
+    # dir_result1 = "../output/final_results/square/p, d=0.054/"
+    # dir_result2 = "../output/final_results/square/p, s=3.6/"
+    # (
+    #     rho,
+    #     vol,
+    #     dis,
+    #     stress_iter,
+    #     stress,
+    #     omega,
+    #     phi0,
+    #     phi1,
+    #     phi2,
+    #     phi3,
+    #     phi4,
+    #     phi5,
+    # ) = assmble_data(2, 1000)
+    # with plt.style.context(["nature"]):
+    #     plot_7(rho, dis, vol, stress_iter, stress, omega, phi0)
 
     # dir_result1 = (
     #     "../output/final_results/square/p, d=0.034/"

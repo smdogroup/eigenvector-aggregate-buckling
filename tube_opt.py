@@ -1546,7 +1546,7 @@ def main(problem, finalise=False):
         set_beam = {
             "nelems": 50,
             "ndvs": 10,
-            "L": 2.0,
+            "L": 8.0,
             "t": 0.005,
             "N": 4,
             "ksrho": 100 / (519.94**2),  # 519.94 rad/s is the first frequency
@@ -1580,7 +1580,7 @@ def main(problem, finalise=False):
             bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
             constraints={"type": "ineq", "fun": mass, "jac": mass_grad},
             options={"disp": 1, "maxiter": 200, "ftol": 1e-8},
-            callback=lambda x: print("obj: ", obj(x)),
+            callback=lambda x: print("obj: ", beam.appox_min_eigenvalue(x)),
             # callback=lambda x: print("mass: ", (beam.get_mass(set_opt["x_con"]) - beam.get_mass(x))),
             # callback=lambda x: print("mass: ", (beam.get_mass(set_opt["x_con"]))),
         )
@@ -1651,8 +1651,12 @@ def main(problem, finalise=False):
         }
 
         # maximun the eigenvalue
-        obj = lambda x: -beam.appox_min_eigenvalue(x) / (519.94**2)
-        obj_grad = lambda x: -beam.approx_min_eigenvalue_deriv(x) / (519.94**2)
+        # obj = lambda x: -beam.appox_min_eigenvalue(x) / (519.94**2)
+        # obj_grad = lambda x: -beam.approx_min_eigenvalue_deriv(x) / (519.94**2)
+        
+        # minimize the displacement
+        obj = lambda x: beam.approx_eigenvector(x)
+        obj_grad = lambda x: beam.approx_eigenvector_deriv(x)
 
         dis = lambda x: 0.8 - np.abs(beam.approx_eigenvector(x))
         dis_grad = lambda x: -beam.approx_eigenvector_deriv(x)
@@ -1669,7 +1673,7 @@ def main(problem, finalise=False):
             bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
             constraints=(
                 {"type": "ineq", "fun": mass, "jac": mass_grad},
-                {"type": "ineq", "fun": dis, "jac": dis_grad},
+                # {"type": "ineq", "fun": dis, "jac": dis_grad},
             ),
             options={"disp": 1, "maxiter": 100, "ftol": 1e-8},
             callback=lambda x: print("obj: %f" % obj(x)),
@@ -1723,7 +1727,7 @@ def main(problem, finalise=False):
         set_beam = {
             "nelems": 50,
             "ndvs": 10,
-            "L": 2.0,  # 2 m
+            "L": 8.0,  # 2 m
             "t": 0.005,  # 5 mm
             "N": 4,
             "ksrho": 100 / (519.94**2),  # 519.94 rad/s is the first frequency
@@ -1752,10 +1756,15 @@ def main(problem, finalise=False):
         allowable = set_stress["allowable"]
 
         # minimize the eigenvalue
-        obj = lambda x: -beam.appox_min_eigenvalue(x) / (519.94**2)
-        obj_grad = lambda x: -beam.approx_min_eigenvalue_deriv(x) / (519.94**2)
-
-        stress = lambda x: 0.52 - 1e-20 * beam.eigenvector_stress(
+        # obj = lambda x: -beam.appox_min_eigenvalue(x) / (519.94**2)
+        # obj_grad = lambda x: -beam.approx_min_eigenvalue_deriv(x) / (519.94**2)
+        
+        # minimize the stress
+        obj = lambda x: beam.eigenvector_stress(x, rho=rho, allowable=allowable) * 1e-19
+        obj_grad = lambda x: beam.eigenvector_stress_deriv(x, rho=rho, allowable=allowable) * 1e-19
+        
+        # # stress 0.52
+        stress = lambda x: 0.5 - 1e-20 * beam.eigenvector_stress(
             x, rho=rho, allowable=allowable
         )
         stress_grad = lambda x: -1e-20 * beam.eigenvector_stress_deriv(
@@ -1774,13 +1783,14 @@ def main(problem, finalise=False):
             method="SLSQP",
             bounds=[(xl, xu) for xl, xu in zip(set_opt["x_lower"], set_opt["x_upper"])],
             constraints=(
-                {"type": "ineq", "fun": stress, "jac": stress_grad},
+                # {"type": "ineq", "fun": stress, "jac": stress_grad},
                 {"type": "ineq", "fun": mass, "jac": mass_grad},
             ),
             options=set_opt["options"],
-            callback=lambda x: print("obj: ", obj(x)),
-            # callback=lambda x: print("stress constraint: ", stress(x)),
+            # callback=lambda x: print("obj: ", obj(x)),
+            # callback=lambda x: print("stress: ", beam.eigenvector_stress(x, rho=rho, allowable=allowable)),
             # callback=lambda x: print("mass constraints: ", (beam.get_mass(set_opt["x_con"]))),
+            callback=lambda x: print("freq: ", beam.appox_min_eigenvalue(x)),
         )
 
         # save and read the result
@@ -1823,10 +1833,10 @@ def main(problem, finalise=False):
 if __name__ == "__main__":
     problem = [
         # "plot_E",
-        "accuracy_analysis",
+        # "accuracy_analysis",
         "optimization_eigenvalue",
-        "optimization_displacement",
-        "optimization_stress",
+        # "optimization_displacement",
+        # "optimization_stress",
     ]
 
     for p in problem:

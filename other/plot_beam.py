@@ -256,9 +256,16 @@ def plot_modeshape(
         ax.set_xlim(2.5, 5.5)
 
 
-def plot_1(nrow, rho):
+def plot_1(nrow, rho, phi0):
+    # where is the max location for phi0[0]
+    phi0[0] = np.abs(phi0[0])
+    max_loc = np.argmax(phi0[0][:, :, 1])
+    ic(np.unravel_index(max_loc, phi0[0][:, :, 1].shape))
+    ic(np.unravel_index(159, phi0[0][:, :, 1].shape))
+    ic(np.max(phi0[0][:, :, 1]))
+    ic(phi0[0].shape, max_loc)
     fig, axs = plt.subplots(nrow, 1, figsize=(4, 2), constrained_layout=True)
-    plot_modeshape(axs, rho[0], levels=50)
+    plot_modeshape(axs, rho[0], phi0[0], flip_y=True)
 
 
 def plot_2(omega, vol):
@@ -593,34 +600,34 @@ def plot_4(ncol, rho, stress, phi0, phi1, phi2, dis=None):
 
 
 if __name__ == "__main__":
-    # dir_result1 = "final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
-    # dir_result2 = "final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
-    # dir_result3 = "final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
-    # rho, vol, _,_,_, omega, _, _, _, _, _, _ = assmble_data(3, 300, 300, 300)
-    # with plt.style.context(["nature"]):
-    # plot_1(1, rho)
-    # plt.savefig("final_results/mbbbeam/mbbbeam_mesh.pdf", bbox_inches="tight")
-    # plt.savefig("final_results/mbbbeam/mbbbeam_mesh.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
+    dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
+    dir_result2 = "../output/final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
+    dir_result3 = "../output/final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
+    rho, vol, _,_,_, omega, phi0, _, _, _, _, _ = assmble_data(3, 300, 300, 300)
+    with plt.style.context(["nature"]):
+        plot_1(1, rho, phi0)
+    # plt.savefig("../output/final_results/mbbbeam/mbbbeam_mesh.pdf", bbox_inches="tight")
+    # plt.savefig("../output/final_results/mbbbeam/mbbbeam_mesh.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
 
     # plot_2(omega, vol)
-    # plt.savefig("final_results/mbbbeam/mbbbeam_freq.pdf", bbox_inches="tight", pad_inches=0.0)
+    # plt.savefig("../output/final_results/mbbbeam/mbbbeam_freq.pdf", bbox_inches="tight", pad_inches=0.0)
 
     # plot_3(omega, vol)
-    # plt.savefig("final_results/mbbbeam/mbbbeam_freq_2.pdf", bbox_inches="tight", pad_inches=0.0)
+    # plt.savefig("../output/final_results/mbbbeam/mbbbeam_freq_2.pdf", bbox_inches="tight", pad_inches=0.0)
 
     # dir_result1 = "final_results/mbbbeam/nx=500, vol=0.5, r0=1.0, K=simp, M=msimp/"
     # dir_result2 = "final_results/mbbbeam/nx=500, vol=0.5, dis=0.3, mode=2, r0=1.0, K=simp, M=msimp/"
     # dir_result3 = "final_results/mbbbeam/nx=500, vol=0.5, dis=0.3, mode=2, s=20000000000000.0, r0=1.0, K=simp, M=msimp/"
 
-    dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"
-    dir_result2 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, r0=2.1, K=simp, M=linear/"
-    dir_result3 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, r0=2.1, K=simp, M=linear/"
+    # dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"
+    # dir_result2 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, r0=2.1, K=simp, M=linear/"
+    # dir_result3 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, r0=2.1, K=simp, M=linear/"
     
     # dir_result1 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
     # dir_result2 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
     # dir_result3 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
     
-    rho, _, _,_, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5 = assmble_data(3, 500)
+    # rho, _, _,_, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5 = assmble_data(3, 500)
     
     # omegas = np.array([omega[0][500, 0], omega[0][500, 1], omega[0][500, 2], omega[0][500, 3], omega[0][500, 4], omega[0][500, 5]])
     # ic(omegas)
@@ -634,16 +641,16 @@ if __name__ == "__main__":
     # ic(q)
     # ic(np.dot(eta, q**2))
     
-    with plt.style.context(["nature"]):
-        plot_4(3, rho, stress, phi0, phi1, phi2)
-        plt.savefig("../output/final_results/mbbbeam/mbbbeam_stress_new_17.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
+    # with plt.style.context(["nature"]):
+    #     plot_4(3, rho, stress, phi0, phi1, phi2)
+    #     plt.savefig("../output/final_results/mbbbeam/mbbbeam_stress_new_17.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
         
-    dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
-    dir_result2 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
-    dir_result3 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
-    _, vol, dis,stress_iter, _, omega, _, _, _, _, _, _ = assmble_data(3, 500)
-    with plt.style.context(["nature"]):
-        plot_3(omega, vol, dis, stress_iter)
+    # dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
+    # dir_result2 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
+    # dir_result3 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
+    # _, vol, dis,stress_iter, _, omega, _, _, _, _, _, _ = assmble_data(3, 500)
+    # with plt.style.context(["nature"]):
+    #     plot_3(omega, vol, dis, stress_iter)
 
     # dir_result1 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"
     # dir_result2 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"

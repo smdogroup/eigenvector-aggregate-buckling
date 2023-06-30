@@ -2659,6 +2659,7 @@ class TopologyAnalysis:
             t = np.dot(Ur.T, bkr)
             bkr = bkr - np.dot(Ur, t)
             vkr, info = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
+            print("GMRES info: ", info)
             vk = np.zeros_like(bk)
             vk[reduced] = vkr
 
