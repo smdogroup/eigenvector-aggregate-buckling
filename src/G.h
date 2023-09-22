@@ -74,18 +74,18 @@ View1D<T> populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye, Vi
   return detJ;
 }
 
-template <typename T>
-View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn, const View1D<T>& rho,
-                   const View1D<T>& u, const View2D<T>& C0, const T rho0_K, const char* ptype_K,
+template <typename T, typename D>
+View3D<D> computeG(const View2D<T>& X, const View2D<int>& conn, const View1D<D>& rho,
+                   const View1D<D>& u, const View2D<T>& C0, const T rho0_K, const char* ptype_K,
                    const double p, const double q) {
   const int nelems = conn.extent(0);
-  View3D<T> C("C", nelems, 3, 3);
+  View3D<D> C("C", nelems, 3, 3);
   View2D<T> xe("xe", nelems, 4);
   View2D<T> ye("ye", nelems, 4);
-  View2D<T> ue("ue", nelems, 8);
+  View2D<D> ue("ue", nelems, 8);
   View3D<T> Be("Be", nelems, 3, 8);
   View4D<T> Te("Te", nelems, 3, 4, 4);
-  View3D<T> Ge("Ge", nelems, 8, 8);
+  View3D<D> Ge("Ge", nelems, 8, 8);
 
   // Compute Gauss quadrature with a 2-point quadrature rule
   const double gauss_pts[2] = {-1.0 / sqrt(3.0), 1.0 / sqrt(3.0)};
@@ -94,7 +94,7 @@ View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn, const View1D<T>&
   Kokkos::parallel_for(
       nelems, KOKKOS_LAMBDA(const int n) {
         // Average the density to get the element - wise density
-        T rhoE_n = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n, 2)) + rho(conn(n, 3)));
+        D rhoE_n = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n, 2)) + rho(conn(n, 3)));
 
         // Compute the constitutivve matrix
         const char* simp = "simp";
@@ -134,7 +134,7 @@ View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn, const View1D<T>&
       Kokkos::parallel_for(
           nelems, KOKKOS_LAMBDA(const int n) {
             for (int i = 0; i < 3; i++) {
-              T s_ni = 0.0;
+              D s_ni = 0.0;
               for (int k = 0; k < 8; k++) {
                 for (int j = 0; j < 3; j++) {
                   s_ni += C(n, i, j) * Be(n, j, k) * ue(n, k);
@@ -143,7 +143,7 @@ View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn, const View1D<T>&
 
               for (int j = 0; j < 4; j++) {
                 for (int l = 0; l < 4; l++) {
-                  T temp = detJ(n) * s_ni * Te(n, i, j, l);
+                  D temp = detJ(n) * s_ni * Te(n, i, j, l);
                   Ge(n, j * 2, l * 2) += temp;
                   Ge(n, j * 2 + 1, l * 2 + 1) += temp;
                 }

@@ -55,18 +55,18 @@ View1D<T> populateBe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye, View
   return detJ;
 }
 
-template <typename T>
-View3D<T> computeK(const View2D<T>& X, const View2D<int>& conn, const View1D<T>& rho,
+template <typename T, typename D>
+View3D<D> computeK(const View2D<T>& X, const View2D<int>& conn, const View1D<D>& rho,
                    const View2D<T>& C0, const T rho0_K, const char* ptype_K, const double p,
                    const double q) {
   const int nelems = conn.extent(0);
   const int nnodes = X.extent(0);
 
-  View3D<T> C("C", nelems, 3, 3);
+  View3D<D> C("C", nelems, 3, 3);
   View2D<T> xe("xe", nelems, 4);
   View2D<T> ye("ye", nelems, 4);
   View3D<T> Be("Be", nelems, 3, 8);
-  View3D<T> Ke("Ke", nelems, 8, 8);
+  View3D<D> Ke("Ke", nelems, 8, 8);
 
   // Compute Gauss quadrature with a 2-point quadrature rule
   const double gauss_pts[2] = {-1.0 / sqrt(3.0), 1.0 / sqrt(3.0)};
@@ -75,7 +75,7 @@ View3D<T> computeK(const View2D<T>& X, const View2D<int>& conn, const View1D<T>&
   Kokkos::parallel_for(
       nelems, KOKKOS_LAMBDA(const int n) {
         // Average the density to get the element - wise density
-        T rhoE_n = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n, 2)) + rho(conn(n, 3)));
+        D rhoE_n = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n, 2)) + rho(conn(n, 3)));
 
         // Compute the constitutivve matrix
         const char* simp = "simp";
