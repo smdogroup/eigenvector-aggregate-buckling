@@ -5,8 +5,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Set warning flags
 add_compile_options(
-  -Wall -Wextra -Wno-unused-variable -Wno-unused-parameter -Wno-sign-compare
-  )
+    -O3
+    -march=native
+    -Wall
+    -Wextra
+    -Wno-unused-variable
+    -Wno-unused-parameter
+    -Wno-sign-compare
+)
+
 
 # Find the required packages
 # find_package(pybind11 REQUIRED)
