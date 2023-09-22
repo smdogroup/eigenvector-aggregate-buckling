@@ -1,5 +1,6 @@
 import argparse
 from collections import OrderedDict
+import inspect  # for debug
 import multiprocessing as multiprocessing
 import os
 import shutil as shutil
@@ -17,8 +18,9 @@ from scipy import sparse, spatial
 from scipy.linalg import eigh
 from scipy.sparse import coo_matrix, linalg
 
+import kokkos as kokkos
 from other.utils import time_this, timer_set_log_path
-import inspect # for debug
+
 
 # defind a function to print line number
 def check():
@@ -55,6 +57,7 @@ def _populate_Be(nelems, xi, eta, xe, ye, Be):
     J[:, 1, 0] = np.dot(ye, Nxi)
     J[:, 0, 1] = np.dot(xe, Neta)
     J[:, 1, 1] = np.dot(ye, Neta)
+
     # Compute the inverse of the Jacobian
     detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
     invJ[:, 0, 0] = J[:, 1, 1] / detJ
@@ -486,7 +489,7 @@ class TopologyAnalysis:
         forces={},
         m=None,
         D_index=None,
-        E=1.0,
+        E=1.0,  # to make sure eigs is not too large, E=10.0 * 1e6,
         nu=0.3,
         ptype_K="ramp",
         ptype_M="ramp",
@@ -497,6 +500,7 @@ class TopologyAnalysis:
         density=1.0,
         epsilon=0.3,
         assume_same_element=False,
+        check=False,
         prob="natural_frequency",
         kokkos=False,
     ):
@@ -527,9 +531,7 @@ class TopologyAnalysis:
         self.K0 = None
         self.M0 = None
 
-        self.Q = None
-        self.eigs = None
-        self.mu = None  # mu = - 1 / eigs
+        self.check = check
         self.prob = prob
         self.kokkos = kokkos
 
@@ -604,176 +606,90 @@ class TopologyAnalysis:
         """
         Assemble the stiffness matrix
         """
-        ic(self.nelems)
-        ic(self.X.shape)
-        ic(self.conn.shape)
-        ic(self.C0.shape)
 
-        time_start = time.time()
+        if not self.kokkos or self.check:
+            # Average the density to get the element-wise density
+            rhoE = 0.25 * (
+                rho[self.conn[:, 0]]
+                + rho[self.conn[:, 1]]
+                + rho[self.conn[:, 2]]
+                + rho[self.conn[:, 3]]
+            )
 
-        # Average the density to get the element-wise density
-        rhoE = 0.25 * (
-            rho[self.conn[:, 0]]
-            + rho[self.conn[:, 1]]
-            + rho[self.conn[:, 2]]
-            + rho[self.conn[:, 3]]
-        )
-        
-        # ic(rhoE.shape)
-        # ic(rhoE[0])
+            # Compute the element stiffnesses
+            if self.ptype_K == "simp":
+                C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
+            else:  # ramp
+                C = np.outer(
+                    rhoE / (1.0 + self.q * (1.0 - rhoE)) + self.rho0_K, self.C0
+                )
 
-        # Compute the element stiffnesses
-        if self.ptype_K == "simp":
-            rhoE = rhoE**self.p + self.rho0_K
-        else:  # ramp
-            rhoE = rhoE / (1.0 + self.q * (1.0 - rhoE)) + self.rho0_K
+            C = C.reshape((self.nelems, 3, 3))
 
-        C = np.outer(rhoE, self.C0)
-        C = C.reshape((self.nelems, 3, 3))
-        
-        # ic(C[0])
+            # Compute the element stiffness matrix
+            gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
-        # Compute the element stiffness matrix
-        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+            # Assemble all of the the 8 x 8 element stiffness matrix
+            Ke_python = np.zeros((self.nelems, 8, 8), dtype=rho.dtype)
 
-        # Assemble all of the the 8 x 8 element stiffness matrix
-        Ke = np.zeros((self.nelems, 8, 8))
+            if self.assume_same_element:
+                Be_ = np.zeros((3, 8))
 
-        if self.assume_same_element:
-            Be_ = np.zeros((3, 8))
+                # Compute the x and y coordinates of the first element
+                xe_ = self.X[self.conn[0], 0]
+                ye_ = self.X[self.conn[0], 1]
 
-            # Compute the x and y coordinates of the first element
-            xe_ = self.X[self.conn[0], 0]
-            ye_ = self.X[self.conn[0], 1]
+                for j in range(2):
+                    for i in range(2):
+                        xi = gauss_pts[i]
+                        eta = gauss_pts[j]
+                        detJ = _populate_Be_single(xi, eta, xe_, ye_, Be_)
 
-            for j in range(2):
-                for i in range(2):
-                    xi = gauss_pts[i]
-                    eta = gauss_pts[j]
-                    detJ = _populate_Be_single(xi, eta, xe_, ye_, Be_)
+                        # This is a fancy (and fast) way to compute the element matrices
+                        Ke_python += detJ * np.einsum("ij,nik,kl -> njl", Be_, C, Be_)
 
-                    # This is a fancy (and fast) way to compute the element matrices
-                    Ke += detJ * np.einsum("ij,nik,kl -> njl", Be_, C, Be_)
+            else:
+                Be = np.zeros((self.nelems, 3, 8))
 
-        else:
-            Be = np.zeros((self.nelems, 3, 8))
+                # Compute the x and y coordinates of each element
+                xe = self.X[self.conn, 0]
+                ye = self.X[self.conn, 1]
 
-            # Compute the x and y coordinates of each element
-            xe = self.X[self.conn, 0]
-            ye = self.X[self.conn, 1]
-            
-            # ic(xe.shape)
-            # ic(xe[0])
-            for j in range(2):
-                for i in range(2):
-                    xi = gauss_pts[i]
-                    eta = gauss_pts[j]
-                    
-                    # ic(xi)
-                    # ic(eta)
-                    
-                    detJ = _populate_Be(self.nelems, xi, eta, xe, ye, Be)
-                    # if j == 0 and i == 0:
-                    #     ic(detJ)
-                    #     ic(Be[0])
+                for j in range(2):
+                    for i in range(2):
+                        xi = gauss_pts[i]
+                        eta = gauss_pts[j]
+                        detJ = _populate_Be(self.nelems, xi, eta, xe, ye, Be)
 
-                    # This is a fancy (and fast) way to compute the element matrices
-                    Ke += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
-                    
-                    # if j == 0 and i == 0:
-                    #     ic(Ke[0])
+                        # This is a fancy (and fast) way to compute the element matrices
+                        Ke_python += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
+                Ke_python = Ke_python.flatten()
 
-        time_end = time.time()
-        print("Python: ", time_end - time_start)
-
-        ic(self.i.shape)
-        ic(self.j.shape)
-        # print all elements of self.i
-        print("self.i: ")
-        # ic(self.i[:100])
-        # ic(self.j[:100])
-        
-        # ic(Ke.flatten()[:100])
-        
-        
-        K = sparse.coo_matrix((Ke.flatten(), (self.i, self.j)))
-        K = K.tocsr()
-        
-        
-        # # # print the row map
-        # ic(K.indptr)
-        # # print column indices
-        # ic(K.indices[:100])
-        # # print first 100 elements of the matrix
-        # ic(K.data[:100])
-        
-        # ic(Ke.flatten().shape)
-        # ic(Ke.flatten()[100:200])
-        # print the size of the matrix
-        ic(self.nnodes)
-        ic(K.shape)
-        ic(self.K0)
-        if self.K0 is not None:
-            K += self.K0
-
-        if self.kokkos:
-            import kokkos
-            
-            f = np.ones(K.shape[0])
-
-            
-            u = sparse.linalg.spsolve(K, f)
-
-            
-            
-            
-            # ic(self.reduced)
-            Kr = self.reduce_matrix(K)
-            fr = self.reduce_vector(self.f)
-            
-            ic(Kr.shape)
-            
-            fr = np.ones(Kr.shape[0])
-            time_start = time.time()
-            ur = sparse.linalg.spsolve(Kr, fr)
-            time_end = time.time()
-            duration = time_end - time_start
-            ic("scipy: ", duration)
-            # ic(ur)
-            ic(Kr.data.shape)
-            u = self.full_vector(ur)
-            # ic(fr)
-            # ic(ur)
-
-            time_start = time.time()
-
-            # use the kokkos version from stiffness library
-            Ke2 = kokkos.assemble_stiffness_matrix(
+        if self.kokkos or self.check:
+            Ke_kokkos = kokkos.assemble_stiffness_matrix(
                 self.X,
                 self.conn,
                 rho,
                 self.C0,
-                self.reduced,
                 self.rho0_K,
                 self.ptype_K,
                 self.p,
                 self.q,
-                Kr.indptr,
-                Kr.indices,
-                Kr.data,
-                fr,
             )
-            time_end = time.time()
-            print("kokkos: ", time_end - time_start)
 
-            K2 = sparse.coo_matrix((Ke2.flatten(), (self.i, self.j)))
-            K2 = K2.tocsr()
+        if self.check:
+            ic(np.allclose(Ke_python, Ke_kokkos))
 
-            if self.K0 is not None:
-                K2 += self.K0
+        if not self.kokkos:
+            Ke = Ke_python
+        else:
+            Ke = Ke_kokkos
 
-            # check if K and K2 are the same
-            ic(np.allclose(K.toarray(), K2.toarray()))
+        K = sparse.coo_matrix((Ke, (self.i, self.j)))
+        K = K.tocsr()
+
+        if self.K0 is not None:
+            K += self.K0
 
         return K
 
@@ -782,80 +698,78 @@ class TopologyAnalysis:
         """
         Compute the derivative of the stiffness matrix times the vectors psi and u
         """
-        print("Computing the stiffness matrix derivative")
-        time_start = time.time()
-        # Average the density to get the element-wise density
-        rhoE = 0.25 * (
-            rho[self.conn[:, 0]]
-            + rho[self.conn[:, 1]]
-            + rho[self.conn[:, 2]]
-            + rho[self.conn[:, 3]]
-        )
+        # if don't have the kokkos version, use the python version
+        if not self.kokkos or self.check:
+            # Average the density to get the element-wise density
+            rhoE = 0.25 * (
+                rho[self.conn[:, 0]]
+                + rho[self.conn[:, 1]]
+                + rho[self.conn[:, 2]]
+                + rho[self.conn[:, 3]]
+            )
 
-        dfdC = np.zeros((self.nelems, 3, 3))
+            dfdC = np.zeros((self.nelems, 3, 3))
 
-        # Compute the element stiffness matrix
-        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+            # Compute the element stiffness matrix
+            gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
-        # The element-wise variables
-        ue = np.zeros((self.nelems, 8))
-        psie = np.zeros((self.nelems, 8))
+            # The element-wise variables
+            ue = np.zeros((self.nelems, 8))
+            psie = np.zeros((self.nelems, 8))
 
-        ue[:, ::2] = u[2 * self.conn]
-        ue[:, 1::2] = u[2 * self.conn + 1]
+            ue[:, ::2] = u[2 * self.conn]
+            ue[:, 1::2] = u[2 * self.conn + 1]
 
-        psie[:, ::2] = psi[2 * self.conn]
-        psie[:, 1::2] = psi[2 * self.conn + 1]
+            psie[:, ::2] = psi[2 * self.conn]
+            psie[:, 1::2] = psi[2 * self.conn + 1]
 
-        if self.assume_same_element:
-            Be_ = np.zeros((3, 8))
-            xe_ = self.X[self.conn[0], 0]
-            ye_ = self.X[self.conn[0], 1]
+            if self.assume_same_element:
+                Be_ = np.zeros((3, 8))
+                xe_ = self.X[self.conn[0], 0]
+                ye_ = self.X[self.conn[0], 1]
 
-            for j in range(2):
-                for i in range(2):
-                    xi = gauss_pts[i]
-                    eta = gauss_pts[j]
-                    detJ = _populate_Be_single(xi, eta, xe_, ye_, Be_)
+                for j in range(2):
+                    for i in range(2):
+                        xi = gauss_pts[i]
+                        eta = gauss_pts[j]
+                        detJ = _populate_Be_single(xi, eta, xe_, ye_, Be_)
 
-                    dfdC += detJ * np.einsum("im,jl,nm,nl -> nij", Be_, Be_, psie, ue)
+                        dfdC += detJ * np.einsum(
+                            "im,jl,nm,nl -> nij", Be_, Be_, psie, ue
+                        )
 
-        else:
-            Be = np.zeros((self.nelems, 3, 8))
-            xe = self.X[self.conn, 0]
-            ye = self.X[self.conn, 1]
+            else:
+                Be = np.zeros((self.nelems, 3, 8))
+                xe = self.X[self.conn, 0]
+                ye = self.X[self.conn, 1]
 
-            for j in range(2):
-                for i in range(2):
-                    xi = gauss_pts[i]
-                    eta = gauss_pts[j]
-                    detJ = _populate_Be(self.nelems, xi, eta, xe, ye, Be)
+                for j in range(2):
+                    for i in range(2):
+                        xi = gauss_pts[i]
+                        eta = gauss_pts[j]
+                        detJ = _populate_Be(self.nelems, xi, eta, xe, ye, Be)
 
-                    dfdC += np.einsum("n,nim,njl,nm,nl -> nij", detJ, Be, Be, psie, ue)
-        
-        dfdrhoE = np.zeros(self.nelems)
-        for i in range(3):
-            for j in range(3):
-                dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
+                        dfdC += np.einsum(
+                            "n,nim,njl,nm,nl -> nij", detJ, Be, Be, psie, ue
+                        )
 
-        if self.ptype_K == "simp":
-            dfdrhoE[:] *= self.p * rhoE ** (self.p - 1.0)
-        else:  # ramp
-            dfdrhoE[:] *= (1.0 + self.q) / (1.0 + self.q * (1.0 - rhoE)) ** 2
+            dfdrhoE = np.zeros(self.nelems)
+            for i in range(3):
+                for j in range(3):
+                    dfdrhoE[:] += self.C0[i, j] * dfdC[:, i, j]
 
-        dfdrho = np.zeros(self.nnodes)
-        for i in range(4):
-            np.add.at(dfdrho, self.conn[:, i], dfdrhoE)
-        dfdrho *= 0.25
-        
-        time_end = time.time()
-        print("Python: ", time_end - time_start)
-        
-        if self.kokkos:
-            import kokkos
+            if self.ptype_K == "simp":
+                dfdrhoE[:] *= self.p * rhoE ** (self.p - 1.0)
+            else:  # ramp
+                dfdrhoE[:] *= (1.0 + self.q) / (1.0 + self.q * (1.0 - rhoE)) ** 2
 
-            time_start = time.time()
-            dG = kokkos.stiffness_matrix_derivative(
+            dKdrho_python = np.zeros(self.nnodes)
+            for i in range(4):
+                np.add.at(dKdrho_python, self.conn[:, i], dfdrhoE)
+            dKdrho_python *= 0.25
+
+        if self.kokkos or self.check:
+            dKdrho_kokkos = kokkos.stiffness_matrix_derivative(
                 self.X,
                 self.conn,
                 rho,
@@ -866,13 +780,16 @@ class TopologyAnalysis:
                 self.p,
                 self.q,
             )
-            time_end = time.time()
-            print("kokkos: ", time_end - time_start)
-            
-            # check if dfdrho and dG are the same
-            ic(np.allclose(dfdrho, dG))
 
-        return dfdrho
+        if self.check:
+            ic(np.allclose(dKdrho_python, dKdrho_kokkos))
+
+        if not self.kokkos:
+            dKdrho = dKdrho_python
+        else:
+            dKdrho = dKdrho_kokkos
+
+        return dKdrho
 
     @time_this
     def assemble_mass_matrix(self, rho):
@@ -904,7 +821,7 @@ class TopologyAnalysis:
         gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
         # Assemble all of the the 8 x 8 element mass matrices
-        Me = np.zeros((self.nelems, 8, 8))
+        Me = np.zeros((self.nelems, 8, 8), dtype=rho.dtype)
 
         if self.assume_same_element:
             He_ = np.zeros((2, 8))
@@ -1035,105 +952,90 @@ class TopologyAnalysis:
         """
         Compute the stress stiffness matrix for buckling, given the displacement path u
         """
-        ic(self.nelems)
-        ic(self.X.shape)
-        ic(self.conn.shape)
-        ic(rho.shape)
-        ic(self.C0.shape)
-        time_start = time.time()
-
-        # Average the density to get the element-wise density
-        rhoE = 0.25 * (
-            rho[self.conn[:, 0]]
-            + rho[self.conn[:, 1]]
-            + rho[self.conn[:, 2]]
-            + rho[self.conn[:, 3]]
-        )
-
-        # Get the element-wise solution variables
-        ue = np.zeros((self.nelems, 8))
-        ue[:, ::2] = u[2 * self.conn]
-        ue[:, 1::2] = u[2 * self.conn + 1]
-
-        # Compute the element stiffnesses
-        if self.ptype_K == "simp":
-            C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
-        else:  # ramp
-            C = np.outer(
-                rhoE / (1.0 + (self.q + 1) * (1.0 - rhoE)) + self.rho0_K, self.C0
+        if not self.kokkos or self.check:
+            # Average the density to get the element-wise density
+            rhoE = 0.25 * (
+                rho[self.conn[:, 0]]
+                + rho[self.conn[:, 1]]
+                + rho[self.conn[:, 2]]
+                + rho[self.conn[:, 3]]
             )
 
-        C = C.reshape((self.nelems, 3, 3))
+            # Get the element-wise solution variables
+            ue = np.zeros((self.nelems, 8), dtype=rho.dtype)
+            ue[:, ::2] = u[2 * self.conn]
+            ue[:, 1::2] = u[2 * self.conn + 1]
 
-        # Compute the element stiffness matrix
-        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+            # Compute the element stiffnesses
+            if self.ptype_K == "simp":
+                C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
+            else:  # ramp
+                C = np.outer(
+                    rhoE / (1.0 + (self.q + 1) * (1.0 - rhoE)) + self.rho0_K, self.C0
+                )
 
-        # Assemble all of the the 8 x 8 element stiffness matrix
-        Ge = np.zeros((self.nelems, 8, 8))
+            C = C.reshape((self.nelems, 3, 3))
 
-        if self.assume_same_element:
-            Be_ = np.zeros((3, 8))
-            Te_ = np.zeros((3, 4, 4))
+            # Compute the element stiffness matrix
+            gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
-            # Compute the x and y coordinates of the first element
-            xe_ = self.X[self.conn[0], 0]
-            ye_ = self.X[self.conn[0], 1]
+            # Assemble all of the the 8 x 8 element stiffness matrix
+            Ge_python = np.zeros((self.nelems, 8, 8), dtype=rho.dtype)
 
-            for j in range(2):
-                for i in range(2):
-                    xi = gauss_pts[i]
-                    eta = gauss_pts[j]
-                    detJ = _populate_Be_and_Te_single(xi, eta, xe_, ye_, Be_, Te_)
+            if self.assume_same_element:
+                Be_ = np.zeros((3, 8))
+                Te_ = np.zeros((3, 4, 4))
 
-                    # Compute the stress
-                    s = np.einsum("nij,jk,nk - > ni", C, Be_, ue)
+                # Compute the x and y coordinates of the first element
+                xe_ = self.X[self.conn[0], 0]
+                ye_ = self.X[self.conn[0], 1]
 
-                    # G0e =
-                    # s[0] * np.outer(Nx, Nx) +
-                    # s[1] * np.outer(Ny, Ny) +
-                    # s[2] * (np.outer(Nx, Ny) + np.outer(Ny, Nx))
-                    G0e = np.einsum("n,ni,ijl -> njl", detJ, s, Te_)
-                    Ge[:, 0::2, 0::2] += G0e
-                    Ge[:, 1::2, 1::2] += G0e
-        else:
-            Be = np.zeros((self.nelems, 3, 8))
-            Te = np.zeros((self.nelems, 3, 4, 4))
+                for j in range(2):
+                    for i in range(2):
+                        xi = gauss_pts[i]
+                        eta = gauss_pts[j]
+                        detJ = _populate_Be_and_Te_single(xi, eta, xe_, ye_, Be_, Te_)
 
-            # Compute the x and y coordinates of each element
-            xe = self.X[self.conn, 0]
-            ye = self.X[self.conn, 1]
+                        # Compute the stress
+                        s = np.einsum("nij,jk,nk - > ni", C, Be_, ue)
 
-            for j in range(2):
-                for i in range(2):
-                    xi = gauss_pts[i]
-                    eta = gauss_pts[j]
-                    detJ = _populate_Be_and_Te(self.nelems, xi, eta, xe, ye, Be, Te)
+                        # G0e =
+                        # s[0] * np.outer(Nx, Nx) +
+                        # s[1] * np.outer(Ny, Ny) +
+                        # s[2] * (np.outer(Nx, Ny) + np.outer(Ny, Nx))
+                        G0e = np.einsum("n,ni,ijl -> njl", detJ, s, Te_)
+                        Ge_python[:, 0::2, 0::2] += G0e
+                        Ge_python[:, 1::2, 1::2] += G0e
+            else:
+                Be = np.zeros((self.nelems, 3, 8))
+                Te = np.zeros((self.nelems, 3, 4, 4))
 
-                    # Compute the stresses in each element
-                    s = np.einsum("nij,njk,nk -> ni", C, Be, ue)
+                # Compute the x and y coordinates of each element
+                xe = self.X[self.conn, 0]
+                ye = self.X[self.conn, 1]
 
-                    # G0e =
-                    # s[0] * np.outer(Nx, Nx) +
-                    # s[1] * np.outer(Ny, Ny) +
-                    # s[2] * (np.outer(Nx, Ny) + np.outer(Ny, Nx))
-                    G0e = np.einsum("n,ni,nijl -> njl", detJ, s, Te)
-                    Ge[:, 0::2, 0::2] += G0e
-                    Ge[:, 1::2, 1::2] += G0e
-                    
-        time_end = time.time()
-        print("Python: ", time_end - time_start)
+                for j in range(2):
+                    for i in range(2):
+                        xi = gauss_pts[i]
+                        eta = gauss_pts[j]
+                        detJ = _populate_Be_and_Te(self.nelems, xi, eta, xe, ye, Be, Te)
 
-        # Assemble the global stiffness matrix
-        G = sparse.coo_matrix((Ge.flatten(), (self.i, self.j)))
-        G = G.tocsr()
-        
-        if self.kokkos:
-            import kokkos
+                        # Compute the stresses in each element
+                        s = np.einsum("nij,njk,nk -> ni", C, Be, ue)
 
-            time_start = time.time()
+                        # G0e =
+                        # s[0] * np.outer(Nx, Nx) +
+                        # s[1] * np.outer(Ny, Ny) +
+                        # s[2] * (np.outer(Nx, Ny) + np.outer(Ny, Nx))
+                        G0e = np.einsum("n,ni,nijl -> njl", detJ, s, Te)
+                        Ge_python[:, 0::2, 0::2] += G0e
+                        Ge_python[:, 1::2, 1::2] += G0e
 
+                Ge_python = Ge_python.flatten()
+
+        if self.kokkos or self.check:
             # use the kokkos version from stiffness library
-            Ge2 = kokkos.assemble_stress_stiffness(
+            Ge_kokkos = kokkos.assemble_stress_stiffness(
                 self.X,
                 self.conn,
                 rho,
@@ -1144,14 +1046,18 @@ class TopologyAnalysis:
                 self.p,
                 self.q,
             )
-            time_end = time.time()
-            print("kokkos: ", time_end - time_start)
 
-            G2 = sparse.coo_matrix((Ge2.flatten(), (self.i, self.j)))
-            G2 = G2.tocsr()
-            
-            # check if K and K2 are the same
-            ic(np.allclose(G.toarray(), G2.toarray()))
+        if self.check:
+            ic(np.allclose(Ge_python, Ge_kokkos))
+
+        if not self.kokkos:
+            Ge = Ge_python
+        else:
+            Ge = Ge_kokkos
+
+        # Assemble the global stiffness matrix
+        G = sparse.coo_matrix((Ge, (self.i, self.j)))
+        G = G.tocsr()
 
         return G
 
@@ -1166,86 +1072,119 @@ class TopologyAnalysis:
         Given the right-hand-side rhs. ie. sol = solver(rhs)
         """
 
-        # Average the density to get the element-wise density
-        rhoE = 0.25 * (
-            rho[self.conn[:, 0]]
-            + rho[self.conn[:, 1]]
-            + rho[self.conn[:, 2]]
-            + rho[self.conn[:, 3]]
-        )
-
-        dfdrho = np.zeros(self.nnodes)
-        dfdC = np.zeros((self.nelems, 3, 3))
-
-        # Compute the element stiffnesses
-        if self.ptype_K == "simp":
-            C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
-        else:  # ramp
-            C = np.outer(
-                rhoE / (1.0 + (self.q + 1) * (1.0 - rhoE)) + self.rho0_K, self.C0
+        if not self.kokkos or self.check:
+            # Average the density to get the element-wise density
+            rhoE_python = 0.25 * (
+                rho[self.conn[:, 0]]
+                + rho[self.conn[:, 1]]
+                + rho[self.conn[:, 2]]
+                + rho[self.conn[:, 3]]
             )
 
-        C = C.reshape((self.nelems, 3, 3))
+            dfdC_python = np.zeros((self.nelems, 3, 3))
 
-        # Compute the element stiffness matrix
-        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+            # Compute the element stiffnesses
+            if self.ptype_K == "simp":
+                C = np.outer(rhoE_python**self.p + self.rho0_K, self.C0)
+            else:  # ramp
+                C = np.outer(
+                    rhoE_python / (1.0 + (self.q + 1) * (1.0 - rhoE_python))
+                    + self.rho0_K,
+                    self.C0,
+                )
 
-        # The element-wise variables
-        ue = np.zeros((self.nelems, 8))
-        ue[:, ::2] = u[2 * self.conn]
-        ue[:, 1::2] = u[2 * self.conn + 1]
+            C = C.reshape((self.nelems, 3, 3))
 
-        # Compute the element-wise values of psi and phi
-        psie = np.zeros((self.nelems, 8))
-        psie[:, ::2] = psi[2 * self.conn]
-        psie[:, 1::2] = psi[2 * self.conn + 1]
+            # Compute the element stiffness matrix
+            gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
 
-        phie = np.zeros((self.nelems, 8))
-        phie[:, ::2] = phi[2 * self.conn]
-        phie[:, 1::2] = phi[2 * self.conn + 1]
+            # The element-wise variables
+            ue = np.zeros((self.nelems, 8))
+            ue[:, ::2] = u[2 * self.conn]
+            ue[:, 1::2] = u[2 * self.conn + 1]
 
-        dfdue = np.zeros((self.nelems, 8))
+            # Compute the element-wise values of psi and phi
+            psie = np.zeros((self.nelems, 8))
+            psie[:, ::2] = psi[2 * self.conn]
+            psie[:, 1::2] = psi[2 * self.conn + 1]
 
-        if self.assume_same_element:
-            pass
+            phie = np.zeros((self.nelems, 8))
+            phie[:, ::2] = phi[2 * self.conn]
+            phie[:, 1::2] = phi[2 * self.conn + 1]
+
+            dfdue = np.zeros((self.nelems, 8))
+
+            if self.assume_same_element:
+                pass
+            else:
+                # Compute
+                Be = np.zeros((self.nelems, 3, 8))
+                Te = np.zeros((self.nelems, 3, 4, 4))
+
+                # Compute the x and y coordinates of each element
+                xe = self.X[self.conn, 0]
+                ye = self.X[self.conn, 1]
+
+                for j in range(2):
+                    for i in range(2):
+                        xi = gauss_pts[i]
+                        eta = gauss_pts[j]
+                        detJ = _populate_Be_and_Te(self.nelems, xi, eta, xe, ye, Be, Te)
+
+                        # Compute the stresses in each element
+                        # s = np.einsum("nij,njk,nk -> ni", C, Be, ue)
+
+                        # Compute the derivative of the stress w.r.t. u
+                        dfds = np.einsum(
+                            "n,nijl,nj,nl -> ni", detJ, Te, psie[:, ::2], phie[:, ::2]
+                        ) + np.einsum(
+                            "n,nijl,nj,nl -> ni", detJ, Te, psie[:, 1::2], phie[:, 1::2]
+                        )
+
+                        # Add up contributions to d( psi^{T} * G(x, u) * phi ) / du
+                        dfdue += np.einsum("nij,nik,nk -> nj", Be, C, dfds)
+
+                        # Add contributions to the derivative w.r.t. C
+                        dfdC_python += np.einsum("ni,njk,nk -> nij", dfds, Be, ue)
+
+            dfdu_python = np.zeros(2 * self.nnodes)
+            np.add.at(dfdu_python, 2 * self.conn, dfdue[:, 0::2])
+            np.add.at(dfdu_python, 2 * self.conn + 1, dfdue[:, 1::2])
+
+        if self.kokkos or self.check:
+            rhoE_kokkos, dfdu_kokkos, dfdC_kokkos = kokkos.stress_stiffness_derivative(
+                self.X,
+                self.conn,
+                rho,
+                u,
+                psi,
+                phi,
+                self.C0,
+                self.rho0_K,
+                self.ptype_K,
+                self.p,
+                self.q,
+            )
+
+            dfdC_kokkos = np.reshape(dfdC_kokkos, (self.nelems, 3, 3))
+
+        if self.check:
+            ic(np.allclose(rhoE_python, rhoE_kokkos))
+            ic(np.allclose(dfdu_python, dfdu_kokkos))
+            ic(np.allclose(dfdC_python, dfdC_kokkos))
+
+        if not self.kokkos:
+            rhoE = rhoE_python
+            dfdu = dfdu_python
+            dfdC = dfdC_python
         else:
-            # Compute
-            Be = np.zeros((self.nelems, 3, 8))
-            Te = np.zeros((self.nelems, 3, 4, 4))
-
-            # Compute the x and y coordinates of each element
-            xe = self.X[self.conn, 0]
-            ye = self.X[self.conn, 1]
-
-            for j in range(2):
-                for i in range(2):
-                    xi = gauss_pts[i]
-                    eta = gauss_pts[j]
-                    detJ = _populate_Be_and_Te(self.nelems, xi, eta, xe, ye, Be, Te)
-
-                    # Compute the stresses in each element
-                    s = np.einsum("nij,njk,nk -> ni", C, Be, ue)
-
-                    # Compute the derivative of the stress w.r.t. u
-                    dfds = np.einsum(
-                        "n,nijl,nj,nl -> ni", detJ, Te, psie[:, ::2], phie[:, ::2]
-                    ) + np.einsum(
-                        "n,nijl,nj,nl -> ni", detJ, Te, psie[:, 1::2], phie[:, 1::2]
-                    )
-
-                    # Add up contributions to d( psi^{T} * G(x, u) * phi ) / du
-                    dfdue += np.einsum("nij,nik,nk -> nj", Be, C, dfds)
-
-                    # Add contributions to the derivative w.r.t. C
-                    dfdC += np.einsum("ni,njk,nk -> nij", dfds, Be, ue)
-
-        dfdu = np.zeros(2 * self.nnodes)
-        np.add.at(dfdu, 2 * self.conn, dfdue[:, 0::2])
-        np.add.at(dfdu, 2 * self.conn + 1, dfdue[:, 1::2])
+            rhoE = rhoE_kokkos
+            dfdu = dfdu_kokkos
+            dfdC = dfdC_kokkos
 
         # convert self.reduced to a numpy array
         # self.reduced = np.array(self.reduced)
-        
+
         dfdur = self.reduce_vector(dfdu)
 
         # Compute the adjoint for K * adj = d ( psi^{T} * G(u, x) * phi ) / du
@@ -1262,6 +1201,8 @@ class TopologyAnalysis:
         else:  # ramp
             dfdrhoE[:] *= (2.0 + self.q) / (1.0 + (self.q + 1.0) * (1.0 - rhoE)) ** 2
 
+        dfdrho = np.zeros(self.nnodes)
+
         for i in range(4):
             np.add.at(dfdrho, self.conn[:, i], dfdrhoE)
         dfdrho *= 0.25
@@ -1270,47 +1211,6 @@ class TopologyAnalysis:
         dfdrho -= self.stiffness_matrix_derivative(rho, adj, u)
 
         return dfdrho
-
-    def check_buckling(self, rho, psi, phi, dh=1e-6):
-        K = self.assemble_stiffness_matrix(rho)
-        Kr = self.reduce_matrix(K)
-
-        # Compute the solution path
-        fr = self.reduce_vector(self.f)
-        Kfact = linalg.factorized(Kr)
-        ur = Kfact(fr)
-        u = self.full_vector(ur)
-
-        # Find the gemoetric stiffness matrix
-        G = self.assemble_stress_stiffness(rho, u)
-        Gr = self.reduce_matrix(G)
-
-        gx = self.stress_stiffness_derivative(rho, u, psi, phi, Kfact)
-
-        f0 = np.dot(psi, G @ phi)
-        p_rho = np.random.uniform(size=rho.shape)
-        rho_1 = rho + dh * p_rho
-        exact = np.dot(gx, p_rho)
-
-        K = self.assemble_stiffness_matrix(rho_1)
-        Kr = self.reduce_matrix(K)
-
-        # Compute the solution path
-        fr = self.reduce_vector(self.f)
-        Kfact = linalg.factorized(Kr)
-        ur = Kfact(fr)
-        u = self.full_vector(ur)
-
-        # Find the gemoetric stiffness matrix
-        G = self.assemble_stress_stiffness(rho_1, u)
-        Gr = self.reduce_matrix(G)
-
-        f1 = np.dot(psi, G @ phi)
-        fd = (f1 - f0) / dh
-
-        print("Exact: ", exact)
-        print("FD: ", fd)
-        print("Error: ", np.abs(exact - fd) / np.abs(exact))
 
     def reduce_vector(self, forces):
         """
@@ -1329,7 +1229,7 @@ class TopologyAnalysis:
         """
         Transform from a reduced vector without dirichlet BCs to the full vector
         """
-        temp = np.zeros(self.nvars)
+        temp = np.zeros(self.nvars, dtype=vec.dtype)
         temp[self.reduced] = vec[:]
         return temp
 
@@ -1338,36 +1238,35 @@ class TopologyAnalysis:
         Perform a linear static analysis
         """
 
-        # Compute the density at each node
-        rho = self.fltr.apply(x)
-
-        K = self.assemble_stiffness_matrix(rho)
-        Kr = self.reduce_matrix(K)
         fr = self.reduce_vector(self.f)
 
-        ur = sparse.linalg.spsolve(Kr, fr)
+        # Method 1: use the factorized matrix
+        Kfact = linalg.factorized(self.Kr)
+        ur = Kfact(fr)
         u = self.full_vector(ur)
+
+        # Method 2: use the sparse solver
+        # ur = sparse.linalg.spsolve(self.Kr, fr)
+        # u = self.full_vector(ur)
 
         return u
 
     def compliance(self, x):
-        self.u = self.solve(x)
+        if self.u is None:
+            self.u = self.solve(x)
         return self.f.dot(self.u)
 
     def compliance_gradient(self, x):
-        rho = self.fltr.apply(x)
-        dfdrho = -1.0 * self.stiffness_matrix_derivative(rho, self.u, self.u)
+        dfdrho = -1.0 * self.stiffness_matrix_derivative(self.rho, self.u, self.u)
         return self.fltr.applyGradient(dfdrho, x)
 
     def eval_area(self, x):
-        rho = self.fltr.apply(x)
-
         # Average the density to get the element-wise density
         rhoE = 0.25 * (
-            rho[self.conn[:, 0]]
-            + rho[self.conn[:, 1]]
-            + rho[self.conn[:, 2]]
-            + rho[self.conn[:, 3]]
+            self.rho[self.conn[:, 0]]
+            + self.rho[self.conn[:, 1]]
+            + self.rho[self.conn[:, 2]]
+            + self.rho[self.conn[:, 3]]
         )
 
         # Quadrature points
@@ -1449,7 +1348,7 @@ class TopologyAnalysis:
 
     @time_this
     def solve_eigenvalue_problem(
-        self, x, k=5, sigma=0.0, nodal_sols=None, nodal_vecs=None
+        self, x, k=6, ks_rho=100.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
     ):
         """
         Compute the k-th smallest natural frequencies
@@ -1460,13 +1359,14 @@ class TopologyAnalysis:
             k = len(self.reduced)
 
         # Compute the density at each node
-        rho = self.fltr.apply(x)
+        self.rho = self.fltr.apply(x)
 
-        K = self.assemble_stiffness_matrix(rho)
+        K = self.assemble_stiffness_matrix(self.rho)
         Kr = self.reduce_matrix(K)
 
-        M = self.assemble_mass_matrix(rho)
+        M = self.assemble_mass_matrix(self.rho)
         Mr = self.reduce_matrix(M)
+        Mfact = linalg.factorized(Mr)
 
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
@@ -1478,62 +1378,147 @@ class TopologyAnalysis:
                 Kr, M=Mr, k=k, sigma=sigma, which="LM", tol=1e-10
             )
 
-        Q = np.zeros((self.nvars, k))
+        ic(np.allclose(Kr @ Qr, Mr @ Qr @ np.diag(eigs), atol=1e-10))
+
+        Q = np.zeros((self.nvars, k), dtype=self.rho.dtype)
         for i in range(k):
             Q[self.reduced, i] = Qr[:, i]
 
         # Save vtk output data
         if nodal_sols is not None:
             nodal_sols["x"] = np.array(x)
-            nodal_sols["rho"] = np.array(rho)
+            nodal_sols["rho"] = np.array(self.rho)
 
         if nodal_vecs is not None:
             for i in range(k):
                 nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
 
-        # Save the eigenvalues and eigenvectors
+        self.A = K
+        self.B = M
+        self.Kr = Kr
+
         self.eigs = eigs
         self.Q = Q
 
-        # Return natural frequencies
-        omega = np.sqrt(self.eigs)
-        return omega
+        self.u = None
+        self.Bfact = Mfact
 
-    def ks_prepare(self, lam):
-        """
-        1. Determine ks_rho
+        # defind dA(q1, q2) as a function of q1 and q2 and can be called from the outside
+        self.dA = lambda q1, q2: self.stiffness_matrix_derivative(self.rho, q1, q2)
+        self.dB = lambda q1, q2: self.mass_matrix_derivative(self.rho, q1, q2)
+        self.lam = self.eigs  # Ar @ Qr = lam * Br @ Qr
+        self.lam_min = np.min(self.lam)
 
-        2. Compute the eta
-
-        3. Determine N
-        """
-        ks_rho = 1000 / np.abs(lam[0])
-
-        lam_min = np.min(lam)
-        eta = np.exp(-ks_rho * (lam - lam_min))
+        # compute eta
+        self.ks_rho = ks_rho
+        eta = np.exp(-self.ks_rho * (self.lam - self.lam_min))
         eta_sum = np.sum(eta)
         eta = eta / eta_sum
 
-        N = len(eta[eta > 1e-30])
-        while N == len(eta):
-            ks_rho *= 2.0
-            eta = np.exp(-ks_rho * (lam - lam_min))
-            eta_sum = np.sum(eta)
-            eta = eta / eta_sum
-            N = len(eta[eta > 1e-30])
-
-        self.ks_rho = ks_rho
-        self.N = N
+        self.N = len(eta[eta > 1e-30])
         self.eta = eta[: self.N]
-
-        self.eta_sum = eta_sum
-        self.lam_min = lam_min
+        self.eta_sum = np.sum(self.eta)
 
         ic(self.ks_rho)
-        ic(self.eta)
+        ic(eigs)
+        ic(eta)
         ic(self.N)
 
-        return None
+        # Return natural frequencies
+        return np.sqrt(self.eigs)
+
+    def solve_buckling(
+        self, x, k=6, ks_rho=1000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
+    ):
+        if k > len(self.reduced):
+            k = len(self.reduced)
+
+        # Compute the density at each node
+        self.rho = self.fltr.apply(x)
+
+        K = self.assemble_stiffness_matrix(self.rho)
+        Kr = self.reduce_matrix(K)
+
+        # Compute the solution path
+        fr = self.reduce_vector(self.f)
+        Kfact = linalg.factorized(Kr)
+        ur = Kfact(fr)
+        u = self.full_vector(ur)
+
+        # Find the gemoetric stiffness matrix
+        G = self.assemble_stress_stiffness(self.rho, u)
+        Gr = self.reduce_matrix(G)
+
+        # Find the eigenvalues closest to zero. This uses a shift and
+        # invert strategy around sigma = 0, which means that the largest
+        # magnitude values are closest to zero.
+        ic("Solving eigenvalue problem")
+        if k == len(self.reduced):
+            eigs, Qr = eigh(Kr.todense(), Gr.todense())
+            pass
+        else:
+            # Method 0: this is the fast and most accurate way to solve the eigenvalue problem
+            time_start = time.time()
+            mu, Qr = sparse.linalg.eigsh(Gr, M=Kr, k=k, sigma=sigma, which="SM")
+            eigs = -1.0 / mu
+            time_end = time.time()
+
+        ic("Time to solve eigenvalue problem:", time_end - time_start)
+        ic(np.allclose(Kr @ Qr, -Gr @ Qr @ np.diag(eigs), atol=1e-10))
+        ic("Done solving eigenvalue problem")
+
+        self.QGQ = np.zeros(k, dtype=x.dtype)
+        for i in range(k):
+            self.QGQ[i] = np.dot(Qr[:, i], Gr @ Qr[:, i])
+
+        Q = np.zeros((self.nvars, k), dtype=x.dtype)
+        for i in range(k):
+            Q[self.reduced, i] = Qr[:, i]
+
+        # Save vtk output data
+        if nodal_sols is not None:
+            nodal_sols["x"] = np.array(x)
+            nodal_sols["rho"] = np.array(self.rho)
+
+        if nodal_vecs is not None:
+            for i in range(k):
+                nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
+
+        self.A = G
+        self.B = K
+        self.Kr = Kr
+
+        self.eigs = eigs
+        self.mu = mu
+        self.Q = Q
+
+        self.u = u
+        self.Bfact = Kfact
+
+        self.dA = lambda q1, q2: self.stress_stiffness_derivative(
+            self.rho, self.u, q1, q2, self.Bfact
+        )
+        self.dB = lambda q1, q2: self.stiffness_matrix_derivative(self.rho, q1, q2)
+        self.lam = self.mu  # Ar @ Qr = lam * Br @ Qr
+        self.lam_min = np.min(self.lam)
+
+        # compute eta
+        self.ks_rho = ks_rho
+        eta = np.exp(-self.ks_rho * (self.lam - self.lam_min))
+        eta_sum = np.sum(eta)
+        eta = eta / eta_sum
+
+        self.N = len(eta[eta > 1e-30])
+        self.eta = eta[: self.N]
+        self.eta_sum = np.sum(self.eta)
+
+        ic(self.ks_rho)
+        ic(eigs)
+        ic(eta)
+        ic(self.N)
+
+        # Return natural frequencies
+        return np.sqrt(self.eigs)
 
     def ks_omega(self, ks_rho=100.0):
         """
@@ -1554,104 +1539,23 @@ class TopologyAnalysis:
         Compute the ks minimum eigenvalue
         """
 
-        # Compute the density at each node
-        rho = self.fltr.apply(x)
-
         omega = np.sqrt(self.eigs)
 
         c = np.min(omega)
         eta = np.exp(-ks_rho * (omega - c))
         a = np.sum(eta)
-        eta *= 1.0 / a
+        eta = eta / a
 
         dfdrho = np.zeros(self.nnodes)
 
         for i in range(len(self.eigs)):
-            kx = self.stiffness_matrix_derivative(rho, self.Q[:, i], self.Q[:, i])
+            kx = self.stiffness_matrix_derivative(self.rho, self.Q[:, i], self.Q[:, i])
             dfdrho += (eta[i] / (2 * omega[i])) * kx
 
-            mx = self.mass_matrix_derivative(rho, self.Q[:, i], self.Q[:, i])
+            mx = self.mass_matrix_derivative(self.rho, self.Q[:, i], self.Q[:, i])
             dfdrho -= (omega[i] ** 2 * eta[i] / (2 * omega[i])) * mx
 
         return self.fltr.applyGradient(dfdrho, x)
-
-    def solve_buckling(self, x, k=5, sigma=0.001, nodal_sols=None, nodal_vecs=None):
-        if k > len(self.reduced):
-            k = len(self.reduced)
-
-        # Compute the density at each node
-        rho = self.fltr.apply(x)
-
-        K = self.assemble_stiffness_matrix(rho)
-        Kr = self.reduce_matrix(K)
-
-        # Compute the solution path
-        fr = self.reduce_vector(self.f)
-        Kfact = linalg.factorized(Kr)
-        ur = Kfact(fr)
-        u = self.full_vector(ur)
-
-        # Find the gemoetric stiffness matrix
-        G = self.assemble_stress_stiffness(rho, u)
-        Gr = self.reduce_matrix(G)
-
-        # Find the eigenvalues closest to zero. This uses a shift and
-        # invert strategy around sigma = 0, which means that the largest
-        # magnitude values are closest to zero.
-        ic("Solving eigenvalue problem")
-        if k == len(self.reduced):
-            # eigs, Qr = eigh(Kr.todense(), Gr.todense())
-            pass
-        else:
-            # check Gr is symmetric
-            # ic("Gr is symmetric: ", np.allclose(Gr.todense(), Gr.todense().T))
-            # ic("Kr is symmetric: ", np.allclose(Kr.todense(), Kr.todense().T))
-            # ic("Kr is positive definite: ", np.all(np.linalg.eigvals(Kr.todense()) > 0))
-            # set target eigenvalue small enough to get the smallest eigenvalues
-            eigs, Qr = sparse.linalg.eigsh(
-                Kr, M=Gr, k=k, sigma=-sigma, mode="buckling", which="LA", tol=1e-10
-            )
-
-            # ic(eigs)
-
-        ic("Finished solving eigenvalue problem")
-
-        eigs *= -1.0
-        # R = Kr @ Qr[:, 0] + eigs[0] * Gr @ Qr[:, 0]
-        # ic("Residual: ", np.max(np.abs(R)))
-
-        # re-order the eigenvalues and eigenvectors by magnitude
-        idx = np.argsort(np.abs(eigs))
-        eigs = eigs[idx]
-        Qr = Qr[:, idx]
-        # ic("Eigenvalues: ", eigs)
-        # ic(eigs)
-
-        self.QGQ = np.zeros(k)
-        for i in range(k):
-            self.QGQ[i] = np.dot(Qr[:, i], Gr @ Qr[:, i])
-
-        Q = np.zeros((self.nvars, k))
-        for i in range(k):
-            Q[self.reduced, i] = Qr[:, i]
-
-        # Save vtk output data
-        if nodal_sols is not None:
-            nodal_sols["x"] = np.array(x)
-            nodal_sols["rho"] = np.array(rho)
-
-        if nodal_vecs is not None:
-            for i in range(k):
-                nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
-
-        # Save the eigenvalues and eigenvectors
-        self.eigs = eigs
-        self.mu = -1.0 / eigs
-        self.Q = Q
-
-        # self.check_buckling(rho, Q[:, 0], Q[:, 0])
-
-        return eigs
 
     def ks_buckling(self, ks_rho=100.0):
         """
@@ -1665,16 +1569,13 @@ class TopologyAnalysis:
         return ks_min
 
     def ks_buckling_derivative(self, x, ks_rho=100.0):
-        # Compute the density at each node
-        rho = self.fltr.apply(x)
-
         c = np.min(self.eigs)
         eta = np.exp(-ks_rho * (self.eigs - c))
         a = np.sum(eta)
         eta *= 1.0 / a
 
         # Solve for the load path again here...
-        K = self.assemble_stiffness_matrix(rho)
+        K = self.assemble_stiffness_matrix(self.rho)
         Kr = self.reduce_matrix(K)
         fr = self.reduce_vector(self.f)
         Kfact = linalg.factorized(Kr)
@@ -1685,29 +1586,18 @@ class TopologyAnalysis:
         Q = self.Q
 
         for i in range(len(self.eigs)):
-            kx = self.stiffness_matrix_derivative(rho, Q[:, i], Q[:, i])
-            gx = self.stress_stiffness_derivative(rho, u, Q[:, i], Q[:, i], Kfact)
+            kx = self.stiffness_matrix_derivative(self.rho, Q[:, i], Q[:, i])
+            gx = self.stress_stiffness_derivative(self.rho, u, Q[:, i], Q[:, i], Kfact)
             dfdrho -= eta[i] * (kx + self.eigs[i] * gx) / self.QGQ[i]
 
         return self.fltr.applyGradient(dfdrho, x)
 
     @time_this
     def eigenvector_displacement(self, ks_rho=100.0):
-        # if self.prob == "natural_frequency":
-        #     lam = self.eigs
-        # elif self.prob == "buckling":
-        #     lam = self.mu
-
-        # c = np.min(lam)
-        # eta = np.exp(-ks_rho * (lam - c))
-        # a = np.sum(eta)
-        # eta = eta / a
-
         h = 0.0
-        for i in range(len(self.eta)):
+        for i in range(self.N):
             q = self.Q[self.D_index, i]
             h += self.eta[i] * np.dot(q, q)
-
         return h
 
     def precise(self, rho, trace, lam_min, lam1, lam2):
@@ -1722,167 +1612,20 @@ class TopologyAnalysis:
                 )
         return np.float64(val)
 
-    # @time_this
-    # def eigenvector_displacement_deriv(self, x, ks_rho=100.0):
-    #     """
-    #     Approximately compute the forward derivative
-    #     """
-
-    #     if self.prob == "natural_frequency":
-    #         lam = self.eigs
-    #     elif self.prob == "buckling":
-    #         lam = self.mu
-
-    #     # Compute the filtered variables
-    #     rho = self.fltr.apply(x)
-
-    #     N = len(lam)
-    #     c = np.min(lam)
-    #     eta = np.exp(-ks_rho * (lam - c))
-    #     a = np.sum(eta)
-    #     eta = eta / a
-
-    #     # Compute the h values
-    #     h = 0.0
-    #     for i in range(N):
-    #         q = self.Q[self.D_index, i]
-    #         h += eta[i] * np.dot(q, q)
-
-    #     # Set the value of the derivative
-    #     dfdrho = np.zeros(self.nnodes)
-
-    #     # defind the derivative of the A and B matrices
-    #     if self.prob == "natural_frequency":
-    #         A = self.assemble_stiffness_matrix(rho)
-    #         Ar = self.reduce_matrix(A)
-
-    #         B = self.assemble_mass_matrix(rho)
-    #         Br = self.reduce_matrix(B)
-    #         Bfact = linalg.factorized(Br)
-
-    #         def dA(rho, q1, q2):
-    #             return self.stiffness_matrix_derivative(rho, q1, q2)
-
-    #         def dB(rho, q1, q2):
-    #             return self.mass_matrix_derivative(rho, q1, q2)
-
-    #     elif self.prob == "buckling":
-    #         B = self.assemble_stiffness_matrix(rho)
-    #         Br = self.reduce_matrix(B)
-
-    #         # Compute the solution path
-    #         fr = self.reduce_vector(self.f)
-    #         Bfact = linalg.factorized(Br)
-    #         ur = Bfact(fr)
-    #         u = self.full_vector(ur)
-
-    #         A = self.assemble_stress_stiffness(rho, u)
-    #         Ar = self.reduce_matrix(A)
-
-    #         def dA(rho, q1, q2):
-    #             return self.stress_stiffness_derivative(rho, u, q1, q2, Bfact)
-
-    #         def dB(rho, q1, q2):
-    #             return self.stiffness_matrix_derivative(rho, q1, q2)
-
-    #     for j in range(N):
-    #         Dq = np.zeros(self.nvars)
-    #         Dq[self.D_index] = self.Q[self.D_index, j]
-    #         for i in range(j + 1):
-    #             qDq = np.dot(self.Q[:, i], Dq)
-    #             scalar = qDq
-    #             if i == j:
-    #                 scalar = qDq - h
-
-    #             Eij = scalar * self.precise(ks_rho, a, c, lam[i], lam[j])
-
-    #             if i == j:
-    #                 # Add to dfdx from A
-    #                 dfdrho += Eij * dA(rho, self.Q[:, i], self.Q[:, j])
-
-    #                 # Add to dfdx from B
-    #                 dfdrho -= Eij * lam[i] * dB(rho, self.Q[:, i], self.Q[:, j])
-    #             else:
-    #                 # Add to dfdx from A
-    #                 dfdrho += 2.0 * Eij * dA(rho, self.Q[:, i], self.Q[:, j])
-
-    #                 # Add to dfdx from B
-    #                 dfdrho -= (
-    #                     Eij * (lam[i] + lam[j]) * dB(rho, self.Q[:, i], self.Q[:, j])
-    #                 )
-
-    #     C = B.dot(self.Q)
-
-    #     nr = len(self.reduced)
-    #     Cr = np.zeros((nr, N))
-    #     for k in range(N):
-    #         Cr[:, k] = C[self.reduced, k]
-    #     Ur, R = np.linalg.qr(Cr)
-
-    #     # Factorize the mass matrix
-    #     # Br = Br.tocsc()
-    #     # Bfact = linalg.factorized(Br)
-
-    #     # Form a full factorization for the preconditioner
-    #     factor = 0.99  # Should always be < 1 to ensure P is positive definite.
-    #     # Make this a parameter we can set??
-    #     P = Ar - factor * lam[0] * Br
-    #     P = P.tocsc()
-    #     Pfactor = linalg.factorized(P)
-
-    #     def preconditioner(x):
-    #         y = Pfactor(x)
-    #         t = np.dot(Ur.T, y)
-    #         y = y - np.dot(Ur, t)
-    #         return y
-
-    #     preop = linalg.LinearOperator((nr, nr), preconditioner)
-
-    #     # Form the augmented linear system of equations
-    #     for k in range(N):
-    #         # Compute B * uk = D * qk
-    #         bk = np.zeros(self.nvars)
-    #         bk[self.D_index] = self.Q[self.D_index, k]
-    #         bkr = -eta[k] * self.reduce_vector(bk)
-
-    #         ukr = Bfact(bkr)
-    #         uk = self.full_vector(ukr)
-    #         dfdrho += dB(rho, self.Q[:, k], uk)
-
-    #         # Form the matrix
-    #         def matrix(x):
-    #             y = Ar.dot(x) - lam[k] * Br.dot(x)
-    #             t = np.dot(Ur.T, y)
-    #             y = y - np.dot(Ur, t)
-    #             return y
-
-    #         matop = linalg.LinearOperator((nr, nr), matrix)
-
-    #         # Solve the augmented system of equations for vk
-    #         t = np.dot(Ur.T, bkr)
-    #         bkr = bkr - np.dot(Ur, t)
-    #         vkr, info = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
-    #         vk = self.full_vector(vkr)
-
-    #         # Compute the contributions from the derivative from Adot
-    #         dfdrho += 2.0 * dA(rho, self.Q[:, k], vk)
-
-    #         # Add the contributions to the derivative from Bdot here...
-    #         dfdrho -= lam[k] * dB(rho, self.Q[:, k], vk)
-
-    #         # Now, compute the remaining contributions to the derivative from
-    #         # B by solving the second auxiliary system
-    #         dkr = Ar.dot(ukr)
-
-    #         t = np.dot(Ur.T, dkr)
-    #         dkr = dkr - np.dot(Ur, t)
-    #         wkr, info = linalg.gmres(matop, dkr, M=preop, atol=1e-15, tol=1e-10)
-    #         wk = self.full_vector(wkr)
-
-    #         # Compute the contributions from the derivative
-    #         dfdrho -= dB(rho, self.Q[:, k], wk)
-
-    #     return self.fltr.applyGradient(dfdrho, x)
+    def preciseG(self, rho, trace, lam_min, lam1, lam2):
+        with mp.workdps(80):
+            if lam1 == lam2:
+                val = -rho * lam1 * mp.exp(-rho * (lam1 - lam_min)) / trace
+            else:
+                val = (
+                    (
+                        lam1 * mp.exp(-rho * (lam1 - lam_min))
+                        - lam2 * mp.exp(-rho * (lam2 - lam_min))
+                    )
+                    / (mp.mpf(lam1) - mp.mpf(lam2))
+                    / mp.mpf(trace)
+                )
+        return np.float64(val)
 
     @time_this
     def eigenvector_displacement_deriv(self, x, ks_rho=100.0):
@@ -1890,68 +1633,10 @@ class TopologyAnalysis:
         Approximately compute the forward derivative
         """
 
-        # if self.prob == "natural_frequency":
-        #     lam = self.eigs
-        # elif self.prob == "buckling":
-        #     lam = self.mu
-
-        # Compute the filtered variables
-        rho = self.fltr.apply(x)
-
-        # lam_min = np.min(lam)
-
-        # ks_rho = 10000 / np.abs(lam[0])
-        # ic(ks_rho)
-
-        # eta = np.exp(-ks_rho * (lam - lam_min))
-        # eta_sum = np.sum(eta)
-        # eta = eta / eta_sum
-        # ic(eta)
-
-        # N = len(eta[eta > 1e-30])
-        # if N > len(lam):
-        #     N = len(lam)
-        # eta = eta[:N]
-        # ic(N)
-
-        # defind the derivative of the A and B matrices
-        if self.prob == "natural_frequency":
-            lam = self.eigs
-
-            A = self.assemble_stiffness_matrix(rho)
-            B = self.assemble_mass_matrix(rho)
-            Br = self.reduce_matrix(B)
-            # Bfact = linalg.factorized(Br)
-
-            def dA(q1, q2):
-                return self.stiffness_matrix_derivative(rho, q1, q2)
-
-            def dB(q1, q2):
-                return self.mass_matrix_derivative(rho, q1, q2)
-
-        elif self.prob == "buckling":
-            lam = self.mu
-
-            B = self.assemble_stiffness_matrix(rho)
-            Br = self.reduce_matrix(B)
-
-            # Compute the solution path
-            fr = self.reduce_vector(self.f)
-            Bfact = linalg.factorized(Br)
-            ur = Bfact(fr)
-            u = self.full_vector(ur)
-
-            A = self.assemble_stress_stiffness(rho, u)
-
-            def dA(q1, q2):
-                return self.stress_stiffness_derivative(rho, u, q1, q2, Bfact)
-
-            def dB(q1, q2):
-                return self.stiffness_matrix_derivative(rho, q1, q2)
-
-        Dq = np.zeros((self.Q.shape[0], self.N))
-        for i in range(self.N):
-            Dq[self.D_index, i] = self.Q[self.D_index, i]
+        def D(q):
+            Dq = np.zeros(self.Q.shape[0])
+            Dq[self.D_index] = q[self.D_index]
+            return Dq
 
         # Compute the h values
         h = 0.0
@@ -1966,11 +1651,11 @@ class TopologyAnalysis:
             self.lam,
             self.Q,
             h,
-            A,
-            B,
-            dA,
-            dB,
-            Dq,
+            self.A,
+            self.B,
+            self.dA,
+            self.dB,
+            D,
             self.reduced,
         )
 
@@ -1981,15 +1666,13 @@ class TopologyAnalysis:
         """
         Compute strain field and Von-mises stress given a displacement field
         """
-        # Compute the filtered variables
-        rho = self.fltr.apply(x)
 
         # Average the density to get the element-wise density
         rhoE = 0.25 * (
-            rho[self.conn[:, 0]]
-            + rho[self.conn[:, 1]]
-            + rho[self.conn[:, 2]]
-            + rho[self.conn[:, 3]]
+            self.rho[self.conn[:, 0]]
+            + self.rho[self.conn[:, 1]]
+            + self.rho[self.conn[:, 2]]
+            + self.rho[self.conn[:, 3]]
         )
 
         # Compute the stress relaxation factor
@@ -2029,7 +1712,9 @@ class TopologyAnalysis:
         """
 
         # Loop over all the eigenvalues
-        stress = np.zeros(self.nelems)
+        # stress = np.zeros(self.nelems)
+        # set stress maybe complex
+        stress = np.zeros(self.nelems, dtype=rho.dtype)
 
         # Average the density to get the element-wise density
         rhoE = 0.25 * (
@@ -2043,7 +1728,7 @@ class TopologyAnalysis:
         relax = rhoE / (rhoE + self.epsilon * (1.0 - rhoE))
 
         if self.assume_same_element:
-            Be_ = np.zeros((3, 8))
+            Be_ = np.zeros((3, 8), dtype=rho.dtype)
 
             # Compute the x and y coordinates of each element
             xe_ = self.X[self.conn[0], 0]
@@ -2055,7 +1740,7 @@ class TopologyAnalysis:
             _populate_Be_single(xi, eta_, xe_, ye_, Be_)
 
             for k in range(len(eta)):
-                qe = np.zeros((self.nelems, 8))
+                qe = np.zeros((self.nelems, 8), dtype=rho.dtype)
                 qe[:, ::2] = Q[2 * self.conn, k]
                 qe[:, 1::2] = Q[2 * self.conn + 1, k]
 
@@ -2075,7 +1760,7 @@ class TopologyAnalysis:
                 ) / allowable**2
 
         else:
-            Be = np.zeros((self.nelems, 3, 8))
+            Be = np.zeros((self.nelems, 3, 8), dtype=rho.dtype)
 
             # Compute the x and y coordinates of each element
             xe = self.X[self.conn, 0]
@@ -2087,7 +1772,7 @@ class TopologyAnalysis:
             _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
 
             for k in range(len(eta)):
-                qe = np.zeros((self.nelems, 8))
+                qe = np.zeros((self.nelems, 8), dtype=rho.dtype)
                 qe[:, ::2] = Q[2 * self.conn, k]
                 qe[:, 1::2] = Q[2 * self.conn + 1, k]
 
@@ -2112,22 +1797,8 @@ class TopologyAnalysis:
     def eigenvector_stress(
         self, x, ks_rho=100.0, ks_rho_stress=10.0, allowable=1.0, cell_sols=None
     ):
-        # if self.prob == "natural_frequency":
-        #     lam = self.eigs
-        # elif self.prob == "buckling":
-        #     lam = self.mu
-
-        # Compute the filtered variables
-        rho = self.fltr.apply(x)
-
-        # # Evaluate eigenvalue eta
-        # c = np.min(lam)
-        # eta = np.exp(-ks_rho * (lam - c))
-        # a = np.sum(eta)
-        # eta = eta / a
-
         # Compute the stress values
-        stress = self.get_stress_values(rho, self.eta, self.Q, allowable=allowable)
+        stress = self.get_stress_values(self.rho, self.eta, self.Q, allowable=allowable)
 
         if cell_sols is not None:
             cell_sols["eigenvector_stress"] = stress
@@ -2142,254 +1813,24 @@ class TopologyAnalysis:
 
         return h
 
-    # @time_this
-    # def eigenvector_stress_derivative(
-    #     self, x, ks_rho=100.0, ks_rho_stress=10.0, allowable=1.0
-    # ):
-    #     if self.prob == "natural_frequency":
-    #         lam = self.eigs
-    #     elif self.prob == "buckling":
-    #         lam = self.mu
-
-    #     # Compute the filtered variables
-    #     rho = self.fltr.apply(x)
-
-    #     N = len(lam)
-    #     c = np.min(lam)
-    #     eta = np.exp(-ks_rho * (lam - c))
-    #     a = np.sum(eta)
-    #     eta = eta / a
-
-    #     # Compute the stress values
-    #     stress = self.get_stress_values(rho, eta, self.Q, allowable=allowable)
-
-    #     # Now aggregate over the stress
-    #     max_stress = np.max(stress)
-    #     eta_stress = np.exp(ks_rho_stress * (stress - max_stress))
-    #     eta_stress = eta_stress / np.sum(eta_stress)
-
-    #     # kernel = self.kernel(lam)
-
-    #     # defind the derivative of the A and B matrices
-    #     if self.prob == "natural_frequency":
-    #         A = self.assemble_stiffness_matrix(rho)
-    #         Ar = self.reduce_matrix(A)
-
-    #         B = self.assemble_mass_matrix(rho)
-    #         Br = self.reduce_matrix(B)
-    #         Bfact = linalg.factorized(Br)
-
-    #     elif self.prob == "buckling":
-    #         B = self.assemble_stiffness_matrix(rho)
-    #         Br = self.reduce_matrix(B)
-
-    #         # Compute the solution path
-    #         fr = self.reduce_vector(self.f)
-    #         Bfact = linalg.factorized(Br)
-    #         ur = Bfact(fr)
-    #         u = self.full_vector(ur)
-
-    #         A = self.assemble_stress_stiffness(rho, u)
-    #         Ar = self.reduce_matrix(A)
-
-    #     def dA(rho, q1, q2):
-    #         if self.prob == "natural_frequency":
-    #             return self.stiffness_matrix_derivative(rho, q1, q2)
-    #         elif self.prob == "buckling":
-    #             return self.stress_stiffness_derivative(rho, u, q1, q2, Bfact)
-
-    #     def dB(rho, q1, q2):
-    #         if self.prob == "natural_frequency":
-    #             return self.mass_matrix_derivative(rho, q1, q2)
-    #         elif self.prob == "buckling":
-    #             return self.stiffness_matrix_derivative(rho, q1, q2)
-
-    #     # Set the value of the derivative
-    #     dfdrho = self.get_stress_values_deriv(
-    #         rho, eta_stress, eta, self.Q, allowable=allowable
-    #     )
-
-    #     for j in range(N):
-    #         # Compute D * Q[:, j]
-    #         prod = self.get_stress_product(
-    #             rho, eta_stress, self.Q[:, j], allowable=allowable
-    #         )
-
-    #         for i in range(j + 1):
-    #             qDq = np.dot(self.Q[:, i], prod)
-    #             scalar = qDq
-    #             if i == j:
-    #                 scalar = qDq - np.dot(eta_stress, stress)
-
-    #             Eij = scalar * self.precise(ks_rho, a, c, lam[i], lam[j])
-
-    #             if i == j:
-    #                 # Add to dfdx from A
-    #                 dfdrho += Eij * dA(rho, self.Q[:, i], self.Q[:, j])
-
-    #                 # Add to dfdx from B
-    #                 dfdrho -= Eij * lam[i] * dB(rho, self.Q[:, i], self.Q[:, j])
-    #             else:
-    #                 # Add to dfdx from A
-    #                 dfdrho += 2.0 * Eij * dA(rho, self.Q[:, i], self.Q[:, j])
-
-    #                 # Add to dfdx from B
-    #                 dfdrho -= (
-    #                     Eij * (lam[i] + lam[j]) * dB(rho, self.Q[:, i], self.Q[:, j])
-    #                 )
-
-    #     C = B.dot(self.Q)
-
-    #     nr = len(self.reduced)
-    #     Cr = np.zeros((nr, N))
-    #     for k in range(N):
-    #         Cr[:, k] = C[self.reduced, k]
-    #     Ur, R = np.linalg.qr(Cr)
-
-    #     # Form a full factorization for the preconditioner
-    #     factor = 0.99  # Should always be < 1 to ensure P is positive definite.
-    #     # Make this a parameter we can set??
-    #     P = Ar - factor * lam[0] * Br
-    #     P = P.tocsc()
-    #     Pfactor = linalg.factorized(P)
-
-    #     def preconditioner(x):
-    #         y = Pfactor(x)
-    #         t = np.dot(Ur.T, y)
-    #         y = y - np.dot(Ur, t)
-    #         return y
-
-    #     preop = linalg.LinearOperator((nr, nr), preconditioner)
-
-    #     # Form the augmented linear system of equations
-    #     for k in range(N):
-    #         # Compute B * uk = D * qk
-    #         bk = self.get_stress_product(
-    #             rho, eta_stress, self.Q[:, k], allowable=allowable
-    #         )
-    #         bkr = -eta[k] * self.reduce_vector(bk)
-
-    #         ukr = Bfact(bkr)
-    #         uk =  np.zeros_like(bk)
-    #         uk[self.reduced] = ukr
-    #         dfdrho += dB(rho, self.Q[:, k], uk)
-
-    #         # Form the matrix
-    #         def matrix(x):
-    #             y = Ar.dot(x) - lam[k] * Br.dot(x)
-    #             t = np.dot(Ur.T, y)
-    #             y = y - np.dot(Ur, t)
-    #             return y
-
-    #         matop = linalg.LinearOperator((nr, nr), matrix)
-
-    #         # Solve the augmented system of equations for vk
-    #         t = np.dot(Ur.T, bkr)
-    #         bkr = bkr - np.dot(Ur, t)
-    #         vkr, info = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
-    #         vk = self.full_vector(vkr)
-
-    #         # Compute the contributions from the derivative from Adot
-    #         dfdrho += 2.0 * dA(rho, self.Q[:, k], vk)
-
-    #         # Add the contributions to the derivative from Bdot here...
-    #         dfdrho -= lam[k] * dB(rho, self.Q[:, k], vk)
-
-    #         # Now, compute the remaining contributions to the derivative from
-    #         # B by solving the second auxiliary system
-    #         dkr = Ar.dot(ukr)
-
-    #         t = np.dot(Ur.T, dkr)
-    #         dkr = dkr - np.dot(Ur, t)
-    #         wkr, info = linalg.gmres(matop, dkr, M=preop, atol=1e-15, tol=1e-10)
-    #         wk = self.full_vector(wkr)
-
-    #         # Compute the contributions from the derivative
-    #         dfdrho -= dB(rho, self.Q[:, k], wk)
-
-    #     return self.fltr.applyGradient(dfdrho, x)
-
     @time_this
     def eigenvector_stress_derivative(
         self, x, ks_rho=100.0, ks_rho_stress=10.0, allowable=1.0
     ):
-        # if self.prob == "natural_frequency":
-        #     lam = self.eigs
-        # elif self.prob == "buckling":
-        #     lam = self.mu
-
-        # Compute the filtered variables
-        rho = self.fltr.apply(x)
-
-        # lam_min = np.min(lam)
-
-        # ks_rho = 10000 / np.abs(lam[0])
-        # ic(ks_rho)
-
-        # eta = np.exp(-ks_rho * (lam - lam_min))
-        # eta_sum = np.sum(eta)
-        # eta = eta / eta_sum
-        # ic(eta)
-
-        # N = len(eta[eta > 1e-30])
-        # if N > len(lam):
-        #     N = len(lam)
-        # eta = eta[:N]
-        # ic(N)
-
         # Compute the stress values
-        stress = self.get_stress_values(rho, self.eta, self.Q, allowable=allowable)
+        stress = self.get_stress_values(self.rho, self.eta, self.Q, allowable=allowable)
 
         # Now aggregate over the stress
         max_stress = np.max(stress)
         eta_stress = np.exp(ks_rho_stress * (stress - max_stress))
         eta_stress = eta_stress / np.sum(eta_stress)
 
-        # defind the derivative of the A and B matrices
-        if self.prob == "natural_frequency":
-            lam = self.eigs
+        if self.check:
+            ic(stress)
+            ic(eta_stress)
 
-            A = self.assemble_stiffness_matrix(rho)
-            B = self.assemble_mass_matrix(rho)
-            Br = self.reduce_matrix(B)
-            Bfact = linalg.factorized(Br)
-
-        elif self.prob == "buckling":
-            lam = self.mu
-
-            B = self.assemble_stiffness_matrix(rho)
-            Br = self.reduce_matrix(B)
-
-            # Compute the solution path
-            fr = self.reduce_vector(self.f)
-            Bfact = linalg.factorized(Br)
-            ur = Bfact(fr)
-            u = self.full_vector(ur)
-
-            A = self.assemble_stress_stiffness(rho, u)
-
-        def dA(q1, q2):
-            if self.prob == "natural_frequency":
-                return self.stiffness_matrix_derivative(rho, q1, q2)
-            elif self.prob == "buckling":
-                return self.stress_stiffness_derivative(rho, u, q1, q2, Bfact)
-
-        def dB(q1, q2):
-            if self.prob == "natural_frequency":
-                return self.mass_matrix_derivative(rho, q1, q2)
-            elif self.prob == "buckling":
-                return self.stiffness_matrix_derivative(rho, q1, q2)
-
-        # Compute D * Q[:, j]
-        etac_Dq = np.zeros((self.Q.shape[0], self.N))
-        for j in range(self.N):
-            etac_Dq[:, j] = self.get_stress_product(
-                rho, eta_stress, self.Q[:, j], allowable=allowable
-            )
-
-        a = self.get_stress_values_deriv(
-            rho, eta_stress, self.eta, self.Q, allowable=allowable
-        )
+        def D(q):
+            return self.get_stress_product(self.rho, eta_stress, q, allowable=allowable)
 
         h_eta = np.dot(eta_stress, stress)
 
@@ -2397,16 +1838,19 @@ class TopologyAnalysis:
         dhdrho = self.kernel(
             self.ks_rho,
             self.eta_sum,
-            lam,
+            self.lam,
             self.Q,
             h_eta,
-            A,
-            B,
-            dA,
-            dB,
-            etac_Dq,
+            self.A,
+            self.B,
+            self.dA,
+            self.dB,
+            D,
             self.reduced,
-            a,
+        )
+
+        dhdrho += self.get_stress_values_deriv(
+            self.rho, eta_stress, self.eta, self.Q, allowable=allowable
         )
 
         return self.fltr.applyGradient(dhdrho, x)
@@ -2572,7 +2016,7 @@ class TopologyAnalysis:
         return Dq
 
     @time_this
-    def kernel(self, ks_rho, eta_sum, lam, Q, h, A, B, dA, dB, Dq, reduced, a=None):
+    def kernel(self, ks_rho, eta_sum, lam, Q, h, A, B, dA, dB, D, reduced):
         """
         For displacement constraints:
             a = None
@@ -2585,32 +2029,34 @@ class TopologyAnalysis:
         dA = dA(u, v)
         dB = dB(u, v)
         """
+        if self.check:
+            Ar = self.reduce_matrix(A)
+            Br = self.reduce_matrix(B)
+            for i in range(self.N):
+                qr = self.Q[self.reduced, i]
+                ic(np.allclose(Ar @ qr, lam[i] * Br @ qr))
+
+        dh = np.zeros(self.nnodes)
+
+        for j in range(self.N):
+            for i in range(j + 1):
+                qDq = Q[:, i].T @ D(Q[:, j])
+                qAdotq = dA(Q[:, i], Q[:, j])
+                qBdotq = dB(Q[:, i], Q[:, j])
+
+                if i == j:
+                    scalar = qDq - h
+                else:
+                    scalar = 2 * qDq
+
+                Eij = self.precise(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
+                Gij = self.preciseG(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
+
+                dh += scalar * (Eij * qAdotq - Gij * qBdotq)
 
         Ar = A[reduced, :][:, reduced]
         Br = B[reduced, :][:, reduced]
         Br = Br.tocsc()
-        Bfact = linalg.factorized(Br)
-
-        if a is None:
-            a = np.zeros(self.nnodes)
-
-        dh = a
-
-        for j in range(self.N):
-            for i in range(j + 1):
-                b = np.dot(Q[:, i], Dq[:, j])
-
-                if i == j:
-                    b -= h
-
-                Eij = b * self.precise(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
-
-                if i == j:
-                    dh += Eij * dA(Q[:, i], Q[:, j])
-                    dh -= Eij * lam[i] * dB(Q[:, i], Q[:, j])
-                else:
-                    dh += 2.0 * Eij * dA(Q[:, i], Q[:, j])
-                    dh -= Eij * (lam[i] + lam[j]) * dB(Q[:, i], Q[:, j])
 
         C = B.dot(Q)
 
@@ -2638,13 +2084,8 @@ class TopologyAnalysis:
         # Form the augmented linear system of equations
         for k in range(self.N):
             # Compute B * uk = D * qk
-            bk = Dq[:, k]
-            bkr = -self.eta[k] * bk[reduced]
-
-            ukr = Bfact(bkr)
-            uk = np.zeros_like(bk)
-            uk[reduced] = ukr
-            dh += dB(Q[:, k], uk)
+            Dq = D(Q[:, k])
+            bkr = -2 * self.eta[k] * Dq[reduced]
 
             # Form the matrix
             def matrix(x):
@@ -2658,29 +2099,13 @@ class TopologyAnalysis:
             # Solve the augmented system of equations for vk
             t = np.dot(Ur.T, bkr)
             bkr = bkr - np.dot(Ur, t)
-            vkr, info = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
-            print("GMRES info: ", info)
-            vk = np.zeros_like(bk)
-            vk[reduced] = vkr
+            phir, _ = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
+            phi = self.full_vector(phir)
+            dh += dA(Q[:, k], phi) - lam[k] * dB(Q[:, k], phi)
 
-            # Compute the contributions from the derivative from Adot
-            dh += 2.0 * dA(Q[:, k], vk)
-
-            # Add the contributions to the derivative from Bdot here...
-            dh -= lam[k] * dB(Q[:, k], vk)
-
-            # Now, compute the remaining contributions to the derivative from
-            # B by solving the second auxiliary system
-            dkr = Ar.dot(ukr)
-
-            t = np.dot(Ur.T, dkr)
-            dkr = dkr - np.dot(Ur, t)
-            wkr, info = linalg.gmres(matop, dkr, M=preop, atol=1e-15, tol=1e-10)
-            wk = np.zeros_like(bk)
-            wk[reduced] = wkr
-
-            # Compute the contributions from the derivative
-            dh -= dB(Q[:, k], wk)
+            qDq = np.dot(Q[:, k], Dq)
+            phi = -self.eta[k] * qDq * Q[:, k]
+            dh += dB(Q[:, k], phi)
 
         return dh
 
@@ -2743,7 +2168,7 @@ class TopOptProb:
         frequency_scale=1e-2,
         stress_scale=1e-12,
         compliance_scale=1e6,
-        grad_check=False,
+        check=False,
         domain="square",
     ):
         self.analysis = analysis
@@ -2763,7 +2188,7 @@ class TopOptProb:
         self.stress_scale = stress_scale
         self.compliance_scale = compliance_scale
         self.lb = lb
-        self.grad_check = grad_check
+        self.check = check
         self.domain = domain
 
         # Add more non-design constant to matrices
@@ -2820,7 +2245,7 @@ class TopOptProb:
         lb[:] = self.lb
         ub[:] = 1.0
         x[:] = 0.95
-        if self.grad_check:
+        if self.check:
             np.random.seed(0)
             x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
         return
@@ -2862,14 +2287,12 @@ class TopOptProb:
         # compute ks_rho, N, and eta
         if self.prob == "natural_frequency":
             omega = self.analysis.solve_eigenvalue_problem(
-                self.xfull, k=6, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
+                self.xfull, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
             )
-            self.analysis.ks_prepare(self.analysis.eigs)
         elif self.prob == "buckling":
             omega = self.analysis.solve_buckling(
-                self.xfull, k=6, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
+                self.xfull, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
             )
-            self.analysis.ks_prepare(self.analysis.mu)
 
         # Evaluate objectives
         if self.objf == "volume":
@@ -4085,11 +3508,11 @@ def parse_cmd_args():
         help="density filter type",
     )
     p.add_argument(
-        "--ks-rho", default=160.0, type=float, help="ks aggregation parameter"
+        "--ks-rho", default=1000.0, type=float, help="ks aggregation parameter"
     )
     p.add_argument(
         "--ks-rho-stress",
-        default=30,
+        default=1.0,
         type=float,
         help="stress ks aggregation parameter",
     )
@@ -4223,7 +3646,9 @@ def parse_cmd_args():
         "--maxit", default=200, type=int, help="maximum number of iterations"
     )
     p.add_argument(
-        "--grad-check", action="store_true", help="perform gradient check and exit"
+        "--check",
+        action="store_true",
+        help="perform gradient check and eigencheck and exit",
     )
     p.add_argument(
         "--proj",
@@ -4352,6 +3777,147 @@ def create_folder(args):
     return args
 
 
+def gradient_check(analysis, problem):
+    ks_rho_stress = 1.0
+    N = 6
+
+    def init(x):
+        if problem == "natural_frequency":
+            _ = analysis.solve_eigenvalue_problem(x, k=N)
+
+        elif problem == "buckling":
+            _ = analysis.solve_buckling(x, k=N)
+
+    def compute_u(f, K):
+        fr = analysis.reduce_vector(f)
+        Kr = analysis.reduce_matrix(K)
+        Kfact = linalg.factorized(Kr)
+        ur = Kfact(fr)
+        u = analysis.full_vector(ur)
+        return u, Kfact
+
+    # use the complex step method to check the derivative
+    dh = 1e-5
+    x = np.ones(analysis.nnodes)
+    px = np.random.RandomState(0).rand(analysis.nnodes)
+    q1 = np.random.RandomState(1).rand(analysis.nvars)
+    q2 = np.random.RandomState(2).rand(analysis.nvars)
+
+    init(x)
+    rho = analysis.fltr.apply(x)
+    K = analysis.assemble_stiffness_matrix(rho)
+    u, Kfact = compute_u(analysis.f, K)
+
+    if problem == "natural_frequency":
+        d_omega = analysis.ks_omega_derivative(rho) @ px
+    elif problem == "buckling":
+        d_omega = analysis.ks_buckling_derivative(rho) @ px
+
+    dK = analysis.stiffness_matrix_derivative(rho, q1, q2) @ px
+    dM = analysis.mass_matrix_derivative(rho, q1, q2) @ px
+    dG = analysis.stress_stiffness_derivative(rho, u, q1, q2, Kfact) @ px
+    dis_grad = analysis.eigenvector_displacement_deriv(x, analysis.ks_rho) @ px
+    stress_grad = (
+        analysis.eigenvector_stress_derivative(x, analysis.ks_rho, ks_rho_stress) @ px
+    )
+
+    # s = analysis.get_stress_values(rho, analysis.eta, analysis.Q)
+    # eta_stress = np.exp(ks_rho_stress * (s - np.max(s)))
+    # eta_stress = eta_stress / np.sum(eta_stress)
+    # ds = analysis.get_stress_values_deriv(rho, eta_stress, analysis.eta, analysis.Q) @ px
+
+    # use central difference to check the derivative
+    init(x + dh * px)
+    rho1 = analysis.fltr.apply(x + dh * px)
+
+    if problem == "natural_frequency":
+        omega1 = analysis.ks_omega()
+    elif problem == "buckling":
+        omega1 = analysis.ks_buckling()
+
+    K1 = analysis.assemble_stiffness_matrix(rho1)
+    M1 = analysis.assemble_mass_matrix(rho1)
+    u1, _ = compute_u(analysis.f, K1)
+    G1 = analysis.assemble_stress_stiffness(rho1, u1)
+    dis1 = analysis.eigenvector_displacement(analysis.ks_rho)
+    stress1 = analysis.eigenvector_stress(x + dh * px, analysis.ks_rho, ks_rho_stress)
+    # s1 = analysis.get_stress_values(rho1, analysis.eta, analysis.Q)
+
+    init(x - dh * px)
+    rho2 = analysis.fltr.apply(x - dh * px)
+
+    if problem == "natural_frequency":
+        omega2 = analysis.ks_omega()
+    elif problem == "buckling":
+        omega2 = analysis.ks_buckling()
+
+    K2 = analysis.assemble_stiffness_matrix(rho2)
+    M2 = analysis.assemble_mass_matrix(rho2)
+    u2, _ = compute_u(analysis.f, K2)
+    G2 = analysis.assemble_stress_stiffness(rho2, u2)
+    dis2 = analysis.eigenvector_displacement(analysis.ks_rho)
+    stress2 = analysis.eigenvector_stress(x - dh * px, analysis.ks_rho, ks_rho_stress)
+    # s2 = analysis.get_stress_values(rho2, analysis.eta, analysis.Q)
+
+    dis_grad_cf = (dis1 - dis2) / (2 * dh)
+    stress_grad_cf = (stress1 - stress2) / (2 * dh)
+    K_grad_cf = q1.T @ (K1 - K2) @ q2 / (2 * dh)
+    M_grad_cf = q1.T @ (M1 - M2) @ q2 / (2 * dh)
+    G_grad_cf = q1.T @ (G1 - G2) @ q2 / (2 * dh)
+    omega_grad_cf = (omega1 - omega2) / (2 * dh)
+    # s_grad_cf = (s1 - s2) / (2 * dh)
+
+    error_d_dis_cf = np.abs(dis_grad_cf - dis_grad) / np.abs(dis_grad_cf)
+    error_d_stress_cf = np.abs(stress_grad_cf - stress_grad) / np.abs(stress_grad_cf)
+    error_dK_cf = np.abs(K_grad_cf - dK) / np.abs(K_grad_cf)
+    error_dM_cf = np.abs(M_grad_cf - dM) / np.abs(M_grad_cf)
+    error_dG_cf = np.abs(G_grad_cf - dG) / np.abs(G_grad_cf)
+    error_d_omega_cf = np.abs(omega_grad_cf - d_omega) / np.abs(omega_grad_cf)
+    # error_s_cf = np.abs(s_grad_cf - ds) / np.abs(s_grad_cf)
+
+    ic(error_d_dis_cf)
+    ic(error_d_stress_cf)
+    ic(error_dK_cf)
+    ic(error_dM_cf)
+    ic(error_dG_cf)
+    ic(error_d_omega_cf)
+
+    # ic(error_s_cf)
+
+    # dh = 1e-30
+    # init(x + dh * px * 1j)
+    # rho1 = analysis.fltr.apply(x + dh * px * 1j)
+    # dis1 = analysis.eigenvector_displacement(analysis.ks_rho)
+    # stress1 = analysis.eigenvector_stress(x + dh * px * 1j, analysis.ks_rho, ks_rho_stress)
+    # K1 = analysis.assemble_stiffness_matrix(rho1)
+    # M1 = analysis.assemble_mass_matrix(rho1)
+    # u1, _ = compute_u(analysis.f, K1)
+    # G1 = analysis.assemble_stress_stiffness(rho1, u1)
+
+    # dis_grad_cs = np.imag(dis1) / dh
+    # stress_grad_cs = np.imag(stress1) / dh
+    # K_grad_cs = q1.T @ np.imag(K1) @ q2 / dh
+    # M_grad_cs = q1.T @ np.imag(M1) @ q2 / dh
+    # G_grad_cs = q1.T @ np.imag(G1) @ q2 / dh
+    # ic(dis_grad_cf)
+    # ic(dis_grad_cs)
+    # ic(dis_grad)
+    # ic(stress_grad_cf)
+    # ic(stress_grad_cs)
+    # ic(stress_grad)
+    # error_dis_cs = np.abs(dis_grad_cs - dis_grad) / np.abs(dis_grad_cs)
+    # error_stress_cs = np.abs(stress_grad_cs - stress_grad) / np.abs(stress_grad_cs)
+    # error_K_cs = np.abs(K_grad_cs - dK) / np.abs(K_grad_cs)
+    # error_M_cs = np.abs(M_grad_cs - dM) / np.abs(M_grad_cs)
+    # error_G_cs = np.abs(G_grad_cs - dG) / np.abs(G_grad_cs)
+
+    # ic(error_dis_cs)
+    # ic(error_stress_cs)
+    # ic(error_K_cs)
+    # ic(error_M_cs)
+    # ic(error_G_cs)
+
+
 def main(args):
     args = create_folder(args)
     # Set up logger
@@ -4436,18 +4002,21 @@ def main(args):
             if args.domain == "square":
                 if args.mode == 1:
                     # node_loc=(0.75*n, 0.75*m), x direction
-                    indx = int((0.75 * n * (m + 1) + 0.75 * m))
+                    indx = int((0.1 * n * (m + 1) + 0.1 * m))
                     ic(indx)
                     D_index = [2 * indx, 2 * indx + 1]
                 elif args.mode == 2:
                     indx = int((0.67 * n * (m + 1) + 0.67 * m))
                     D_index = [2 * indx, 2 * indx + 1]
+            if args.domain == "building":
+                if args.mode == 1:
+                    # node_loc=(0.5*n, 0.5*m), x direction
+                    indx = int((0.5 * n * (m + 1) + 0.5 * m))
+                    ic(indx)
+                    D_index = [2 * indx, 2 * indx + 1]
 
     if args.kokkos:
-        import kokkos
-
         kokkos.initialize_kokkos()
-        
 
     # Create the filter
     fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=args.proj)
@@ -4468,14 +4037,15 @@ def main(args):
         q=args.q,
         epsilon=args.stress_relax,
         assume_same_element=args.assume_same_element,
+        check=args.check,
         prob=args.problem,
         kokkos=args.kokkos,
     )
 
     # if args.stress_ub is not None:
     #     args.ks_rho_stress = 100.0 / args.stress_ub
-    if args.compliance_ub is not None and args.domain == "building":
-        args.compliance_ub = args.compliance_ub * 8.85 * 1e-6
+    # if args.compliance_ub is not None and args.domain == "building":
+    #     args.compliance_ub = args.compliance_ub * 8.85 * 1e-6
 
     # Create optimization problem
     topo = TopOptProb(
@@ -4500,7 +4070,7 @@ def main(args):
         stress_scale=args.stress_scale,
         compliance_scale=args.compliance_scale,
         dis_ub=args.dis_ub,
-        grad_check=args.grad_check,
+        check=args.check,
         domain=args.domain,
     )
 
@@ -4520,7 +4090,7 @@ def main(args):
         mmaopt = mma4py.Optimizer(
             mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
         )
-        if args.grad_check:
+        if args.check:
             np.random.seed(0)
             for i in range(5):
                 mmaopt.checkGradients()
@@ -4534,8 +4104,9 @@ def main(args):
 
         paroptprob = ParOptProb(MPI.COMM_SELF, topo)
 
-        if args.grad_check:
+        if args.check:
             for i in range(1):
+                gradient_check(analysis, args.problem)
                 paroptprob.checkGradients(1e-6)
             exit(0)
 
@@ -4565,3 +4136,120 @@ def main(args):
 if __name__ == "__main__":
     args = parse_cmd_args()
     main(args)
+
+
+######################################
+
+# gradient check: complex step method
+# dh = 1e-30
+# init(x + 1j * dh * px)
+# f = analysis.eigenvector_displacement(ks_rho)
+# ic(f)
+# dfdx_d_cs = f.imag / dh
+# ic(dfdx_d_cs)
+
+# error_d_cs = np.abs(dfdx_d_cs - dfdx_d) / np.abs(dfdx_d_cs)
+# ic(error_d_cs)
+
+# dh = 1e-30
+# init(x + 1j * dh * px)
+# f = analysis.eigenvector_stress(x + 1j * dh * px, ks_rho, ks_rho_stress)
+# ic(f)
+# dfdx = f.imag / dh
+# ic(dfdx)
+
+# error_cs = np.abs(dfdx - dfdx_s) / np.abs(dfdx)
+# ic(error_cs)
+
+
+# check Gr is symmetric
+# ic("Gr is symmetric: ", np.allclose(Gr.todense(), Gr.todense().T))
+# ic("Kr is symmetric: ", np.allclose(Kr.todense(), Kr.todense().T))
+# ic("Kr is positive definite: ", np.all(np.linalg.eigvals(Kr.todense()) > 0))
+# ic("Gr is positive definite: ", np.all(np.linalg.eigvals(Gr.todense()) > 0))
+
+# Method 1: this method is not accurate
+# set target eigenvalue small enough to get the smallest eigenvalues
+# eigs, Qr = sparse.linalg.eigsh(
+#     Kr, M=Gr, k=k, sigma=-sigma, mode="buckling", which="LA", tol=1e-10
+# )
+# eigs *= -1.0
+# idx = np.argsort(np.abs(eigs))
+# eigs = eigs[idx]
+# Qr = Qr[:, idx]
+# self.eigs = eigs
+
+# Method 2: this method is not accurate
+# self.eigs, Qr = sparse.linalg.eigsh(
+#     Kr,
+#     M=-Gr,
+#     k=k,
+#     sigma=-sigma,
+#     mode="buckling",
+#     which="SA",
+#     # tol=1e-30 / self.E,
+#     # tol=1e-15,
+# )
+# ic(self.eigs)
+
+# exit(0)
+
+# Method 3: this method is accurate but slow
+# eigs, Qr = eigh(Gr.todense(), Kr.todense())
+# eigs = - 1.0 / eigs
+# self.eigs = eigs[:k]
+# Qr = Qr[:, :k]
+
+# Method 4: this method is accurate and fast, but use magnitude of eigenvalues
+# self.eigs, Qr = sparse.linalg.eigsh(
+#     Gr,
+#     M=Kr,
+#     k=k,
+#     sigma=sigma,
+#     which="SM",
+#     tol=1e-10,
+# )
+# self.eigs = -1.0 / self.eigs
+# ic(self.eigs)
+
+
+# def check_buckling(self, rho, psi, phi, dh=1e-6):
+#     K = self.assemble_stiffness_matrix(rho)
+#     Kr = self.reduce_matrix(K)
+
+#     # Compute the solution path
+#     fr = self.reduce_vector(self.f)
+#     Kfact = linalg.factorized(Kr)
+#     ur = Kfact(fr)
+#     u = self.full_vector(ur)
+
+#     # Find the gemoetric stiffness matrix
+#     G = self.assemble_stress_stiffness(rho, u)
+#     Gr = self.reduce_matrix(G)
+
+#     gx = self.stress_stiffness_derivative(rho, u, psi, phi, Kfact)
+
+#     f0 = np.dot(psi, G @ phi)
+#     p_rho = np.random.uniform(size=rho.shape)
+#     rho_1 = rho + dh * p_rho
+#     exact = np.dot(gx, p_rho)
+
+#     K = self.assemble_stiffness_matrix(rho_1)
+#     Kr = self.reduce_matrix(K)
+
+#     # Compute the solution path
+#     fr = self.reduce_vector(self.f)
+#     Kfact = linalg.factorized(Kr)
+#     ur = Kfact(fr)
+#     u = self.full_vector(ur)
+
+#     # Find the gemoetric stiffness matrix
+#     G = self.assemble_stress_stiffness(rho_1, u)
+#     Gr = self.reduce_matrix(G)
+
+#     f1 = np.dot(psi, G @ phi)
+#     fd = (f1 - f0) / dh
+
+#     print("Exact: ", exact)
+#     print("FD: ", fd)
+#     print("Error: ", np.abs(exact - fd) / np.abs(exact))
