@@ -5,9 +5,9 @@ import mpmath as mp
 import numpy as np
 from scipy.linalg import eigh, expm
 from scipy.optimize import minimize
-from scipy import sparse, spatial
 
-def rand_symm_mat(n=10, eig_low=0.1, eig_high=100.0, nrepeat=1):
+
+def rand_symm_mat(n=10, eig_low=0.1, eig_high=100.0, nrepeat=5):
     # Randomly generated matrix that will be used to generate the eigenvectors
     QRmat = -1.0 + 2 * np.random.uniform(size=(n, n))
 
@@ -26,45 +26,76 @@ def rand_symm_mat(n=10, eig_low=0.1, eig_high=100.0, nrepeat=1):
     return np.dot(Q, np.dot(np.diag(lam), Q.T))  # Compute A = Q*Lambda*Q^{T}
 
 
-def deriv(rho, A, B, D, Adot, Bdot, Ddot=None, ndvs=1):
+def softmax_a(fun, rho, lam, lam_min):
+    eta = np.zeros(len(lam))
+    for i in range(len(lam)):
+        eta[i] = fun(-rho * (lam[i] - lam_min))
+    return eta
+
+
+def softmax_ab(fun, rho, lam, lam_a, lam_b):
     """
-    Compute the forward mode derivative
+    Compute the eta values
+    """
+    eta = np.zeros(len(lam))
+    for i in range(len(lam)):
+        a = fun(rho * (lam[i] - lam_a))
+        b = fun(rho * (lam[i] - lam_b))
+        eta[i] = a - b
+
+    return eta
+
+
+def compute_lam_ab(lam, a, b):
+    """
+    Compute the lam_a and lam_b values
+    """
+    # lam_a = np.argmin(np.abs(lam - a)) - np.min(lam)
+    # lam_b = np.argmin(np.abs(lam - b)) + np.min(lam)
+    lam_a = np.min(lam[lam > a]) - np.min(np.abs(lam))
+    lam_b = np.max(lam[lam < b]) + np.min(np.abs(lam))
+    # lam_a = np.min(lam[lam > a])
+    # lam_b = np.max(lam[lam < b])
+    N_a = np.sum(lam < lam_a)
+    N_b = lam.shape[0] - np.sum(lam > lam_b)
+    return lam_a, lam_b, N_a, N_b
+
+
+def fun_h(eta, Q, D, N=None):
+    """
+    h = sum^N eta_i * q_i^T * D * q_i
     """
 
-    # Compute the eigenvalues of the generalized eigen problem
-    lam, Q = eigh(A, B)
+    eta = eta / np.sum(eta)
 
-    lam_min = np.min(lam)
-    eta = np.exp(-rho * (lam - lam_min))
-    trace = np.sum(eta)
-    eta = eta / trace
+    if N is None:
+        N = Q.shape[0]
 
-    # compute the h value
-    h = func(eta, Q, D, np.shape(A)[0])
-    hdot = np.zeros(ndvs)
+    h = 0.0
+    for i in range(N):
+        h += eta[i] * Q[:, i].T @ D @ Q[:, i]
 
-    for j in range(np.shape(A)[0]):
-        for i in range(np.shape(A)[0]):
-            Adot_q = Q[:, i].T @ Adot @ Q[:, j]
-            Bdot_q = Q[:, i].T @ Bdot @ Q[:, j]
-            Dq = Q[:, i].T @ D @ Q[:, j]
-            Eij = precise(rho, trace, np.min(lam), lam[i], lam[j])
-
-            if i == j:
-                hdot += Eij * (Dq - h) * (Adot_q - lam[j] * Bdot_q)
-            else:
-                hdot += Eij * Dq * (Adot_q - lam[j] * Bdot_q)
-
-            hdot -= eta[i] * Dq * Bdot_q
-
-    for j in range(np.shape(A)[0]):
-        if Ddot is not None:
-            hdot += eta[j] * Q[:, j].T @ Ddot @ Q[:, j]
-
-    return hdot
+    return h
 
 
-def precise(rho, trace, lam_min, lam1, lam2):
+def fun2_h(rho, D, A, B):
+    Binv = np.linalg.inv(B)
+    exp = expm(-rho * Binv @ A)
+    h = np.trace(exp @ Binv @ D) / np.trace(exp)
+    return h
+
+
+def fun3_h(rho, D, lam, Q):
+    """
+    h = trace(exp(-rho * lam) * Q^T * D * Q)
+    """
+    exp = expm(-rho * np.diag(lam))
+    exp /= np.trace(exp)
+    h = np.trace(exp @ Q.T @ D @ Q)
+    return h
+
+
+def Eij_a(fun, rho, trace, lam_min, lam1, lam2):
     """
     Compute the precise value of the E_{ij} term
 
@@ -78,31 +109,190 @@ def precise(rho, trace, lam_min, lam1, lam2):
 
     with mp.workdps(80):
         if lam1 == lam2:
-            val = -rho * mp.exp(-rho * (lam1 - lam_min)) / trace
+            val = -rho * fun(-rho * (lam1 - lam_min)) / trace
         else:
             val = (
-                (mp.exp(-rho * (lam1 - lam_min)) - mp.exp(-rho * (lam2 - lam_min)))
+                (fun(-rho * (lam1 - lam_min)) - fun(-rho * (lam2 - lam_min)))
                 / (mp.mpf(lam1) - mp.mpf(lam2))
                 / mp.mpf(trace)
             )
     return np.float64(val)
 
 
-def func(eta, Q, D, N=None):
+def Gij_a(fun, rho, trace, lam_min, lam1, lam2):
+    with mp.workdps(80):
+        if lam1 == lam2:
+            val = -rho * lam1 * fun(-rho * (lam1 - lam_min)) / trace
+        else:
+            val = (
+                lam1 * fun(-rho * (lam1 - lam_min))
+                - lam2 * fun(-rho * (lam2 - lam_min))
+            ) / ((mp.mpf(lam1) - mp.mpf(lam2)) * mp.mpf(trace))
+    return np.float64(val)
+
+
+def Eij_ab(fun, rho, trace, lam1, lam2, lam_a, lam_b):
+    with mp.workdps(80):
+        a1 = fun(rho * (mp.mpf(lam1) - mp.mpf(lam_a)))
+        b1 = fun(rho * (mp.mpf(lam1) - mp.mpf(lam_b)))
+        a2 = fun(rho * (mp.mpf(lam2) - mp.mpf(lam_a)))
+        b2 = fun(rho * (mp.mpf(lam2) - mp.mpf(lam_b)))
+
+        eta1 = a1 - b1
+        eta2 = a2 - b2
+
+        if lam1 == lam2:
+            val = -rho * eta1 * (a1 + b1) / mp.mpf(trace)
+            # val = 0.0
+        else:
+            val = (eta1 - eta2) / (mp.mpf(lam1) - mp.mpf(lam2)) / mp.mpf(trace)
+    return np.float64(val)
+
+
+def Gij_ab(fun, rho, trace, lam1, lam2, lam_a, lam_b):
+    with mp.workdps(80):
+        a1 = fun(rho * (mp.mpf(lam1) - mp.mpf(lam_a)))
+        b1 = fun(rho * (mp.mpf(lam1) - mp.mpf(lam_b)))
+        a2 = fun(rho * (mp.mpf(lam2) - mp.mpf(lam_a)))
+        b2 = fun(rho * (mp.mpf(lam2) - mp.mpf(lam_b)))
+
+        eta1 = a1 - b1
+        eta2 = a2 - b2
+
+        if lam1 == lam2:
+            val = -rho * lam1 * eta1 * (a1 + b1) / mp.mpf(trace)
+            # val = 0.0
+        else:
+            val = (
+                (lam1 * eta1 - lam2 * eta2)
+                / (mp.mpf(lam1) - mp.mpf(lam2))
+                / mp.mpf(trace)
+            )
+    return np.float64(val)
+
+
+def deriv_exict(
+    rho,
+    A,
+    B,
+    D,
+    Adot,
+    Bdot,
+    lam,
+    Q,
+    eta,
+    fun,
+    Eij_fun,
+    Gij_fun,
+    lam_a=None,
+    lam_b=None,
+    Ddot=None,
+    ndvs=1,
+):
     """
-    h = tr(eta * Q^T * D * Q)
+    Compute the forward mode derivative
     """
-    if N is None:
-        N = Q.shape[0]
 
-    h = 0.0
-    for i in range(N):
-        h += eta[i] * Q[:, i].T @ D @ Q[:, i]
+    trace = np.sum(eta)
+    eta = eta / trace
 
-    return h
+    # compute the h value
+    h = fun_h(eta, Q, D)
+    hdot = np.zeros(ndvs)
+
+    for j in range(np.shape(A)[0]):
+        for i in range(np.shape(A)[0]):
+            Adot_q = Q[:, i].T @ Adot @ Q[:, j]
+            Bdot_q = Q[:, i].T @ Bdot @ Q[:, j]
+            qDq = Q[:, i].T @ D @ Q[:, j]
+
+            if Eij_fun == Eij_a:
+                Eij = Eij_fun(fun, rho, trace, np.min(lam), lam[i], lam[j])
+                Gij = Gij_fun(fun, rho, trace, np.min(lam), lam[i], lam[j])
+            else:
+                Eij = Eij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
+                Gij = Gij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
+
+            if i == j:
+                scale = qDq - h
+            else:
+                scale = qDq
+
+            hdot += scale * (Eij * Adot_q - Gij * Bdot_q)
+
+    for j in range(np.shape(A)[0]):
+        hdot -= eta[j] * (Q[:, j].T @ D @ Q[:, j]) * (Q[:, j].T @ Bdot @ Q[:, j])
+
+        if Ddot is not None:
+            hdot += eta[j] * Q[:, j].T @ Ddot @ Q[:, j]
+
+    return hdot
 
 
-def deriv_approx(A, B, D, Adot, Bdot, Ddot=None, ndvs=1, rho=1.0, N=5):
+def deriv_exict2(rho, A, B, D, Adot, Bdot, Ddot=None, ndvs=1):
+    lam, Q = eigh(A, B)
+
+    lam_min = np.min(lam)
+    eta = np.exp(-rho * (lam - lam_min))
+    trace = np.sum(eta)
+    eta = eta / trace
+
+    # compute the h value
+    h = fun_h(eta, Q, D)
+    hdot = np.zeros(ndvs)
+
+    for i in range(np.shape(A)[0]):
+        Ar = A - lam[i] * B
+        Br = (2 * B @ Q[:, i]).reshape(-1, 1)
+        Mat = np.block([[Ar, Br], [-0.5 * Br.T, 0.0]])
+
+        # check if the matrix is singular
+        # ic(np.linalg.cond(Mat))
+
+        if np.linalg.cond(Mat) > 1e10:
+            ic("Singular matrix")
+            continue
+
+        b0 = (-2 * eta[i] * D @ Q[:, i]).reshape(-1, 1)
+        b1 = rho * eta[i] * (Q[:, i].T @ D @ Q[:, i] - h)
+        b = np.block([[b0], [b1]])
+
+        x = np.linalg.solve(Mat, b)
+
+        pR_px = np.block(
+            [
+                [((Adot - lam[i] * Bdot) @ Q[:, i]).reshape(-1, 1)],
+                [Q[:, i].T @ Bdot @ Q[:, i]],
+            ]
+        )
+
+        hdot += np.dot(x.T, pR_px).reshape(-1)
+
+        if Ddot is not None:
+            hdot += eta[i] * Q[:, i].T @ Ddot @ Q[:, i]
+
+    return hdot
+
+
+def deriv_approx(
+    A,
+    B,
+    D,
+    Adot,
+    Bdot,
+    lam,
+    Q,
+    eta,
+    fun,
+    Eij_fun,
+    N_a=0,
+    N_b=5,
+    lam_a=None,
+    lam_b=None,
+    Ddot=None,
+    ndvs=1,
+    rho=1.0,
+):
     """
     Approximately compute the forward derivative
 
@@ -114,46 +304,39 @@ def deriv_approx(A, B, D, Adot, Bdot, Ddot=None, ndvs=1, rho=1.0, N=5):
             sum^N q_{i}^T * Bdot * (u_{j} - lam_{j} * v_{j} - w_{j})
 
     """
-
-    # solve the eigenvalue problem
-    lam, Q = eigh(A, B)
-
-    # compute eta
-    eta = np.exp(-rho * (lam - np.min(lam)))
-    trace = np.sum(eta)
-    eta = eta / trace
-
-    # count nonzero entries in the eta vector as self.Np
-    N = np.count_nonzero(eta)
-
-    C = B @ Q[:, :N]
-    U, _ = np.linalg.qr(C)
-    Z = np.eye(np.shape(A)[0]) - U @ U.T
-
-    # compute eta
-    eta = np.exp(-rho * (lam - np.min(lam)))
+    # normalize the eta vector
     trace = np.sum(eta)
     eta = eta / trace
 
     # compute the h value
-    h = func(eta, Q, D, N)
+    h = fun_h(eta, Q, D)
     hdot = np.zeros(ndvs)
 
     # only compute the lower triangle of the matrix since it is symmetric
-    for j in range(N):
-        for i in range(j + 1):
-            Adot_q = Q[:, i].T @ Adot @ Q[:, j]
-            Bdot_q = Q[:, i].T @ Bdot @ Q[:, j]
-            Dq = Q[:, i].T @ D @ Q[:, j]
-            Eij = precise(rho, trace, np.min(lam), lam[i], lam[j])
+    for i in range(N_a, N_b):
+        for j in range(N_a, N_b):
+            qDq = Q[:, i].T @ D @ Q[:, j]
+            qAdotq = Q[:, i].T @ Adot @ Q[:, j]
+            qBdotq = Q[:, i].T @ Bdot @ Q[:, j]
+
+            if Eij_fun == Eij_a:
+                Eij = Eij_fun(fun, rho, trace, np.min(lam), lam[i], lam[j])
+            else:
+                Eij = Eij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
 
             if i == j:
-                hdot += Eij * (Dq - h) * (Adot_q - lam[j] * Bdot_q)
+                scale = qDq - h
             else:
-                hdot += Eij * Dq * (2 * Adot_q - (lam[i] + lam[j]) * Bdot_q)
+                scale = qDq
+
+            hdot += Eij * scale * (qAdotq - lam[j] * qBdotq)
+
+    C = B @ Q[:, N_a:N_b]
+    U, _ = np.linalg.qr(C)
+    Z = np.eye(np.shape(A)[0]) - U @ U.T
 
     # compute second term in the derivative approximation
-    for j in range(N):
+    for j in range(N_a, N_b):
         # solve the first linear system
         rhs1 = -eta[j] * D @ Q[:, j]
         uj = np.linalg.solve(B, rhs1)
@@ -179,71 +362,199 @@ def deriv_approx(A, B, D, Adot, Bdot, Ddot=None, ndvs=1, rho=1.0, N=5):
     return hdot
 
 
+def deriv_approx2(
+    A,
+    B,
+    D,
+    Adot,
+    Bdot,
+    lam,
+    Q,
+    eta,
+    fun,
+    Eij_fun,
+    Gij_fun,
+    N_a=0,
+    N_b=5,
+    lam_a=None,
+    lam_b=None,
+    Ddot=None,
+    ndvs=1,
+    rho=1.0,
+):
+    # normalize the eta vector
+    trace = np.sum(eta)
+    eta = eta / trace
+
+    # compute the h value
+    h = fun_h(eta, Q, D)
+    hdot = np.zeros(ndvs)
+
+    for i in range(N_a, N_b):
+        for j in range(N_a, N_b):
+            qDq = Q[:, i].T @ D @ Q[:, j]
+            qAdotq = Q[:, i].T @ Adot @ Q[:, j]
+            qBdotq = Q[:, i].T @ Bdot @ Q[:, j]
+
+            if Eij_fun == Eij_a:
+                Eij = Eij_fun(fun, rho, trace, np.min(lam), lam[i], lam[j])
+                Gij = Gij_fun(fun, rho, trace, np.min(lam), lam[i], lam[j])
+            else:
+                Eij = Eij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
+                Gij = Gij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
+
+            if i == j:
+                scale = qDq - h
+            else:
+                scale = qDq
+
+            hdot += scale * (Eij * qAdotq - Gij * qBdotq)
+
+    # compute the orthogonal projector
+    C = B @ Q[:, N_a:N_b]
+    U, _ = np.linalg.qr(C)
+    Z = np.eye(np.shape(A)[0]) - U @ U.T
+
+    for j in range(N_a, N_b):
+        Dq = D @ Q[:, j]
+        Ak = A - lam[j] * B
+        Abar = Z.T @ Ak @ Z
+        bbar = Z.T @ (-2.0 * eta[j] * Dq)
+        phi = Z @ np.linalg.solve(Abar, bbar)
+
+        hdot += Q[:, j].T @ (Adot - lam[j] * Bdot) @ phi
+
+        hdot -= eta[j] * (Q[:, j].T @ D @ Q[:, j]) * (Q[:, j].T @ Bdot @ Q[:, j])
+
+        if Ddot is not None:
+            hdot += eta[j] * Q[:, j].T @ Ddot @ Q[:, j]
+
+    return hdot
+
+
 # Set parameters
 rho = 1000.0
-N = 5
-n = 30
+n = 100
 dh = 1e-30
 ndvs = 5
 
-np.random.seed(12345)
+np.random.seed(123)
 
 x = 0.1 * np.ones(ndvs)
 p = np.random.uniform(size=ndvs)
 
 A = rand_symm_mat(n)
-B = rand_symm_mat(n, eig_low=-10, eig_high=10.0)
+B = rand_symm_mat(n)
+# B = np.eye(n)
 Adot = rand_symm_mat(n)
 Bdot = rand_symm_mat(n)
 Ddot = rand_symm_mat(n)
 D = rand_symm_mat(n)
 
-# check if some eigenvalues of B are negative
-ic(np.any(np.linalg.eigvals(B) < 0))
+lam, Q = eigh(A, B)
 
-# set positive infinity to be the largest eigenvalue of B
-sigma = np.power(10.0, 10.0)
+for softmax in ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
+    print("Softmax =", softmax)
 
-lam1, Q = sparse.linalg.eigsh(A, M=B, k=n-1, sigma=np.power(10.0, 10.0), which="LA", mode="buckling")
-lam2, Q = sparse.linalg.eigsh(A, M=B, k=1, sigma=-np.power(10.0, 10.0), which="LA", mode="buckling")
-# combine lam1 and lam2
-lam = np.concatenate((lam1, lam2))
-ic(lam)
+    if softmax in ["exp", "sech"]:
+        fun = getattr(mp, softmax)
 
-# lam, Q = sparse.linalg.eigsh(A, M=B, k=N, sigma=-np.power(10.0, 10.0), which="SM", mode="buckling")
-lam, Q = sparse.linalg.eigsh(A, M=B, k=N, sigma=-np.power(10.0, 0.0), which="LA", mode="buckling")
+        N = 10
+        N_a = 0
+        N_b = N
+        lam_a = None
+        lam_b = None
 
-ic(lam)
-lam *= -1.0
-R = A @ Q[:, -1] + lam[-1] * B @ Q[:, -1]
-# check that the residual is small
-ic(R)
-ic(np.linalg.norm(R))
-ic(np.allclose(R, np.zeros_like(R), atol=1e-8))
-# check if A - lam[0] * B is singular
-ic(np.linalg.cond(A - lam[0] * B) < 1e-8)
+        eta = softmax_a(fun, rho, lam, np.min(lam))
+        Eij_fun = Eij_a
+        Gij_fun = Gij_a
 
-ic(lam)
-# re-order the eigenvalues and eigenvectors by magnitude
-idx = np.argsort(np.abs(lam))
-lam = lam[idx]
-Q = Q[:, idx]
-ic(lam)
+    else:
+        fun = getattr(mp, softmax)
 
-# lam = - 1 / lam
-# ic(lam)
+        a = lam[0] + 10.0
+        b = lam[0] + 50.0
 
-# lam, Q = sparse.linalg.eigsh(B, M=A, k=N, sigma=1.0, which="LM", mode="buckling")
-# ic(lam)
+        lam_a, lam_b, N_a, N_b = compute_lam_ab(lam, a, b)
+        eta = softmax_ab(fun, rho, lam, lam_a, lam_b)
 
-eta = np.exp(-rho * (lam - np.min(lam)))
-eta = eta / np.sum(eta)
+        Eij_fun = Eij_ab
+        Gij_fun = Gij_ab
 
-times = []
+    ans = np.dot(
+        deriv_exict(
+            rho,
+            A,
+            B,
+            D,
+            Adot,
+            Bdot,
+            lam,
+            Q,
+            eta,
+            fun,
+            Eij_fun,
+            Gij_fun,
+            lam_a,
+            lam_b,
+            Ddot,
+            ndvs=ndvs,
+        ),
+        p,
+    )
+    ans_approx = np.dot(
+        deriv_approx(
+            A,
+            B,
+            D,
+            Adot,
+            Bdot,
+            lam,
+            Q,
+            eta,
+            fun,
+            Eij_fun,
+            N_a,
+            N_b,
+            lam_a,
+            lam_b,
+            Ddot,
+            ndvs=ndvs,
+            rho=rho,
+        ),
+        p,
+    )
+    ans_approx2 = np.dot(
+        deriv_approx2(
+            A,
+            B,
+            D,
+            Adot,
+            Bdot,
+            lam,
+            Q,
+            eta,
+            fun,
+            Eij_fun,
+            Gij_fun,
+            N_a,
+            N_b,
+            lam_a,
+            lam_b,
+            Ddot,
+            ndvs=ndvs,
+            rho=rho,
+        ),
+        p,
+    )
 
-ans = np.dot(deriv(rho, A, B, D, Adot, Bdot, Ddot, ndvs=ndvs), p)
-ans_approx = np.dot(deriv_approx(A, B, D, Adot, Bdot, Ddot, ndvs=ndvs, rho=rho, N=N), p)
+    # print("ans = ", ans)
+    # print("ans_approx1 = ", ans_approx)
+    # print("ans_approx2 = ", ans_approx2)
+    print("error1  =", np.abs(ans - ans_approx) / np.abs(ans))
+    print("error2  =", np.abs(ans - ans_approx2) / np.abs(ans))
+    print("")
 
-print("ans = ", ans)
-print("ans_approx = ", ans_approx)
-print("error = ", np.abs(ans - ans_approx) / np.abs(ans))
+    plt.plot(lam, eta, "o-", label=softmax)
+    plt.legend()
+plt.show()
