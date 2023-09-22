@@ -1,24 +1,25 @@
 #ifndef STRESS_STIFFNESS_H
 #define STRESS_STIFFNESS_H
 
-#include <KokkosBlas1_axpby.hpp>
-#include <KokkosBlas1_mult.hpp>
-#include <KokkosBlas1_reciprocal.hpp>
-#include <KokkosBlas1_scal.hpp>
-#include <KokkosBlas1_update.hpp>
-#include <KokkosBlas2_gemv.hpp>
+#include <KokkosBlas.hpp>
+// #include <KokkosBlas1_axpby.hpp>
+// #include <KokkosBlas1_mult.hpp>
+// #include <KokkosBlas1_reciprocal.hpp>
+// #include <KokkosBlas1_scal.hpp>
+// #include <KokkosBlas1_update.hpp>
+// #include <KokkosBlas2_gemv.hpp>
 #include <Kokkos_Core.hpp>
 #include <cstring>
 
 #include "converter.h"
-#include "toolkit.h"
+#include "utils.h"
 
 template <typename T>
-View1D<T> populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
-                       View3D<T>& Be, View4D<T>& Te) {
+View1D<T> populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye, View3D<T>& Be,
+                       View4D<T>& Te) {
   const int nelems = xe.extent(0);
   View1D<T> detJ("detJ", nelems);
-  View1D<T> invdetJ("invdetJ", nelems);
+  // View1D<T> invdetJ("invdetJ", nelems);
   View3D<T> J("J", nelems, 2, 2);
   View3D<T> invJ("invJ", nelems, 2, 2);
 
@@ -37,64 +38,31 @@ View1D<T> populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
   Neta(2) = 0.25 * (1.0 + xi);
   Neta(3) = 0.25 * (1.0 - xi);
 
-  auto J00 = Kokkos::subview(J, Kokkos::ALL(), 0, 0);
-  auto J01 = Kokkos::subview(J, Kokkos::ALL(), 0, 1);
-  auto J10 = Kokkos::subview(J, Kokkos::ALL(), 1, 0);
-  auto J11 = Kokkos::subview(J, Kokkos::ALL(), 1, 1);
-
-  // KokkosBlas::gemv (mode, alpha, A, x, beta, y)
-  // y[i] = beta * y[i] + alpha * SUM_j(A[i,j] * x[j])
-  KokkosBlas::gemv("N", 1.0, xe, Nxi, 0.0, J00);
-  KokkosBlas::gemv("N", 1.0, xe, Neta, 0.0, J01);
-  KokkosBlas::gemv("N", 1.0, ye, Nxi, 0.0, J10);
-  KokkosBlas::gemv("N", 1.0, ye, Neta, 0.0, J11);
-
-  // detJ = J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
-  // KokkosBlas::mult(gamma,y,alpha,a,x):
-  // y[i] <- gamma*y[i] + alpha*a[i]*x[i]
-  KokkosBlas::mult(0.0, detJ, 1.0, J00, J11);
-  KokkosBlas::mult(1.0, detJ, -1.0, J01, J10);
-
-  auto invJ00 = Kokkos::subview(invJ, Kokkos::ALL(), 0, 0);
-  auto invJ01 = Kokkos::subview(invJ, Kokkos::ALL(), 0, 1);
-  auto invJ10 = Kokkos::subview(invJ, Kokkos::ALL(), 1, 0);
-  auto invJ11 = Kokkos::subview(invJ, Kokkos::ALL(), 1, 1);
-
-  KokkosBlas::reciprocal(invdetJ, detJ);
-  KokkosBlas::mult(0.0, invJ00, 1.0, J11, invdetJ);
-  KokkosBlas::mult(0.0, invJ01, -1.0, J01, invdetJ);
-  KokkosBlas::mult(0.0, invJ10, -1.0, J10, invdetJ);
-  KokkosBlas::mult(0.0, invJ11, 1.0, J00, invdetJ);
-
-  // KokkosBlas::update(alpha,x,beta,y,gamma,z)
-  // z[i] <- gamma*z[i] + alpha*x[i] + beta*y[i]
-  // Nx(i, 0) = invJ(i, 0, 0) * Nxi[0] + invJ(i, 1, 0) * Neta[0]
-  // Nx = np.outer(invJ[:, 0, 0], Nxi) + np.outer(invJ[:, 1, 0], Neta)
-  // Ny = np.outer(invJ[:, 0, 1], Nxi) + np.outer(invJ[:, 1, 1], Neta)
-  for (int i = 0; i < 4; ++i) {
-    KokkosBlas::update(Nxi(i), invJ00, Neta(i), invJ10, 0.0,
-                       Kokkos::subview(Nx, Kokkos::ALL(), i));
-    KokkosBlas::update(Nxi(i), invJ01, Neta(i), invJ11, 0.0,
-                       Kokkos::subview(Ny, Kokkos::ALL(), i));
-  }
-
   Kokkos::parallel_for(
-      "PopulateBe", nelems, KOKKOS_LAMBDA(const int n) {
-        for (int i = 0; i < 4; i++) {
-          Be(n, 0, i * 2) = Nx(n, i);
-          Be(n, 1, i * 2 + 1) = Ny(n, i);
-          Be(n, 2, i * 2) = Ny(n, i);
-          Be(n, 2, i * 2 + 1) = Nx(n, i);
+      nelems, KOKKOS_LAMBDA(const int n) {
+        for (int i = 0; i < 4; ++i) {
+          J(n, 0, 0) += Nxi(i) * xe(n, i);
+          J(n, 0, 1) += Nxi(i) * ye(n, i);
+          J(n, 1, 0) += Neta(i) * xe(n, i);
+          J(n, 1, 1) += Neta(i) * ye(n, i);
         }
-      });
 
-  // for n in range(nelems):
-  // Te [n, 0, :, :] = outer(Nx [n, :], Nx [n, :])
-  // Te [n, 1, :, :] = outer(Ny [n, :], Ny [n, :])
-  // Te [n, 2, :, :] = outer(Nx [n, :], Ny [n, :]) + outer(Ny [n, :], Nx [n, :])
-  Kokkos::parallel_for(
-      "PopulateTe", nelems, KOKKOS_LAMBDA(const int n) {
-        for (int i = 0; i < 4; i++) {
+        detJ(n) = J(n, 0, 0) * J(n, 1, 1) - J(n, 0, 1) * J(n, 1, 0);
+
+        invJ(n, 0, 0) = J(n, 1, 1) / detJ(n);
+        invJ(n, 0, 1) = -J(n, 0, 1) / detJ(n);
+        invJ(n, 1, 0) = -J(n, 1, 0) / detJ(n);
+        invJ(n, 1, 1) = J(n, 0, 0) / detJ(n);
+
+        for (int i = 0; i < 4; ++i) {
+          Nx(n, i) = invJ(n, 0, 0) * Nxi(i) + invJ(n, 0, 1) * Neta(i);
+          Ny(n, i) = invJ(n, 1, 0) * Nxi(i) + invJ(n, 1, 1) * Neta(i);
+
+          Be(n, 0, i * 2) = Be(n, 2, i * 2 + 1) = Nx(n, i);
+          Be(n, 2, i * 2) = Be(n, 1, i * 2 + 1) = Ny(n, i);
+        }
+
+        for (int i = 0; i < 4; ++i) {
           for (int j = 0; j < 4; j++) {
             Te(n, 0, i, j) = Nx(n, i) * Nx(n, j);
             Te(n, 1, i, j) = Ny(n, i) * Ny(n, j);
@@ -107,9 +75,8 @@ View1D<T> populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye,
 }
 
 template <typename T>
-View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn,
-                   const View1D<T>& rho, const View1D<T>& u,
-                   const View2D<T>& C0, const T rho0_K, const char* ptype_K,
+View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn, const View1D<T>& rho,
+                   const View1D<T>& u, const View2D<T>& C0, const T rho0_K, const char* ptype_K,
                    const double p, const double q) {
   const int nelems = conn.extent(0);
   View3D<T> C("C", nelems, 3, 3);
@@ -127,8 +94,7 @@ View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn,
   Kokkos::parallel_for(
       nelems, KOKKOS_LAMBDA(const int n) {
         // Average the density to get the element - wise density
-        T rhoE_n = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n, 2)) +
-                           rho(conn(n, 3)));
+        T rhoE_n = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n, 2)) + rho(conn(n, 3)));
 
         // Compute the constitutivve matrix
         const char* simp = "simp";
@@ -198,17 +164,16 @@ View3D<T> computeG(const View2D<T>& X, const View2D<int>& conn,
   K * sol = rhs
 
   Given the right-hand-side rhs. ie. sol = solver(rhs)
+
+  returns: dfdu and dfdC
 */
 template <typename T>
-View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
-                             const View1D<T>& rho, const View1D<T>& u,
-                             const View1D<T>& psi, const View1D<T>& phi,
-                             const View2D<T>& C0, const View1D<T>& reduced,
-                             const T rho0_K, const char* ptype_K,
-                             const double p, const double q) {
+std::tuple<View1D<T>, View1D<T>, View3D<T>> computeGDerivative(
+    const View2D<T>& X, const View2D<int>& conn, const View1D<T>& rho, const View1D<T>& u,
+    const View1D<T>& psi, const View1D<T>& phi, const View2D<T>& C0, const T rho0_K,
+    const char* ptype_K, const double p, const double q) {
   const int nelems = conn.extent(0);
   const int nnodes = X.extent(0);
-  const int nreduced = reduced.extent(0);
 
   View1D<T> rhoE("rhoE", nelems);
   View3D<T> C("C", nelems, 3, 3);
@@ -222,9 +187,7 @@ View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
 
   View2D<T> dfdue("dfdue", nelems, 8);
   View1D<T> dfdu("dfdu", 2 * nnodes);
-  View1D<T> dfdur("dfdur", nreduced);
   View3D<T> dfdC("dfdC", nelems, 3, 3);
-  View1D<T> dG("dG", nnodes);
 
   // Compute Gauss quadrature with a 2-point quadrature rule
   const double gauss_pts[2] = {-1.0 / sqrt(3.0), 1.0 / sqrt(3.0)};
@@ -233,8 +196,7 @@ View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
   Kokkos::parallel_for(
       nelems, KOKKOS_LAMBDA(const int n) {
         // Average the density to get the element - wise density
-        rhoE(n) = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n, 2)) +
-                          rho(conn(n, 3)));
+        rhoE(n) = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n, 2)) + rho(conn(n, 3)));
 
         // Compute the constitutivve matrix
         const char* simp = "simp";
@@ -270,40 +232,42 @@ View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
 
       auto detJ = populateBeTe(xi, eta, xe, ye, Be, Te);
 
+      // dfds = np.einsum( "n,nijl,nj,nl -> ni", detJ, Te, psie[:, ::2],
+      // phie[:, ::2]) + np.einsum("n,nijl,nj,nl -> ni", detJ, Te, psie[:,
+      // 1::2], phie[:, 1::2] )
+      View2D<T> dfds("dfds", nelems, 3);
+
       Kokkos::parallel_for(
-          nelems, KOKKOS_LAMBDA(const int n) {
-            // dfds = np.einsum( "n,nijl,nj,nl -> ni", detJ, Te, psie[:, ::2],
-            // phie[:, ::2]) + np.einsum("n,nijl,nj,nl -> ni", detJ, Te, psie[:,
-            // 1::2], phie[:, 1::2] )
-            T dfds_ni = 0.0;
-            for (int i = 0; i < 3; i++) {
-              for (int j = 0; j < 4; j++) {
-                for (int l = 0; l < 4; l++) {
-                  dfds_ni = detJ(n) * Te(n, i, j, l) *
-                            (psie(n, j * 2) * phie(n, l * 2) +
-                             psie(n, j * 2 + 1) * phie(n, l * 2 + 1));
-                }
+          Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {nelems, 3}),
+          KOKKOS_LAMBDA(const int n, const int i) {
+            for (int j = 0; j < 4; j++) {
+              for (int l = 0; l < 4; l++) {
+                dfds(n, i) +=
+                    detJ(n) * Te(n, i, j, l) *
+                    (psie(n, j * 2) * phie(n, l * 2) + psie(n, j * 2 + 1) * phie(n, l * 2 + 1));
               }
             }
+            // }
+          });
 
-            // Add up contributions to d( psi^{T} * G(x, u) * phi ) / du
-            // dfdue += np.einsum("nij,nik,nk -> nj", Be, C, dfds)
+      // Add up contributions to d( psi^{T} * G(x, u) * phi ) / du
+      // dfdue += np.einsum("nij,nik,nk -> nj", Be, C, dfds)
+      Kokkos::parallel_for(
+          Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {nelems, 8}), KOKKOS_LAMBDA(int n, int j) {
             for (int i = 0; i < 3; i++) {
-              for (int j = 0; j < 8; j++) {
-                for (int k = 0; k < 8; k++) {
-                  dfdue(n, j) += Be(n, i, j) * C(n, i, k) * dfds_ni;
-                }
+              for (int k = 0; k < 3; k++) {
+                dfdue(n, j) += Be(n, i, j) * C(n, i, k) * dfds(n, k);
               }
             }
+          });
 
-            // Add contributions to the derivative w.r.t. C
-            // dfdC += np.einsum("ni,njk,nk -> nij", dfds, Be, ue)
-            for (int i = 0; i < 3; i++) {
-              for (int j = 0; j < 3; j++) {
-                for (int k = 0; k < 8; k++) {
-                  dfdC(n, i, j) += dfds_ni * Be(n, i, k) * ue(n, k);
-                }
-              }
+      // Add contributions to the derivative w.r.t. C
+      // dfdC += np.einsum("ni,njk,nk -> nij", dfds, Be, ue)
+      Kokkos::parallel_for(
+          Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {nelems, 3, 3}),
+          KOKKOS_LAMBDA(int n, int i, int j) {
+            for (int k = 0; k < 8; k++) {
+              dfdC(n, i, j) += dfds(n, i) * Be(n, j, k) * ue(n, k);
             }
           });
     };
@@ -311,47 +275,15 @@ View1D<T> computeGDerivative(const View2D<T>& X, const View2D<int>& conn,
 
   // // np.add.at(dfdu, 2 * self.conn, dfdue[:, 0::2])
   // // np.add.at(dfdu, 2 * self.conn + 1, dfdue[:, 1::2])
-  // Kokkos::parallel_for(
-  //     nelems, KOKKOS_LAMBDA(const int n) {
-  //       for (int i = 0; i < 4; i++) {
-  //         dfdu(conn(n, i) * 2) += dfdue(n, i * 2);
-  //         dfdu(conn(n, i) * 2 + 1) += dfdue(n, i * 2 + 1);
-  //       }
-  //     });
+  Kokkos::parallel_for(
+      nelems, KOKKOS_LAMBDA(const int n) {
+        for (int i = 0; i < 4; i++) {
+          Kokkos::atomic_add(&dfdu(conn(n, i) * 2), dfdue(n, i * 2));
+          Kokkos::atomic_add(&dfdu(conn(n, i) * 2 + 1), dfdue(n, i * 2 + 1));
+        }
+      });
 
-  // // dfdur = dfdu[reduced] where dfdur has same size of reduced
-  // Kokkos::parallel_for(
-  //     nreduced, KOKKOS_LAMBDA(const int n) { dfdur(n) = dfdu(reduced(n)); });
-
-  // Kokkos::parallel_for(
-  //     nelems, KOKKOS_LAMBDA(const int n) {
-  //       T drhoE_n = 0.0;
-  //       for (int i = 0; i < 3; i++) {
-  //         for (int j = 0; j < 3; j++) {
-  //           drhoE_n += dfdC(n, i, j) * C0(i, j);
-  //         }
-  //       }
-
-  //       // Average the density to get the element - wise density
-  //       T rhoE_n = 0.25 * (rho(conn(n, 0)) + rho(conn(n, 1)) + rho(conn(n,
-  //       2)) +
-  //                          rho(conn(n, 3)));
-
-  //       // Penalize the stiffness matrix
-  //       if (ptype_K == "simp") {
-  //         drhoE_n *= p * pow(rhoE_n, p - 1.0);
-  //       } else if (ptype_K == "ramp") {
-  //         drhoE_n *= (1.0 + q) / pow((1.0 + q * (1.0 - rhoE_n)), 2.0);
-  //       } else {
-  //         std::cout << "Penalty type not supported" << std::endl;
-  //       }
-
-  //       for (int i = 0; i < 4; i++) {
-  //         Kokkos::atomic_add(&dG(conn(n, i)), 0.25 * drhoE_n);
-  //       }
-  //     });
-
-  return dG;
+  return std::make_tuple(rhoE, dfdu, dfdC);
 }
 
 #endif
