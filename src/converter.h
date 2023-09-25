@@ -31,6 +31,10 @@ template <typename T>
 using View3D = Kokkos::View<T***, Layout, ExecSpace>;
 template <typename T>
 using View4D = Kokkos::View<T****, Layout, ExecSpace>;
+template <typename T>
+using View5D = Kokkos::View<T*****, Layout, ExecSpace>;
+template <typename T>
+using View6D = Kokkos::View<T******, Layout, ExecSpace>;
 
 template <typename T>
 using HostView1D = Kokkos::View<T*, Kokkos::HostSpace>;
@@ -40,6 +44,10 @@ template <typename T>
 using HostView3D = Kokkos::View<T***, Kokkos::HostSpace>;
 template <typename T>
 using HostView4D = Kokkos::View<T****, Kokkos::HostSpace>;
+template <typename T>
+using HostView5D = Kokkos::View<T*****, Kokkos::HostSpace>;
+template <typename T>
+using HostView6D = Kokkos::View<T******, Kokkos::HostSpace>;
 
 #ifdef KOKKOS_ENABLE_CUDA
 template <typename T>
@@ -50,6 +58,10 @@ template <typename T>
 using DeviceViewType3D = Kokkos::View<T***, Kokkos::CudaSpace>;
 template <typename T>
 using DeviceViewType4D = Kokkos::View<T****, Kokkos::CudaSpace>;
+template <typename T>
+using DeviceViewType5D = Kokkos::View<T*****, Kokkos::CudaSpace>;
+template <typename T>
+using DeviceViewType6D = Kokkos::View<T******, Kokkos::CudaSpace>;
 #endif
 
 void initializeKokkos() { Kokkos::initialize(); }
@@ -139,6 +151,58 @@ View4D<T> numpyArrayToView4D(const py::array_t<T, py::array::c_style>& array) {
 }
 
 template <typename T>
+View5D<T> numpyArrayToView5D(const py::array_t<T, py::array::c_style>& array) {
+  py::buffer_info info = array.request();
+  T* data_ptr = static_cast<T*>(info.ptr);
+
+#ifdef KOKKOS_ENABLE_CUDA
+  typedef DeviceViewType5D<T> ViewType;
+  ViewType view("view", info.shape[0], info.shape[1], info.shape[2], info.shape[3], info.shape[4]);
+  typename ViewType::HostMirror hostview(data_ptr, info.shape[0], info.shape[1], info.shape[2],
+                                         info.shape[3], info.shape[4]);
+  Kokkos::deep_copy(view, hostview);
+#else
+
+  // typedef HostView5D<T> ViewType;
+  // ViewType view(data_ptr, info.shape[0], info.shape[1], info.shape[2], info.shape[3],
+  // info.shape[4]);
+  HostView5D<T> view("view", info.shape[0], info.shape[1], info.shape[2], info.shape[3],
+                     info.shape[4]);
+  std::memcpy(
+      view.data(), data_ptr,
+      info.shape[0] * info.shape[1] * info.shape[2] * info.shape[3] * info.shape[4] * sizeof(T));
+#endif
+
+  return view;
+}
+
+template <typename T>
+View6D<T> numpyArrayToView6D(const py::array_t<T, py::array::c_style>& array) {
+  py::buffer_info info = array.request();
+  T* data_ptr = static_cast<T*>(info.ptr);
+
+#ifdef KOKKOS_ENABLE_CUDA
+  typedef DeviceViewType6D<T> ViewType;
+  ViewType view("view", info.shape[0], info.shape[1], info.shape[2], info.shape[3], info.shape[4],
+                info.shape[5]);
+  typename ViewType::HostMirror hostview(data_ptr, info.shape[0], info.shape[1], info.shape[2],
+                                         info.shape[3], info.shape[4], info.shape[5]);
+  Kokkos::deep_copy(view, hostview);
+#else
+  // typedef HostView6D<T> ViewType;
+  // ViewType view(data_ptr, info.shape[0], info.shape[1], info.shape[2], info.shape[3],
+  // info.shape[4], info.shape[5]);
+  HostView6D<T> view("view", info.shape[0], info.shape[1], info.shape[2], info.shape[3],
+                     info.shape[4], info.shape[5]);
+  std::memcpy(view.data(), data_ptr,
+              info.shape[0] * info.shape[1] * info.shape[2] * info.shape[3] * info.shape[4] *
+                  info.shape[5] * sizeof(T));
+#endif
+
+  return view;
+}
+
+template <typename T>
 py::array_t<T, py::array::c_style> viewToNumpyArray1D(const View1D<T>& view) {
   auto shape = view.extent(0);
   auto result = py::array_t<T>(shape);
@@ -206,6 +270,44 @@ py::array_t<T, py::array::c_style> viewToNumpyArray4D(const View4D<T>& view) {
   std::memcpy(ptr, hostview.data(), shape * shape1 * shape2 * shape3 * sizeof(T));
 #else
   std::memcpy(ptr, view.data(), shape * shape1 * shape2 * shape3 * sizeof(T));
+#endif
+
+  return result;
+}
+
+template <typename T>
+py::array_t<T, py::array::c_style> viewToNumpyArray5D(const View5D<T>& view) {
+  auto shape = view.extent(0), shape1 = view.extent(1), shape2 = view.extent(2),
+       shape3 = view.extent(3), shape4 = view.extent(4);
+  auto result = py::array_t<T>(shape * shape1 * shape2 * shape3 * shape4);
+  py::buffer_info buf = result.request();
+  T* ptr = static_cast<T*>(buf.ptr);
+
+#ifdef KOKKOS_ENABLE_CUDA
+  typename View5D<T>::HostMirror hostview = Kokkos::create_mirror_view(view);
+  Kokkos::deep_copy(hostview, view);
+  std::memcpy(ptr, hostview.data(), shape * shape1 * shape2 * shape3 * shape4 * sizeof(T));
+#else
+  std::memcpy(ptr, view.data(), shape * shape1 * shape2 * shape3 * shape4 * sizeof(T));
+#endif
+
+  return result;
+}
+
+template <typename T>
+py::array_t<T, py::array::c_style> viewToNumpyArray6D(const View6D<T>& view) {
+  auto shape = view.extent(0), shape1 = view.extent(1), shape2 = view.extent(2),
+       shape3 = view.extent(3), shape4 = view.extent(4), shape5 = view.extent(5);
+  auto result = py::array_t<T>(shape * shape1 * shape2 * shape3 * shape4 * shape5);
+  py::buffer_info buf = result.request();
+  T* ptr = static_cast<T*>(buf.ptr);
+
+#ifdef KOKKOS_ENABLE_CUDA
+  typename View6D<T>::HostMirror hostview = Kokkos::create_mirror_view(view);
+  Kokkos::deep_copy(hostview, view);
+  std::memcpy(ptr, hostview.data(), shape * shape1 * shape2 * shape3 * shape4 * shape5 * sizeof(T));
+#else
+  std::memcpy(ptr, view.data(), shape * shape1 * shape2 * shape3 * shape4 * shape5 * sizeof(T));
 #endif
 
   return result;
