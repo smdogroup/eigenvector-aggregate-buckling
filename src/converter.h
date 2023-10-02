@@ -9,14 +9,14 @@
 namespace py = pybind11;
 
 #ifdef KOKKOS_ENABLE_CUDA
-#define MemSpace Kokkos::CudaSpace
+#define MS Kokkos::CudaSpace
 #endif
 
-#ifndef MemSpace
-#define MemSpace Kokkos::HostSpace
+#ifndef MS
+#define MS Kokkos::HostSpace
 #endif
 
-using ExecSpace = MemSpace::execution_space;
+using ExecSpace = MS::execution_space;
 using RangePolicy = Kokkos::RangePolicy<ExecSpace>;
 using TeamPolicy = Kokkos::TeamPolicy<ExecSpace>;
 using TeamHandle = TeamPolicy::member_type;
