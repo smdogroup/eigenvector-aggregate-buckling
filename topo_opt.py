@@ -1,10 +1,9 @@
 import argparse
 from collections import OrderedDict
-import inspect  # for debug
-import multiprocessing as multiprocessing
 import os
 import shutil as shutil
 from shutil import rmtree
+import sys
 import time
 from timeit import default_timer as timer
 
@@ -12,20 +11,18 @@ from icecream import ic
 import matplotlib.pylab as plt
 import matplotlib.tri as tri
 import mpmath as mp
+import numpy
 import numpy as np
 from paropt import ParOpt
 from scipy import sparse, spatial
-from scipy.linalg import eigh
+from scipy.linalg import cholesky, eigh, lu
 from scipy.sparse import coo_matrix, linalg
 
 import kokkos as kokkos
 from other.utils import time_this, timer_set_log_path
+from test_lobpcg import lobpcg4
 
-
-# defind a function to print line number
-def check():
-    print(inspect.currentframe().f_back.f_lineno)
-    return
+# numpy.set_printoptions(threshold=sys.maxsize)
 
 
 class Logger:
@@ -500,7 +497,8 @@ class TopologyAnalysis:
         density=1.0,
         epsilon=0.3,
         assume_same_element=False,
-        check=False,
+        check_gradient=False,
+        check_kokkos=False,
         prob="natural_frequency",
         kokkos=False,
     ):
@@ -531,7 +529,8 @@ class TopologyAnalysis:
         self.K0 = None
         self.M0 = None
 
-        self.check = check
+        self.check_gradient = check_gradient
+        self.check_kokkos = check_kokkos
         self.prob = prob
         self.kokkos = kokkos
 
@@ -607,7 +606,7 @@ class TopologyAnalysis:
         Assemble the stiffness matrix
         """
 
-        if not self.kokkos or self.check:
+        if not self.kokkos or self.check_kokkos:
             # Average the density to get the element-wise density
             rhoE = 0.25 * (
                 rho[self.conn[:, 0]]
@@ -665,11 +664,12 @@ class TopologyAnalysis:
                         Ke_python += np.einsum("n,nij,nik,nkl -> njl", detJ, Be, C, Be)
                 Ke_python = Ke_python.flatten()
 
-        if self.kokkos or self.check:
+        if self.kokkos or self.check_kokkos:
             Ke_kokkos = kokkos.assemble_stiffness_matrix(
-                self.X,
-                self.conn,
                 rho,
+                self.detJ,
+                self.Be,
+                self.conn,
                 self.C0,
                 self.rho0_K,
                 self.ptype_K,
@@ -677,7 +677,7 @@ class TopologyAnalysis:
                 self.q,
             )
 
-        if self.check:
+        if self.check_kokkos:
             ic(np.allclose(Ke_python, Ke_kokkos))
 
         if not self.kokkos:
@@ -699,7 +699,7 @@ class TopologyAnalysis:
         Compute the derivative of the stiffness matrix times the vectors psi and u
         """
         # if don't have the kokkos version, use the python version
-        if not self.kokkos or self.check:
+        if not self.kokkos or self.check_kokkos:
             # Average the density to get the element-wise density
             rhoE = 0.25 * (
                 rho[self.conn[:, 0]]
@@ -768,11 +768,12 @@ class TopologyAnalysis:
                 np.add.at(dKdrho_python, self.conn[:, i], dfdrhoE)
             dKdrho_python *= 0.25
 
-        if self.kokkos or self.check:
+        if self.kokkos or self.check_kokkos:
             dKdrho_kokkos = kokkos.stiffness_matrix_derivative(
-                self.X,
-                self.conn,
                 rho,
+                self.detJ,
+                self.Be,
+                self.conn,
                 u,
                 psi,
                 self.C0,
@@ -781,7 +782,7 @@ class TopologyAnalysis:
                 self.q,
             )
 
-        if self.check:
+        if self.check_kokkos:
             ic(np.allclose(dKdrho_python, dKdrho_kokkos))
 
         if not self.kokkos:
@@ -952,7 +953,7 @@ class TopologyAnalysis:
         """
         Compute the stress stiffness matrix for buckling, given the displacement path u
         """
-        if not self.kokkos or self.check:
+        if not self.kokkos or self.check_kokkos:
             # Average the density to get the element-wise density
             rhoE = 0.25 * (
                 rho[self.conn[:, 0]]
@@ -1033,13 +1034,14 @@ class TopologyAnalysis:
 
                 Ge_python = Ge_python.flatten()
 
-        if self.kokkos or self.check:
-            # use the kokkos version from stiffness library
+        if self.kokkos or self.check_kokkos:
             Ge_kokkos = kokkos.assemble_stress_stiffness(
-                self.X,
-                self.conn,
                 rho,
                 u,
+                self.detJ,
+                self.Be,
+                self.Te,
+                self.conn,
                 self.C0,
                 self.rho0_K,
                 self.ptype_K,
@@ -1047,7 +1049,7 @@ class TopologyAnalysis:
                 self.q,
             )
 
-        if self.check:
+        if self.check_kokkos:
             ic(np.allclose(Ge_python, Ge_kokkos))
 
         if not self.kokkos:
@@ -1061,6 +1063,7 @@ class TopologyAnalysis:
 
         return G
 
+    @time_this
     def stress_stiffness_derivative(self, rho, u, psi, phi, solver):
         """
         Compute the derivative of psi^{T} * G(u, x) * phi using the adjoint method.
@@ -1072,7 +1075,7 @@ class TopologyAnalysis:
         Given the right-hand-side rhs. ie. sol = solver(rhs)
         """
 
-        if not self.kokkos or self.check:
+        if not self.kokkos or self.check_kokkos:
             # Average the density to get the element-wise density
             rhoE_python = 0.25 * (
                 rho[self.conn[:, 0]]
@@ -1151,12 +1154,14 @@ class TopologyAnalysis:
             np.add.at(dfdu_python, 2 * self.conn, dfdue[:, 0::2])
             np.add.at(dfdu_python, 2 * self.conn + 1, dfdue[:, 1::2])
 
-        if self.kokkos or self.check:
+        if self.kokkos or self.check_kokkos:
             rhoE_kokkos, dfdu_kokkos, dfdC_kokkos = kokkos.stress_stiffness_derivative(
-                self.X,
-                self.conn,
                 rho,
                 u,
+                self.detJ,
+                self.Be,
+                self.Te,
+                self.conn,
                 psi,
                 phi,
                 self.C0,
@@ -1168,7 +1173,7 @@ class TopologyAnalysis:
 
             dfdC_kokkos = np.reshape(dfdC_kokkos, (self.nelems, 3, 3))
 
-        if self.check:
+        if self.check_kokkos:
             ic(np.allclose(rhoE_python, rhoE_kokkos))
             ic(np.allclose(dfdu_python, dfdu_kokkos))
             ic(np.allclose(dfdC_python, dfdC_kokkos))
@@ -1233,6 +1238,16 @@ class TopologyAnalysis:
         temp[self.reduced] = vec[:]
         return temp
 
+    def full_matrix(self, mat):
+        """
+        Transform from a reduced matrix without dirichlet BCs to the full matrix
+        """
+        temp = np.zeros((self.nvars, self.nvars), dtype=mat.dtype)
+        for i in range(len(self.reduced)):
+            for j in range(len(self.reduced)):
+                temp[self.reduced[i], self.reduced[j]] = mat[i, j]
+        return temp
+
     def solve(self, x):
         """
         Perform a linear static analysis
@@ -1241,13 +1256,13 @@ class TopologyAnalysis:
         fr = self.reduce_vector(self.f)
 
         # Method 1: use the factorized matrix
-        Kfact = linalg.factorized(self.Kr)
-        ur = Kfact(fr)
-        u = self.full_vector(ur)
+        # Kfact = linalg.factorized(self.Kr)
+        # ur = Kfact(fr)
+        # u = self.full_vector(ur)
 
         # Method 2: use the sparse solver
-        # ur = sparse.linalg.spsolve(self.Kr, fr)
-        # u = self.full_vector(ur)
+        ur = sparse.linalg.spsolve(self.Kr, fr)
+        u = self.full_vector(ur)
 
         return u
 
@@ -1407,17 +1422,15 @@ class TopologyAnalysis:
         self.dA = lambda q1, q2: self.stiffness_matrix_derivative(self.rho, q1, q2)
         self.dB = lambda q1, q2: self.mass_matrix_derivative(self.rho, q1, q2)
         self.lam = self.eigs  # Ar @ Qr = lam * Br @ Qr
-        self.lam_min = np.min(self.lam)
 
         # compute eta
         self.ks_rho = ks_rho
-        eta = np.exp(-self.ks_rho * (self.lam - self.lam_min))
+        eta = np.exp(-self.ks_rho * (self.lam - np.min(self.lam)))
         eta_sum = np.sum(eta)
         eta = eta / eta_sum
 
         self.N = len(eta[eta > 1e-30])
         self.eta = eta[: self.N]
-        self.eta_sum = np.sum(self.eta)
 
         ic(self.ks_rho)
         ic(eigs)
@@ -1428,13 +1441,60 @@ class TopologyAnalysis:
         return np.sqrt(self.eigs)
 
     def solve_buckling(
-        self, x, k=6, ks_rho=1000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
+        self, x, k=20, ks_rho=3000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
     ):
         if k > len(self.reduced):
             k = len(self.reduced)
 
         # Compute the density at each node
         self.rho = self.fltr.apply(x)
+
+        # Compute detJ, Be, and Te
+        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+        xe = self.X[self.conn, 0]
+        ye = self.X[self.conn, 1]
+
+        self.detJ = np.zeros((2, 2, self.nelems))
+        self.Be = np.zeros((2, 2, self.nelems, 3, 8))
+        self.Be00 = np.zeros((self.nelems, 3, 8))
+        self.Te = np.zeros((2, 2, self.nelems, 3, 4, 4))
+
+        for j in range(2):
+            for i in range(2):
+                xi = gauss_pts[i]
+                eta = gauss_pts[j]
+                if not self.kokkos or self.check_kokkos:
+                    Be_python = np.zeros((self.nelems, 3, 8))
+                    Te_python = np.zeros((self.nelems, 3, 4, 4))
+                    detJ_python = _populate_Be_and_Te(
+                        self.nelems, xi, eta, xe, ye, Be_python, Te_python
+                    )
+                    if i == 0 and j == 0:
+                        _populate_Be(self.nelems, 0.0, 0.0, xe, ye, self.Be00)
+
+                if self.kokkos or self.check_kokkos:
+                    detJ_kokkos, Be_kokkos, Te_kokkos = kokkos.populate_Be_Te(
+                        xi, eta, xe, ye
+                    )
+                    Be_kokkos = Be_kokkos.reshape((self.nelems, 3, 8))
+                    Te_kokkos = Te_kokkos.reshape((self.nelems, 3, 4, 4))
+                    if i == 0 and j == 0:
+                        _, self.Be00 = kokkos.populate_Be(0.0, 0.0, xe, ye)
+                        self.Be00 = self.Be00.reshape((self.nelems, 3, 8))
+
+                if self.check_kokkos:
+                    ic(np.allclose(detJ_python, detJ_kokkos))
+                    ic(np.allclose(Be_python, Be_kokkos))
+                    ic(np.allclose(Te_python, Te_kokkos))
+
+                if not self.kokkos:
+                    self.detJ[i, j, :] = detJ_python
+                    self.Be[i, j, :, :, :] = Be_python
+                    self.Te[i, j, :, :, :, :] = Te_python
+                else:
+                    self.detJ[i, j, :] = detJ_kokkos
+                    self.Be[i, j, :, :, :] = Be_kokkos
+                    self.Te[i, j, :, :, :, :] = Te_kokkos
 
         K = self.assemble_stiffness_matrix(self.rho)
         Kr = self.reduce_matrix(K)
@@ -1453,19 +1513,22 @@ class TopologyAnalysis:
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
         ic("Solving eigenvalue problem")
-        if k == len(self.reduced):
-            eigs, Qr = eigh(Kr.todense(), Gr.todense())
+        start = time.time()
+
+        if k == len(self.reduced) or (
+            self.check_gradient and self.rho.dtype == np.complex128
+        ):
+            mu, Qr = eigh(Gr.todense(), Kr.todense())
+            mu, Qr = mu[:k], Qr[:, :k]
             pass
         else:
             # Method 0: this is the fast and most accurate way to solve the eigenvalue problem
-            time_start = time.time()
             mu, Qr = sparse.linalg.eigsh(Gr, M=Kr, k=k, sigma=sigma, which="SM")
-            eigs = -1.0 / mu
-            time_end = time.time()
 
-        ic("Time to solve eigenvalue problem:", time_end - time_start)
+        eigs = -1.0 / mu
+        end = time.time()
+        print("scipy::eigsh", end - start)
         ic(np.allclose(Kr @ Qr, -Gr @ Qr @ np.diag(eigs), atol=1e-10))
-        ic("Done solving eigenvalue problem")
 
         self.QGQ = np.zeros(k, dtype=x.dtype)
         for i in range(k):
@@ -1484,41 +1547,30 @@ class TopologyAnalysis:
             for i in range(k):
                 nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
 
-        self.A = G
-        self.B = K
-        self.Kr = Kr
-
-        self.eigs = eigs
-        self.mu = mu
-        self.Q = Q
-
-        self.u = u
-        self.Bfact = Kfact
+        self.A, self.B = G, K
+        self.Kr, self.u, self.Bfact = Kr, u, Kfact
 
         self.dA = lambda q1, q2: self.stress_stiffness_derivative(
             self.rho, self.u, q1, q2, self.Bfact
         )
         self.dB = lambda q1, q2: self.stiffness_matrix_derivative(self.rho, q1, q2)
-        self.lam = self.mu  # Ar @ Qr = lam * Br @ Qr
-        self.lam_min = np.min(self.lam)
 
-        # compute eta
-        self.ks_rho = ks_rho
-        eta = np.exp(-self.ks_rho * (self.lam - self.lam_min))
+        self.eigs, self.lam, self.Q = eigs, mu, Q  # Ar @ Qr = lam * Br @ Qr
+
+        eta = np.exp(-ks_rho * (self.lam - np.min(self.lam)))
         eta_sum = np.sum(eta)
         eta = eta / eta_sum
 
-        self.N = len(eta[eta > 1e-30])
+        self.N = len(eta[eta > 1e-50])
+        self.ks_rho = ks_rho
         self.eta = eta[: self.N]
-        self.eta_sum = np.sum(self.eta)
 
-        ic(self.ks_rho)
+        ic(self.ks_rho, self.N)
         ic(eigs)
         ic(eta)
-        ic(self.N)
 
-        # Return natural frequencies
-        return np.sqrt(self.eigs)
+        omega = np.sqrt(self.eigs)
+        return omega
 
     def ks_omega(self, ks_rho=100.0):
         """
@@ -1594,6 +1646,20 @@ class TopologyAnalysis:
 
     @time_this
     def eigenvector_displacement(self, ks_rho=100.0):
+        # Ar = self.reduce_matrix(self.A)
+        # Br = self.reduce_matrix(self.B)
+
+        # lam, Q = eigh(Ar.todense(), Br.todense())
+
+        # eta = np.exp(-self.ks_rho * (lam - np.min(lam)))
+        # eta = eta / np.sum(eta)
+
+        # D = np.zeros((self.nvars, self.nvars))
+        # D[self.D_index, self.D_index] = 1.0
+        # D = self.reduce_matrix(D)
+
+        # h = np.trace(np.diag(eta) @ Q.T @ D @ Q)
+
         h = 0.0
         for i in range(self.N):
             q = self.Q[self.D_index, i]
@@ -1647,7 +1713,7 @@ class TopologyAnalysis:
         # Set the value of the derivative
         dhdrho = self.kernel(
             self.ks_rho,
-            self.eta_sum,
+            self.eta,
             self.lam,
             self.Q,
             h,
@@ -1658,6 +1724,27 @@ class TopologyAnalysis:
             D,
             self.reduced,
         )
+
+        # if self.check_gradient:
+        #     dhdrho_exact = self.kernel_exact(
+        #         self.ks_rho,
+        #         self.eta_full,
+        #         self.lam_full,
+        #         self.Q_full,
+        #         h,
+        #         self.A,
+        #         self.B,
+        #         self.dA,
+        #         self.dB,
+        #         D,
+        #         self.reduced,
+        #     )
+
+        #     error_displacement_derivatives = np.linalg.norm(
+        #         dhdrho_exact - dhdrho
+        #     ) / np.linalg.norm(dhdrho_exact)
+
+        #     ic(error_displacement_derivatives)
 
         return self.fltr.applyGradient(dhdrho, x)
 
@@ -1678,24 +1765,24 @@ class TopologyAnalysis:
         # Compute the stress relaxation factor
         relax = rhoE / (rhoE + self.epsilon * (1.0 - rhoE))
 
-        Be = np.zeros((self.nelems, 3, 8))
+        # Be = np.zeros((self.nelems, 3, 8))
 
-        # Compute the x and y coordinates of each element
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
+        # # Compute the x and y coordinates of each element
+        # xe = self.X[self.conn, 0]
+        # ye = self.X[self.conn, 1]
 
-        # Compute the stress in the middle of the element
-        xi = 0.0
-        eta = 0.0
-        _populate_Be(self.nelems, xi, eta, xe, ye, Be)
+        # # Compute the stress in the middle of the element
+        # xi = 0.0
+        # eta = 0.0
+        # _populate_Be(self.nelems, xi, eta, xe, ye, Be)
 
         qe = np.zeros((self.nelems, 8))
         qe[:, ::2] = u[2 * self.conn]
         qe[:, 1::2] = u[2 * self.conn + 1]
 
         # Compute the stresses in each element
-        strain = np.einsum("nik,nk -> ni", Be, qe)
-        s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+        strain = np.einsum("nik,nk -> ni", self.Be00, qe)
+        s = np.einsum("ij,njk,nk -> ni", self.C0, self.Be00, qe)
 
         # Compute the von Mises stress
         vonmises = (
@@ -1728,7 +1815,7 @@ class TopologyAnalysis:
         relax = rhoE / (rhoE + self.epsilon * (1.0 - rhoE))
 
         if self.assume_same_element:
-            Be_ = np.zeros((3, 8), dtype=rho.dtype)
+            Be_ = np.zeros((3, 8))
 
             # Compute the x and y coordinates of each element
             xe_ = self.X[self.conn[0], 0]
@@ -1760,16 +1847,16 @@ class TopologyAnalysis:
                 ) / allowable**2
 
         else:
-            Be = np.zeros((self.nelems, 3, 8), dtype=rho.dtype)
+            # Be = np.zeros((self.nelems, 3, 8))
 
-            # Compute the x and y coordinates of each element
-            xe = self.X[self.conn, 0]
-            ye = self.X[self.conn, 1]
+            # # Compute the x and y coordinates of each element
+            # xe = self.X[self.conn, 0]
+            # ye = self.X[self.conn, 1]
 
-            # Compute the stress in the middle of the element
-            xi = 0.0
-            eta_ = 0.0
-            _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
+            # # Compute the stress in the middle of the element
+            # xi = 0.0
+            # eta_ = 0.0
+            # _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
 
             for k in range(len(eta)):
                 qe = np.zeros((self.nelems, 8), dtype=rho.dtype)
@@ -1777,7 +1864,7 @@ class TopologyAnalysis:
                 qe[:, 1::2] = Q[2 * self.conn + 1, k]
 
                 # Compute the stresses in each element
-                s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+                s = np.einsum("ij,njk,nk -> ni", self.C0, self.Be00, qe)
 
                 # Add the contributions from the von Mises stress
                 stress += (
@@ -1825,7 +1912,7 @@ class TopologyAnalysis:
         eta_stress = np.exp(ks_rho_stress * (stress - max_stress))
         eta_stress = eta_stress / np.sum(eta_stress)
 
-        if self.check:
+        if self.check_gradient:
             ic(stress)
             ic(eta_stress)
 
@@ -1837,7 +1924,7 @@ class TopologyAnalysis:
         # Set the value of the derivative
         dhdrho = self.kernel(
             self.ks_rho,
-            self.eta_sum,
+            self.eta,
             self.lam,
             self.Q,
             h_eta,
@@ -1852,6 +1939,31 @@ class TopologyAnalysis:
         dhdrho += self.get_stress_values_deriv(
             self.rho, eta_stress, self.eta, self.Q, allowable=allowable
         )
+
+        # if self.check_gradient:
+        #     dhdrho_exact = self.kernel_exact(
+        #         self.ks_rho,
+        #         self.eta_full,
+        #         self.lam_full,
+        #         self.Q_full,
+        #         h_eta,
+        #         self.A,
+        #         self.B,
+        #         self.dA,
+        #         self.dB,
+        #         D,
+        #         self.reduced,
+        #     )
+
+        #     dhdrho_exact += self.get_stress_values_deriv(
+        #         self.rho, eta_stress, self.eta, self.Q, allowable=allowable
+        #     )
+
+        #     error_stress_derivative = np.linalg.norm(
+        #         dhdrho_exact - dhdrho
+        #     ) / np.linalg.norm(dhdrho_exact)
+
+        #     ic(error_stress_derivative)
 
         return self.fltr.applyGradient(dhdrho, x)
 
@@ -1904,16 +2016,16 @@ class TopologyAnalysis:
                 ) / allowable**2
 
         else:
-            Be = np.zeros((self.nelems, 3, 8))
+            # Be = np.zeros((self.nelems, 3, 8))
 
-            # Compute the x and y coordinates of each element
-            xe = self.X[self.conn, 0]
-            ye = self.X[self.conn, 1]
+            # # Compute the x and y coordinates of each element
+            # xe = self.X[self.conn, 0]
+            # ye = self.X[self.conn, 1]
 
-            # Compute the stress in the middle of the element
-            xi = 0.0
-            eta_ = 0.0
-            _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
+            # # Compute the stress in the middle of the element
+            # xi = 0.0
+            # eta_ = 0.0
+            # _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
 
             for k in range(len(eta)):
                 qe = np.zeros((self.nelems, 8))
@@ -1921,7 +2033,7 @@ class TopologyAnalysis:
                 qe[:, 1::2] = Q[2 * self.conn + 1, k]
 
                 # Compute the stresses in each element
-                s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+                s = np.einsum("ij,njk,nk -> ni", self.C0, self.Be00, qe)
 
                 # Add the contributions from the von Mises stress
                 dfdrhoE += (
@@ -1983,30 +2095,30 @@ class TopologyAnalysis:
             Dqe = np.einsum("ni,ij,jk -> nk", ds, self.C0, Be_)
 
         else:
-            Be = np.zeros((self.nelems, 3, 8))
+            # Be = np.zeros((self.nelems, 3, 8))
 
-            # Compute the x and y coordinates of each element
-            xe = self.X[self.conn, 0]
-            ye = self.X[self.conn, 1]
+            # # Compute the x and y coordinates of each element
+            # xe = self.X[self.conn, 0]
+            # ye = self.X[self.conn, 1]
 
-            # Compute the stress in the middle of the element
-            xi = 0.0
-            eta_ = 0.0
-            _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
+            # # Compute the stress in the middle of the element
+            # xi = 0.0
+            # eta_ = 0.0
+            # _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
 
             qe = np.zeros((self.nelems, 8))
             qe[:, ::2] = q[2 * self.conn]
             qe[:, 1::2] = q[2 * self.conn + 1]
 
             # Compute the stresses in each element
-            s = np.einsum("ij,njk,nk -> ni", self.C0, Be, qe)
+            s = np.einsum("ij,njk,nk -> ni", self.C0, self.Be00, qe)
 
             ds = np.zeros((self.nelems, 3))
             ds[:, 0] = eta_stress * relax * (s[:, 0] - 0.5 * s[:, 1]) / allowable**2
             ds[:, 1] = eta_stress * relax * (s[:, 1] - 0.5 * s[:, 0]) / allowable**2
             ds[:, 2] = eta_stress * relax * 3.0 * s[:, 2] / allowable**2
 
-            Dqe = np.einsum("ni,ij,njk -> nk", ds, self.C0, Be)
+            Dqe = np.einsum("ni,ij,njk -> nk", ds, self.C0, self.Be00)
 
         Dq = np.zeros(self.nvars)
         for i in range(4):
@@ -2016,7 +2128,7 @@ class TopologyAnalysis:
         return Dq
 
     @time_this
-    def kernel(self, ks_rho, eta_sum, lam, Q, h, A, B, dA, dB, D, reduced):
+    def kernel(self, ks_rho, eta, lam, Q, h, A, B, dA, dB, D, reduced):
         """
         For displacement constraints:
             a = None
@@ -2029,14 +2141,16 @@ class TopologyAnalysis:
         dA = dA(u, v)
         dB = dB(u, v)
         """
-        if self.check:
-            Ar = self.reduce_matrix(A)
-            Br = self.reduce_matrix(B)
-            for i in range(self.N):
-                qr = self.Q[self.reduced, i]
-                ic(np.allclose(Ar @ qr, lam[i] * Br @ qr))
+
+        Ar = self.reduce_matrix(A)
+        Br = self.reduce_matrix(B)
+
+        if self.check_gradient:
+            Qr = self.reduce_vector(Q)
+            ic(np.allclose(Ar @ Qr, Br @ Qr @ np.diag(lam)))
 
         dh = np.zeros(self.nnodes)
+        eta_sum = np.sum(eta)
 
         for j in range(self.N):
             for i in range(j + 1):
@@ -2054,10 +2168,7 @@ class TopologyAnalysis:
 
                 dh += scalar * (Eij * qAdotq - Gij * qBdotq)
 
-        Ar = A[reduced, :][:, reduced]
-        Br = B[reduced, :][:, reduced]
         Br = Br.tocsc()
-
         C = B.dot(Q)
 
         nr = len(reduced)
@@ -2085,7 +2196,7 @@ class TopologyAnalysis:
         for k in range(self.N):
             # Compute B * uk = D * qk
             Dq = D(Q[:, k])
-            bkr = -2 * self.eta[k] * Dq[reduced]
+            bkr = -2 * eta[k] * Dq[reduced]
 
             # Form the matrix
             def matrix(x):
@@ -2104,8 +2215,49 @@ class TopologyAnalysis:
             dh += dA(Q[:, k], phi) - lam[k] * dB(Q[:, k], phi)
 
             qDq = np.dot(Q[:, k], Dq)
-            phi = -self.eta[k] * qDq * Q[:, k]
-            dh += dB(Q[:, k], phi)
+            dh -= eta[k] * qDq * dB(Q[:, k], Q[:, k])
+
+        return dh
+
+    @time_this
+    def kernel_exact(self, ks_rho, eta, lam, Q, h, A, B, dA, dB, D, reduced):
+        dh = np.zeros(self.nnodes)
+        eta_sum = np.sum(eta)
+
+        if self.check_gradient:
+            Ar = self.reduce_matrix(A)
+            Br = self.reduce_matrix(B)
+            Qr = self.reduce_vector(Q)
+            ic(np.allclose(Ar @ Qr, Br @ Qr @ np.diag(lam)))
+
+        for j in range(self.nvars):
+            if j + 1 < self.N:
+                a = j + 1
+            else:
+                a = self.N
+
+            for i in range(a):
+                qDq = Q[:, i].T @ D(Q[:, j])
+                qAdotq = dA(Q[:, i], Q[:, j])
+                qBdotq = dB(Q[:, i], Q[:, j])
+
+                if i == j:
+                    scalar = qDq - h
+                else:
+                    scalar = 2 * qDq
+
+                Eij = self.precise(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
+                Gij = self.preciseG(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
+
+                dh += scalar * (Eij * qAdotq - Gij * qBdotq)
+
+            if j % 100 == 0:
+                ic(j / self.nvars)
+
+        for k in range(self.nvars):
+            Dq = D(Q[:, k])
+            qDq = np.dot(Q[:, k], Dq)
+            dh -= eta[k] * qDq * dB(Q[:, k], Q[:, k])
 
         return dh
 
@@ -2168,7 +2320,7 @@ class TopOptProb:
         frequency_scale=1e-2,
         stress_scale=1e-12,
         compliance_scale=1e6,
-        check=False,
+        check_gradient=False,
         domain="square",
     ):
         self.analysis = analysis
@@ -2188,7 +2340,7 @@ class TopOptProb:
         self.stress_scale = stress_scale
         self.compliance_scale = compliance_scale
         self.lb = lb
-        self.check = check
+        self.check_gradient = check_gradient
         self.domain = domain
 
         # Add more non-design constant to matrices
@@ -2245,7 +2397,7 @@ class TopOptProb:
         lb[:] = self.lb
         ub[:] = 1.0
         x[:] = 0.95
-        if self.check:
+        if self.check_gradient:
             np.random.seed(0)
             x[:] = 0.5 + 0.5 * np.random.uniform(size=len(x))
         return
@@ -3646,9 +3798,14 @@ def parse_cmd_args():
         "--maxit", default=200, type=int, help="maximum number of iterations"
     )
     p.add_argument(
-        "--check",
+        "--check-gradient",
         action="store_true",
-        help="perform gradient check and eigencheck and exit",
+        help="perform gradient check",
+    )
+    p.add_argument(
+        "--check-kokkos",
+        action="store_true",
+        help="perform kokkos check",
     )
     p.add_argument(
         "--proj",
@@ -3777,145 +3934,122 @@ def create_folder(args):
     return args
 
 
-def gradient_check(analysis, problem):
+def gradient_check(topo, problem):
     ks_rho_stress = 1.0
-    N = 6
+    N = 20
 
     def init(x):
         if problem == "natural_frequency":
-            _ = analysis.solve_eigenvalue_problem(x, k=N)
+            _ = topo.solve_eigenvalue_problem(x, k=N)
 
         elif problem == "buckling":
-            _ = analysis.solve_buckling(x, k=N)
+            _ = topo.solve_buckling(x, k=N)
 
     def compute_u(f, K):
-        fr = analysis.reduce_vector(f)
-        Kr = analysis.reduce_matrix(K)
+        fr = topo.reduce_vector(f)
+        Kr = topo.reduce_matrix(K)
         Kfact = linalg.factorized(Kr)
         ur = Kfact(fr)
-        u = analysis.full_vector(ur)
+        u = topo.full_vector(ur)
         return u, Kfact
 
     # use the complex step method to check the derivative
     dh = 1e-5
-    x = np.ones(analysis.nnodes)
-    px = np.random.RandomState(0).rand(analysis.nnodes)
-    q1 = np.random.RandomState(1).rand(analysis.nvars)
-    q2 = np.random.RandomState(2).rand(analysis.nvars)
+    x = np.ones(topo.nnodes)
+    px = np.random.RandomState(0).rand(topo.nnodes)
+    q1 = np.random.RandomState(1).rand(topo.nvars)
+    q2 = np.random.RandomState(2).rand(topo.nvars)
 
     init(x)
-    rho = analysis.fltr.apply(x)
-    K = analysis.assemble_stiffness_matrix(rho)
-    u, Kfact = compute_u(analysis.f, K)
+    K = topo.assemble_stiffness_matrix(topo.rho)
+    u, Kfact = compute_u(topo.f, K)
 
     if problem == "natural_frequency":
-        d_omega = analysis.ks_omega_derivative(rho) @ px
+        d_omega = topo.ks_omega_derivative(topo.rho) @ px
     elif problem == "buckling":
-        d_omega = analysis.ks_buckling_derivative(rho) @ px
+        d_omega = topo.ks_buckling_derivative(topo.rho) @ px
 
-    dK = analysis.stiffness_matrix_derivative(rho, q1, q2) @ px
-    dM = analysis.mass_matrix_derivative(rho, q1, q2) @ px
-    dG = analysis.stress_stiffness_derivative(rho, u, q1, q2, Kfact) @ px
-    dis_grad = analysis.eigenvector_displacement_deriv(x, analysis.ks_rho) @ px
-    stress_grad = (
-        analysis.eigenvector_stress_derivative(x, analysis.ks_rho, ks_rho_stress) @ px
-    )
+    dK = topo.stiffness_matrix_derivative(topo.rho, q1, q2) @ px
+    dM = topo.mass_matrix_derivative(topo.rho, q1, q2) @ px
+    dG = topo.stress_stiffness_derivative(topo.rho, u, q1, q2, Kfact) @ px
+    dis_grad = topo.eigenvector_displacement_deriv(x, topo.ks_rho) @ px
+    stress_grad = topo.eigenvector_stress_derivative(x, topo.ks_rho, ks_rho_stress) @ px
 
-    # s = analysis.get_stress_values(rho, analysis.eta, analysis.Q)
+    # s = topo.get_stress_values(rho, topo.eta, topo.Q)
     # eta_stress = np.exp(ks_rho_stress * (s - np.max(s)))
     # eta_stress = eta_stress / np.sum(eta_stress)
-    # ds = analysis.get_stress_values_deriv(rho, eta_stress, analysis.eta, analysis.Q) @ px
+    # ds = topo.get_stress_values_deriv(rho, eta_stress, topo.eta, topo.Q) @ px
 
     # use central difference to check the derivative
     init(x + dh * px)
-    rho1 = analysis.fltr.apply(x + dh * px)
-
     if problem == "natural_frequency":
-        omega1 = analysis.ks_omega()
+        omega1 = topo.ks_omega()
     elif problem == "buckling":
-        omega1 = analysis.ks_buckling()
+        omega1 = topo.ks_buckling()
 
-    K1 = analysis.assemble_stiffness_matrix(rho1)
-    M1 = analysis.assemble_mass_matrix(rho1)
-    u1, _ = compute_u(analysis.f, K1)
-    G1 = analysis.assemble_stress_stiffness(rho1, u1)
-    dis1 = analysis.eigenvector_displacement(analysis.ks_rho)
-    stress1 = analysis.eigenvector_stress(x + dh * px, analysis.ks_rho, ks_rho_stress)
-    # s1 = analysis.get_stress_values(rho1, analysis.eta, analysis.Q)
+    dis1 = topo.eigenvector_displacement(topo.ks_rho)
+    stress1 = topo.eigenvector_stress(x + dh * px, topo.ks_rho, ks_rho_stress)
+    # s1 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     init(x - dh * px)
-    rho2 = analysis.fltr.apply(x - dh * px)
-
     if problem == "natural_frequency":
-        omega2 = analysis.ks_omega()
+        omega2 = topo.ks_omega()
     elif problem == "buckling":
-        omega2 = analysis.ks_buckling()
+        omega2 = topo.ks_buckling()
 
-    K2 = analysis.assemble_stiffness_matrix(rho2)
-    M2 = analysis.assemble_mass_matrix(rho2)
-    u2, _ = compute_u(analysis.f, K2)
-    G2 = analysis.assemble_stress_stiffness(rho2, u2)
-    dis2 = analysis.eigenvector_displacement(analysis.ks_rho)
-    stress2 = analysis.eigenvector_stress(x - dh * px, analysis.ks_rho, ks_rho_stress)
-    # s2 = analysis.get_stress_values(rho2, analysis.eta, analysis.Q)
+    dis2 = topo.eigenvector_displacement(topo.ks_rho)
+    stress2 = topo.eigenvector_stress(x - dh * px, topo.ks_rho, ks_rho_stress)
+    # s2 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     dis_grad_cf = (dis1 - dis2) / (2 * dh)
     stress_grad_cf = (stress1 - stress2) / (2 * dh)
-    K_grad_cf = q1.T @ (K1 - K2) @ q2 / (2 * dh)
-    M_grad_cf = q1.T @ (M1 - M2) @ q2 / (2 * dh)
-    G_grad_cf = q1.T @ (G1 - G2) @ q2 / (2 * dh)
     omega_grad_cf = (omega1 - omega2) / (2 * dh)
     # s_grad_cf = (s1 - s2) / (2 * dh)
-
+    ic(dis_grad_cf)
+    ic(dis_grad)
     error_d_dis_cf = np.abs(dis_grad_cf - dis_grad) / np.abs(dis_grad_cf)
     error_d_stress_cf = np.abs(stress_grad_cf - stress_grad) / np.abs(stress_grad_cf)
-    error_dK_cf = np.abs(K_grad_cf - dK) / np.abs(K_grad_cf)
-    error_dM_cf = np.abs(M_grad_cf - dM) / np.abs(M_grad_cf)
-    error_dG_cf = np.abs(G_grad_cf - dG) / np.abs(G_grad_cf)
     error_d_omega_cf = np.abs(omega_grad_cf - d_omega) / np.abs(omega_grad_cf)
     # error_s_cf = np.abs(s_grad_cf - ds) / np.abs(s_grad_cf)
 
     ic(error_d_dis_cf)
     ic(error_d_stress_cf)
-    ic(error_dK_cf)
-    ic(error_dM_cf)
-    ic(error_dG_cf)
     ic(error_d_omega_cf)
-
     # ic(error_s_cf)
 
-    # dh = 1e-30
-    # init(x + dh * px * 1j)
-    # rho1 = analysis.fltr.apply(x + dh * px * 1j)
-    # dis1 = analysis.eigenvector_displacement(analysis.ks_rho)
-    # stress1 = analysis.eigenvector_stress(x + dh * px * 1j, analysis.ks_rho, ks_rho_stress)
-    # K1 = analysis.assemble_stiffness_matrix(rho1)
-    # M1 = analysis.assemble_mass_matrix(rho1)
-    # u1, _ = compute_u(analysis.f, K1)
-    # G1 = analysis.assemble_stress_stiffness(rho1, u1)
+    dh = 1e-15
+    init(x + dh * px * 1j)
+    dis1 = topo.eigenvector_displacement(topo.ks_rho)
+    stress1 = topo.eigenvector_stress(x + dh * px * 1j, topo.ks_rho, ks_rho_stress)
+    K1 = topo.assemble_stiffness_matrix(topo.rho)
+    M1 = topo.assemble_mass_matrix(topo.rho)
+    u1, _ = compute_u(topo.f, K1)
+    G1 = topo.assemble_stress_stiffness(topo.rho, u1)
 
-    # dis_grad_cs = np.imag(dis1) / dh
-    # stress_grad_cs = np.imag(stress1) / dh
-    # K_grad_cs = q1.T @ np.imag(K1) @ q2 / dh
-    # M_grad_cs = q1.T @ np.imag(M1) @ q2 / dh
-    # G_grad_cs = q1.T @ np.imag(G1) @ q2 / dh
-    # ic(dis_grad_cf)
-    # ic(dis_grad_cs)
-    # ic(dis_grad)
-    # ic(stress_grad_cf)
-    # ic(stress_grad_cs)
-    # ic(stress_grad)
-    # error_dis_cs = np.abs(dis_grad_cs - dis_grad) / np.abs(dis_grad_cs)
-    # error_stress_cs = np.abs(stress_grad_cs - stress_grad) / np.abs(stress_grad_cs)
-    # error_K_cs = np.abs(K_grad_cs - dK) / np.abs(K_grad_cs)
-    # error_M_cs = np.abs(M_grad_cs - dM) / np.abs(M_grad_cs)
-    # error_G_cs = np.abs(G_grad_cs - dG) / np.abs(G_grad_cs)
+    dis_grad_cs = np.imag(dis1) / dh
+    stress_grad_cs = np.imag(stress1) / dh
+    K_grad_cs = q1.T @ np.imag(K1) @ q2 / dh
+    M_grad_cs = q1.T @ np.imag(M1) @ q2 / dh
+    G_grad_cs = q1.T @ np.imag(G1) @ q2 / dh
 
-    # ic(error_dis_cs)
-    # ic(error_stress_cs)
-    # ic(error_K_cs)
-    # ic(error_M_cs)
-    # ic(error_G_cs)
+    ic(dis_grad_cf)
+    ic(dis_grad_cs)
+    ic(dis_grad)
+    ic(stress_grad_cf)
+    ic(stress_grad_cs)
+    ic(stress_grad)
+
+    error_dis_cs = np.abs(dis_grad_cs - dis_grad) / np.abs(dis_grad_cs)
+    error_stress_cs = np.abs(stress_grad_cs - stress_grad) / np.abs(stress_grad_cs)
+    error_K_cs = np.abs(K_grad_cs - dK) / np.abs(K_grad_cs)
+    error_M_cs = np.abs(M_grad_cs - dM) / np.abs(M_grad_cs)
+    error_G_cs = np.abs(G_grad_cs - dG) / np.abs(G_grad_cs)
+
+    ic(error_dis_cs)
+    ic(error_stress_cs)
+    ic(error_K_cs)
+    ic(error_M_cs)
+    ic(error_G_cs)
 
 
 def main(args):
@@ -4016,7 +4150,7 @@ def main(args):
                     D_index = [2 * indx, 2 * indx + 1]
 
     if args.kokkos:
-        kokkos.initialize_kokkos()
+        kokkos.initialize()
 
     # Create the filter
     fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=args.proj)
@@ -4037,7 +4171,8 @@ def main(args):
         q=args.q,
         epsilon=args.stress_relax,
         assume_same_element=args.assume_same_element,
-        check=args.check,
+        check_gradient=args.check_gradient,
+        check_kokkos=args.check_kokkos,
         prob=args.problem,
         kokkos=args.kokkos,
     )
@@ -4070,7 +4205,7 @@ def main(args):
         stress_scale=args.stress_scale,
         compliance_scale=args.compliance_scale,
         dis_ub=args.dis_ub,
-        check=args.check,
+        check_gradient=args.check_gradient,
         domain=args.domain,
     )
 
@@ -4090,7 +4225,7 @@ def main(args):
         mmaopt = mma4py.Optimizer(
             mmaprob, log_name=os.path.join(args.prefix, "mma4py.log")
         )
-        if args.check:
+        if args.check_gradient:
             np.random.seed(0)
             for i in range(5):
                 mmaopt.checkGradients()
@@ -4104,9 +4239,9 @@ def main(args):
 
         paroptprob = ParOptProb(MPI.COMM_SELF, topo)
 
-        if args.check:
-            for i in range(1):
-                gradient_check(analysis, args.problem)
+        if args.check_gradient:
+            for i in range(5):
+                # gradient_check(analysis, args.problem)
                 paroptprob.checkGradients(1e-6)
             exit(0)
 
@@ -4130,7 +4265,7 @@ def main(args):
     topo.evalObjCon(xopt, eval_all=True)
 
     if args.kokkos:
-        kokkos.finalize_kokkos()
+        kokkos.finalize()
 
 
 if __name__ == "__main__":
@@ -4253,3 +4388,40 @@ if __name__ == "__main__":
 #     print("Exact: ", exact)
 #     print("FD: ", fd)
 #     print("Error: ", np.abs(exact - fd) / np.abs(exact))
+
+
+# start = time.time()
+# print("inv2")
+# # use Eigendecomposition of Kr
+# e, v = sparse.linalg.eigsh(Kr)
+# M = v @ np.linalg.inv(np.diag(e)) @ v.T
+# # # Cholesky decomposition of Kr
+# # L = np.linalg.cholesky(Kr.todense())
+# # M = np.linalg.inv(L.T) @ np.linalg.inv(L)
+
+# end = time.time()
+# print("inv2", end - start)
+
+# print("kokkos::lobpcg")
+# start = time.time()
+# mu, Qr = kokkos.lobpcg(
+#     Gr.data,
+#     Gr.indptr,
+#     Gr.indices,
+#     Kr.data,
+#     Kr.indptr,
+#     Kr.indices,
+#     Gr.shape[0],  # number of rows
+#     k,  # number of eigenvalues
+#     M,  # preconditioner
+# )
+
+# A = np.array(Gr.todense())
+# B = np.array(Kr.todense())
+# X = np.eye(Gr.shape[0], k)
+# mu, Qr = lobpcg4(B, X, -A)
+# linalg.lobpcg(Gr, X, B=Kr, largest=False, tol=1e-5, maxiter=500)
+# end = time.time()
+# print("kokkos::lobpcg", end - start)
+# ic(-1.0 / mu)
+# exit()
