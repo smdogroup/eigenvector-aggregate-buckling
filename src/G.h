@@ -6,7 +6,7 @@
 #include <cstring>
 
 #include "converter.h"
-#include "utils.h"
+#include "utils.hpp"
 
 template <typename T>
 View1D<T> populateBeTe(T xi, T eta, const View2D<T>& xe, const View2D<T>& ye, View3D<T>& Be,
