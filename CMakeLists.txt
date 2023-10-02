@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 project(buckling, LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,7 +13,6 @@ add_compile_options(
     -Wno-unused-parameter
     -Wno-sign-compare
 )
-
 
 # Find the required packages
 # find_package(pybind11 REQUIRED)
@@ -41,4 +40,4 @@ target_link_libraries(kokkos
     pybind11::pybind11)
 
 # Add optimization flags specific to the target architecture
-target_compile_options(kokkos PRIVATE -march=native -mtune=native -O3)
+# target_compile_options(kokkos PRIVATE -march=native -mtune=native -O3)

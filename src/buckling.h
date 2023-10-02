@@ -10,7 +10,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "converter.h"
-#include "utils.h"
+#include "utils.hpp"
 
 template <typename T>
 class Buckling {
