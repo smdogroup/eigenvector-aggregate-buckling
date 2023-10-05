@@ -1,15 +1,6 @@
-import matplotlib as mpl
-from matplotlib import cm, ticker
-from matplotlib.lines import Line2D
 import matplotlib.pylab as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mpl_toolkits.mplot3d import Axes3D, proj3d
-import mpmath as mp
 import numpy as np
 import scienceplots
-from scipy import interpolate
-from scipy.linalg import eigh, expm
-from scipy.optimize import minimize
 
 
 def colorbar(mappable, **kwargs):
@@ -27,10 +18,9 @@ def colorbar(mappable, **kwargs):
 
 
 if __name__ == "__main__":
-    # Load data
-    E = np.load("data/E.npy")
-    G = np.load("data/G.npy")
-    
+    E = np.load("./data/E.npy")
+    G = np.load("./data/G.npy")
+
     with plt.style.context(["nature"]):
         fig = plt.figure(figsize=(3.3, 3.3))
         ax = plt.gca()
@@ -43,7 +33,7 @@ if __name__ == "__main__":
             axis="x", which="both", bottom=False, top=True, labelbottom=False
         )
         colorbar(mts, label="$\log_{10}(E / E_{max}$)")
-        plt.savefig("data/E.png", bbox_inches="tight", dpi=1000)
+        plt.savefig("./data/E.png", bbox_inches="tight", dpi=1000)
 
     with plt.style.context(["nature"]):
         fig = plt.figure(figsize=(3.3, 3.3))
@@ -57,4 +47,4 @@ if __name__ == "__main__":
             axis="x", which="both", bottom=False, top=True, labelbottom=False
         )
         colorbar(mts, label="$\log_{10}(G / G_{max}$)")
-        plt.savefig("data/G.png", bbox_inches="tight", dpi=1000)
+        plt.savefig("./data/G.png", bbox_inches="tight", dpi=1000)

@@ -1,5 +1,8 @@
-from time import perf_counter_ns
 import os
+from shutil import rmtree
+from time import perf_counter_ns
+
+import numpy as np
 
 
 class MyProfiler:
@@ -150,3 +153,193 @@ timer_off = MyProfiler.timer_off
 timer_to_stdout = MyProfiler.timer_to_stdout
 timer_set_threshold = MyProfiler.timer_set_threshold
 timer_set_log_path = MyProfiler.timer_set_log_path
+
+
+def create_folder(args):
+    if not os.path.isdir(args.prefix):
+        os.mkdir(args.prefix)
+    if args.confs == ["stress", "frequency"]:
+        args.confs = ["frequency", "stress"]
+    if args.confs == ["frequency", "volume_ub"]:
+        args.confs = ["volume_ub", "frequency"]
+    if args.confs == ["stress", "volume_ub"]:
+        args.confs = ["volume_ub", "stress"]
+    if args.confs == ["volume_ub", "volume_lb"]:
+        args.confs = ["volume_lb", "volume_ub"]
+    if args.confs == ["volume_ub", "displacement"]:
+        args.confs = ["displacement", "volume_ub"]
+
+    name = f"{args.domain}"
+    if not os.path.isdir(os.path.join(args.prefix, name)):
+        os.mkdir(os.path.join(args.prefix, name))
+    args.prefix = os.path.join(args.prefix, name)
+
+    # make a folder inside each domain folder to store the results of each run
+    name2 = f"{args.objf}{args.confs}"
+    if not os.path.isdir(os.path.join(args.prefix, name2)):
+        os.mkdir(os.path.join(args.prefix, name2))
+    args.prefix = os.path.join(args.prefix, name2)
+
+    o = f"{args.optimizer[0]}"
+    args.prefix = os.path.join(args.prefix, o)
+
+    n = f"{args.nx}"
+    args.prefix = args.prefix + ", n=" + n
+
+    if args.confs != []:
+        if args.domain == "square":
+            if args.vol_frac_ub != 0.4:
+                v = f"{args.vol_frac_ub:.1f}"
+                args.prefix = args.prefix + ", v=" + v
+        elif args.domain == "beam":
+            if args.vol_frac_ub != 0.5:
+                v = f"{args.vol_frac_ub:.1f}"
+                args.prefix = args.prefix + ", v=" + v
+
+    if args.m0_block_frac != 0.0:
+        m = f"{args.m0_block_frac:.2f}"
+        args.prefix = args.prefix + ", m0=" + m
+
+    if "frequency" in args.confs:
+        if args.omega_lb != 0.0:
+            w = f"{args.omega_lb}"
+            args.prefix = args.prefix + ", w=" + w
+
+    if "compliance" in args.confs:
+        c = f"{args.compliance_ub:.2f}"
+        args.prefix = args.prefix + ", c=" + c
+
+    if "displacement" in args.confs:
+        if args.mode != 1:
+            args.prefix = args.prefix + ", mode=" + str(args.mode)
+        d = f"{args.dis_ub:.2f}"
+        args.prefix = args.prefix + ", d=" + d
+
+    if "stress" in args.confs:
+        s = f"{args.stress_ub}"
+        args.prefix = args.prefix + ", s=" + s
+
+    r = f"{args.r0}"
+    args.prefix = args.prefix + ", r=" + r
+
+    if args.proj:
+        args.prefix = args.prefix + ", proj"
+
+    if args.note != "":
+        args.prefix = args.prefix + ", " + args.note
+
+    # if args.dis_ub is not None:
+    #     d = f"{args.dis_ub:.3f}"
+    #     args.prefix = os.path.join(args.prefix, d)
+
+    # if args.stress_ub is not None:
+    #     s = f"{args.stress_ub/ 1e12}"
+    #     args.prefix = os.path.join(args.prefix, s)
+
+    # # create a folder inside the result folder to store the results of each run
+    # if args.confs == ["volume_ub", "stress"]:
+    #     args.prefix = os.path.join(
+    #         args.prefix,
+    #         o + ", n=" + n + ", s=" + s + args.note,
+    #     )
+    # elif args.confs == ["volume_ub"]:
+    #     args.prefix = os.path.join(
+    #         args.prefix,
+    #         o + ", n=" + n + args.note,
+    #     )
+    # elif args.confs == ["displacement", "volume_ub"]:
+    #     args.prefix = os.path.join(
+    #         args.prefix,
+    #         o + ", n=" + n + ", d=" + d + args.note,
+    #     )
+    # elif args.confs == ["volume_ub", "displacement", "stress"]:
+    #     args.prefix = os.path.join(
+    #         args.prefix,
+    #         o + ", n=" + n + ", d=" + d + ", s=" + s + args.note,
+    #     )
+
+    if os.path.isdir(args.prefix):
+        rmtree(args.prefix)
+    os.mkdir(args.prefix)
+
+    return args
+
+
+def to_vtk(vtk_path, conn, X, nodal_sols={}, cell_sols={}, nodal_vecs={}, cell_vecs={}):
+    """
+    Generate a vtk given conn, X, and optionally list of nodal solutions
+
+    Args:
+        nodal_sols: dictionary of arrays of length nnodes
+        cell_sols: dictionary of arrays of length nelems
+        nodal_vecs: dictionary of list of components [vx, vy], each has length nnodes
+        cell_vecs: dictionary of list of components [vx, vy], each has length nelems
+    """
+    # vtk requires a 3-dimensional data point
+    X = np.append(X, np.zeros((X.shape[0], 1)), axis=1)
+
+    nnodes = X.shape[0]
+    nelems = conn.shape[0]
+
+    # Create a empty vtk file and write headers
+    with open(vtk_path, "w") as fh:
+        fh.write("# vtk DataFile Version 3.0\n")
+        fh.write("my example\n")
+        fh.write("ASCII\n")
+        fh.write("DATASET UNSTRUCTURED_GRID\n")
+
+        # Write nodal points
+        fh.write("POINTS {:d} double\n".format(nnodes))
+        for x in X:
+            row = f"{x}"[1:-1]  # Remove square brackets in the string
+            fh.write(f"{row}\n")
+
+        # Write connectivity
+        size = 5 * nelems
+
+        fh.write(f"CELLS {nelems} {size}\n")
+        for c in conn:
+            node_idx = f"{c}"[1:-1]  # remove square bracket [ and ]
+            npts = 4
+            fh.write(f"{npts} {node_idx}\n")
+
+        # Write cell type
+        fh.write(f"CELL_TYPES {nelems}\n")
+        for c in conn:
+            vtk_type = 9
+            fh.write(f"{vtk_type}\n")
+
+        # Write solution
+        if nodal_sols or nodal_vecs:
+            fh.write(f"POINT_DATA {nnodes}\n")
+
+        if nodal_sols:
+            for name, data in nodal_sols.items():
+                fh.write(f"SCALARS {name} double 1\n")
+                fh.write("LOOKUP_TABLE default\n")
+                for val in data:
+                    fh.write(f"{val}\n")
+
+        if nodal_vecs:
+            for name, data in nodal_vecs.items():
+                fh.write(f"VECTORS {name} double\n")
+                for val in np.array(data).T:
+                    fh.write(f"{val[0]} {val[1]} 0.\n")
+
+        if cell_sols or cell_vecs:
+            fh.write(f"CELL_DATA {nelems}\n")
+
+        if cell_sols:
+            for name, data in cell_sols.items():
+                fh.write(f"SCALARS {name} double 1\n")
+                fh.write("LOOKUP_TABLE default\n")
+                for val in data:
+                    fh.write(f"{val}\n")
+
+        if cell_vecs:
+            for name, data in cell_vecs.items():
+                fh.write(f"VECTORS {name} double\n")
+                for val in np.array(data).T:
+                    fh.write(f"{val[0]} {val[1]} 0.\n")
+
+    return
