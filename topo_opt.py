@@ -1498,10 +1498,9 @@ class TopologyAnalysis:
         self.lam_b = self.lam[self.N_b] + np.min(np.abs(self.lam)) * 0.5
 
         if self.atype:
-            eta = np.exp(-ks_rho * (self.lam - np.min(self.lam)))
-            self.N = len(eta[eta > 1e-50])
+            self.eta = np.exp(-ks_rho * (self.lam - np.min(self.lam)))
             self.ks_rho = ks_rho
-            self.eta = eta[: self.N]
+            self.N_a = 0
         else:
             if self.fun == mp.exp:
                 self.ks_rho = -ks_rho
@@ -1645,10 +1644,8 @@ class TopologyAnalysis:
 
         if self.atype:
             self.ks_rho = ks_rho
-            eta = np.exp(-self.ks_rho * (self.lam - np.min(self.lam)))
-            ic(eta)
-            self.N = len(eta[eta > 1e-50])
-            self.eta = eta[: self.N]
+            self.eta = np.exp(-self.ks_rho * (self.lam - np.min(self.lam)))
+            self.N_a = 0
         else:
             if self.fun == mp.exp:
                 self.ks_rho = -ks_rho
@@ -2296,7 +2293,7 @@ class TopologyAnalysis:
         eta_sum = np.sum(eta)
         eta = eta / eta_sum
 
-        for j in range(self.N):
+        for j in range(N_a, N_b + 1):
             for i in range(j + 1):
                 qDq = Q[:, i].T @ D(Q[:, j])
                 qAdotq = dA(Q[:, i], Q[:, j])
@@ -2321,11 +2318,11 @@ class TopologyAnalysis:
                 dh += scalar * (Eij * qAdotq - Gij * qBdotq)
 
         Br = Br.tocsc()
-        C = B.dot(Q)
+        C = B.dot(Q[:, : N_b + 1])
 
         nr = len(reduced)
-        Cr = np.zeros((nr, self.N))
-        for k in range(self.N):
+        Cr = np.zeros((nr, C.shape[1]))
+        for k in range(C.shape[1]):
             Cr[:, k] = C[reduced, k]
         Ur, R = np.linalg.qr(Cr)
 
@@ -2345,7 +2342,7 @@ class TopologyAnalysis:
         preop = linalg.LinearOperator((nr, nr), preconditioner)
 
         # Form the augmented linear system of equations
-        for k in range(self.N):
+        for k in range(np.max([0, N_a - 1]), N_b + 1):
             # Compute B * uk = D * qk
             Dq = D(Q[:, k])
             bkr = -2 * eta[k] * Dq[reduced]

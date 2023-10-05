@@ -1,5 +1,9 @@
 import argparse
 
+"""
+Adjust: N_a, N_b, lam_a, lam_b, and np.max([0, N_a - 1]) for accuracy
+"""
+
 
 def parse_cmd_args():
     problem = {
@@ -17,17 +21,17 @@ def parse_cmd_args():
     }
 
     ks_rho = {
-        "ks_rho_natural_freq": 1000.0,
         "ks_rho_buckling": 1000.0,
+        "ks_rho_natural_freq": 1000.0,
         "ks_rho_stress": 10.0,
         "ks_rho_freq": 100.0,
     }
 
     softmax = {
-        "fun": "tanh",
-        "N_a": 0,  # lower bound of selected indices of eigenvalues
+        "N_a": 2,  # lower bound of selected indices of eigenvalues
         "N_b": 5,  # upper bound of selected indices of eigenvalues
-        "atype": 1,  # 0: 0-b based index, 1: a-b based index
+        "atype": 0,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
+        "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     }
 
     constraint_bounds = {

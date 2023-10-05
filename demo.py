@@ -38,13 +38,13 @@ def softmax_ab(fun, rho, lam, lam_a, lam_b):
     """
     Compute the eta values
     """
-    ic(rho, lam, lam_a, lam_b)
+    # ic(rho, lam, lam_a, lam_b)
     eta = np.zeros(len(lam), dtype=lam.dtype)
     for i in range(len(lam)):
         a = fun(rho * (lam[i] - lam_a))
         b = fun(rho * (lam[i] - lam_b))
         eta[i] = a - b
-    ic(eta)
+    # ic(eta[:10])
     return eta
 
 
@@ -399,7 +399,7 @@ def deriv_approx2(
     hdot = 0.0
 
     for i in range(N_a, N_b):
-        for j in range(N_a, N_b):
+        for j in range(i+1):
             qDq = Q[:, i].T @ D @ Q[:, j]
             qAdotq = Q[:, i].T @ Adot @ Q[:, j]
             qBdotq = Q[:, i].T @ Bdot @ Q[:, j]
@@ -411,54 +411,54 @@ def deriv_approx2(
                 Eij = Eij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
                 Gij = Gij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
             
-            ic(i, j, Eij, Gij)
+            # ic(i, j, Eij, Gij)
             
 
             if i == j:
                 scale = qDq - h
             else:
-                scale = qDq
+                scale = 2*qDq
 
             hdot += scale * (Eij * qAdotq - Gij * qBdotq)
 
     # compute the orthogonal projector
-    C = B @ Q[:, N_a:N_b]
+    C = B @ Q[:, :N_b]
     U, _ = np.linalg.qr(C)
 
-    factor = 0.99
-    P = A - factor * lam[0] * B
-    Pfactor = scipy.sparse.linalg.factorized(P)
+    # factor = 0.99
+    # P = A - factor * lam[0] * B
+    # Pfactor = scipy.sparse.linalg.factorized(P)
 
-    def preconditioner(x):
-        y = Pfactor(x)
-        t = np.dot(U.T, y)
-        y = y - np.dot(U, t)
-        return y
+    # def preconditioner(x):
+    #     y = Pfactor(x)
+    #     t = np.dot(U.T, y)
+    #     y = y - np.dot(U, t)
+    #     return y
 
-    preop = scipy.sparse.linalg.LinearOperator((n, n), matvec=preconditioner)
+    # preop = scipy.sparse.linalg.LinearOperator((n, n), matvec=preconditioner)
 
-    # Z = np.eye(np.shape(A)[0]) - U @ U.T
+    Z = np.eye(np.shape(A)[0]) - U @ U.T
 
-    for j in range(N_a, N_b):
+    for j in range(np.max([0, N_a - 1]), N_b):
         Dq = D @ Q[:, j]
-        bkr = -2.0 * eta[j] * Dq
+        # bkr = -2.0 * eta[j] * Dq
 
-        def matrix(x):
-            y = A.dot(x) - lam[j] * B.dot(x)
-            t = np.dot(U.T, y)
-            y = y - np.dot(U, t)
-            return y
+        # def matrix(x):
+        #     y = A.dot(x) - lam[j] * B.dot(x)
+        #     t = np.dot(U.T, y)
+        #     y = y - np.dot(U, t)
+        #     return y
 
-        matop = scipy.sparse.linalg.LinearOperator((n, n), matvec=matrix)
+        # matop = scipy.sparse.linalg.LinearOperator((n, n), matvec=matrix)
 
-        t = np.dot(U.T, bkr)
-        bkr = bkr - np.dot(U, t)
-        phi, _ = scipy.sparse.linalg.gmres(matop, bkr, tol=1e-10, atol=1e-15, M=preop)
+        # t = np.dot(U.T, bkr)
+        # bkr = bkr - np.dot(U, t)
+        # phi, _ = scipy.sparse.linalg.gmres(matop, bkr, tol=1e-10, atol=1e-15, M=preop)
 
-        # Ak = A - lam[j] * B
-        # Abar = Z.T @ Ak @ Z
-        # bbar = Z.T @ (-2.0 * eta[j] * Dq)
-        # phi = Z @ np.linalg.solve(Abar, bbar)
+        Ak = A - lam[j] * B
+        Abar = Z.T @ Ak @ Z
+        bbar = Z.T @ (-2.0 * eta[j] * Dq)
+        phi = Z @ np.linalg.solve(Abar, bbar)
 
         hdot += Q[:, j].T @ (Adot - lam[j] * Bdot) @ phi
 
@@ -499,7 +499,7 @@ def store_EG(fun, Gr, Kr, ks_rho, N_a, N_b):
 
 if __name__ == "__main__":
     # Set parameters
-    rho = 1000.0  # how large rho is depends on how close the eigenvalues are
+    rho = 10000.0  # how large rho is depends on how close the eigenvalues are
     n = 100
     dh = 1e-6
     ndvs = 1
@@ -535,7 +535,7 @@ if __name__ == "__main__":
     lam2, Q2 = eigh(A2, B2)
     lamcs, Qcs = eigh(Acs, Bcs)
 
-    # ["exp", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
+    # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     for softmax in ["tanh"]:
         print("Softmax =", softmax)
 
@@ -570,7 +570,7 @@ if __name__ == "__main__":
             a = lam[0] + 10.0
             b = lam[0] + 50.0
             lam_a, lam_b, N_a, N_b = compute_lam_value(lam, a, b)
-            lam_a, lam_b, N_a, N_b = compute_lam_index(lam, 3, 5)
+            lam_a, lam_b, N_a, N_b = compute_lam_index(lam, 3, 6)
 
             if fun == mp.exp:
                 rho *= -1.0
@@ -679,25 +679,25 @@ if __name__ == "__main__":
     #     plt.legend()
     # plt.show()
     
-        lam = np.array([-0.03699669, -0.02408163, -0.02408163, -0.02373252, -0.02215617,
-                     -0.01048916, -0.01034584, -0.00960726, -0.009055806, -0.00904732])
-        a = 1
-        b = 4
-        rho = 10000.0
-        lam_a, lam_b, N_a, N_b = compute_lam_index(lam, a, b)
-        ic(lam_a, lam_b, N_a, N_b)
-        eta = softmax_ab(fun, rho, lam, lam_a, lam_b)
-        eta_sum = np.sum(eta)
-        ic(eta)
-        ic(eta / np.sum(eta))
+        # lam = np.array([-0.03699669, -0.02408163, -0.02408163, -0.02373252, -0.02215617,
+        #              -0.01048916, -0.01034584, -0.00960726, -0.009055806, -0.00904732])
+        # a = 1
+        # b = 4
+        # rho = 10000.0
+        # lam_a, lam_b, N_a, N_b = compute_lam_index(lam, a, b)
+        # ic(lam_a, lam_b, N_a, N_b)
+        # eta = softmax_ab(fun, rho, lam, lam_a, lam_b)
+        # eta_sum = np.sum(eta)
+        # ic(eta)
+        # ic(eta / np.sum(eta))
         
-        for i in range(len(lam)):
-            for j in range(i+1):
-                # ic(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
-                Eij = Eij_ab(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
-                Gij = Gij_ab(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
-                ic(i, j, Eij, Gij)
+        # for i in range(len(lam)):
+        #     for j in range(i+1):
+        #         # ic(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
+        #         Eij = Eij_ab(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
+        #         Gij = Gij_ab(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
+        #         ic(i, j, Eij, Gij)
                 
-        plt.plot(lam, eta / np.sum(eta), "o-", label=softmax)
-        plt.legend()
-        plt.show()
+        # plt.plot(lam, eta / np.sum(eta), "o-", label=softmax)
+        # plt.legend()
+        # plt.show()
