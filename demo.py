@@ -3,7 +3,7 @@ import matplotlib.pylab as plt
 from mpl_toolkits.mplot3d import Axes3D, proj3d
 import mpmath as mp
 import numpy as np
-from scipy.linalg import eig, eigh, expm
+from scipy.linalg import eig, eigh, expm, eigvalsh
 from scipy.optimize import minimize
 import scipy.sparse
 
@@ -398,8 +398,8 @@ def deriv_approx2(
     h = fun_h(eta, Q, D)
     hdot = 0.0
 
-    for i in range(N_b):
-        for j in range(i + 1):
+    for i in range(N_a, N_b):
+        for j in range(N_a, N_b):
             qDq = Q[:, i].T @ D @ Q[:, j]
             qAdotq = Q[:, i].T @ Adot @ Q[:, j]
             qBdotq = Q[:, i].T @ Bdot @ Q[:, j]
@@ -417,12 +417,12 @@ def deriv_approx2(
             if i == j:
                 scale = qDq - h
             else:
-                scale = 2 * qDq
+                scale = qDq
 
             hdot += scale * (Eij * qAdotq - Gij * qBdotq)
 
     # compute the orthogonal projector
-    C = B @ Q[:, :N_b]
+    C = B @ Q[:, N_a:N_b]
     U, _ = np.linalg.qr(C)
 
     factor = 0.99
@@ -439,7 +439,7 @@ def deriv_approx2(
 
     # Z = np.eye(np.shape(A)[0]) - U @ U.T
 
-    for j in range(N_b):
+    for j in range(N_a, N_b):
         Dq = D @ Q[:, j]
         bkr = -2.0 * eta[j] * Dq
 
@@ -468,6 +468,33 @@ def deriv_approx2(
             hdot += eta[j] * Q[:, j].T @ Ddot @ Q[:, j]
 
     return hdot
+
+
+def store_EG(fun, Gr, Kr, ks_rho, N_a, N_b):
+    n = 100
+
+    mu = eigvalsh(Gr.todense(), Kr.todense(), eigvals=(0, n))
+    lam_a, lam_b = mu[N_a], mu[N_b]
+    eta = softmax_ab(fun, ks_rho, mu, lam_a, lam_b)
+    eta_sum = np.sum(eta)
+
+    ic(mu[:20])
+    ic(eta[:20] / eta_sum)
+
+    E = np.zeros((n, n))
+    G = np.zeros((n, n))
+
+    for i in range(n):
+        for j in range(n):
+            E[i, j] = Eij_ab(
+                fun, ks_rho, eta_sum, mu[i], mu[j], lam_a, lam_b
+            )
+            G[i, j] = Gij_ab(
+                fun, ks_rho, eta_sum, mu[i], mu[j], lam_a, lam_b
+            )
+
+    np.save("data/E.npy", E)
+    np.save("data/G.npy", G)
 
 
 if __name__ == "__main__":

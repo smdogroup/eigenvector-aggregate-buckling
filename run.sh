@@ -70,7 +70,7 @@ fi
 
 # python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6 --note ks_rho=160 --kokkos
 
-python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 32 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160 --kokkos --check-gradient
+python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160 --check-gradient
 
 # ###################### leg ######################
 # python3 topo_opt.py --domain leg --problem buckling --objf compliance --confs volume_ub --nx 50 --r0 1.1 --vol-frac-ub 0.2 --maxit 100
