@@ -3,11 +3,12 @@ import matplotlib.pylab as plt
 from mpl_toolkits.mplot3d import Axes3D, proj3d
 import mpmath as mp
 import numpy as np
-from scipy.linalg import eigh, expm
+from scipy.linalg import eig, eigh, expm
 from scipy.optimize import minimize
+import scipy.sparse
 
 
-def rand_symm_mat(n=10, eig_low=0.1, eig_high=100.0, nrepeat=5):
+def rand_symm_mat(n=10, eig_low=0.1, eig_high=100.0, nrepeat=1):
     # Randomly generated matrix that will be used to generate the eigenvectors
     QRmat = -1.0 + 2 * np.random.uniform(size=(n, n))
 
@@ -26,10 +27,10 @@ def rand_symm_mat(n=10, eig_low=0.1, eig_high=100.0, nrepeat=5):
     return np.dot(Q, np.dot(np.diag(lam), Q.T))  # Compute A = Q*Lambda*Q^{T}
 
 
-def softmax_a(fun, rho, lam, lam_min):
-    eta = np.zeros(len(lam))
+def softmax_a(fun, rho, lam):
+    eta = np.zeros(len(lam), dtype=lam.dtype)
     for i in range(len(lam)):
-        eta[i] = fun(-rho * (lam[i] - lam_min))
+        eta[i] = fun(-rho * (lam[i] - np.min(lam)))
     return eta
 
 
@@ -37,16 +38,17 @@ def softmax_ab(fun, rho, lam, lam_a, lam_b):
     """
     Compute the eta values
     """
-    eta = np.zeros(len(lam))
+    ic(rho, lam, lam_a, lam_b)
+    eta = np.zeros(len(lam), dtype=lam.dtype)
     for i in range(len(lam)):
         a = fun(rho * (lam[i] - lam_a))
         b = fun(rho * (lam[i] - lam_b))
         eta[i] = a - b
-
+    ic(eta)
     return eta
 
 
-def compute_lam_ab(lam, a, b):
+def compute_lam_value(lam, a, b):
     """
     Compute the lam_a and lam_b values
     """
@@ -58,6 +60,15 @@ def compute_lam_ab(lam, a, b):
     # lam_b = np.max(lam[lam < b])
     N_a = np.sum(lam < lam_a)
     N_b = lam.shape[0] - np.sum(lam > lam_b)
+
+    return lam_a, lam_b, N_a, N_b
+
+
+# compute lam_a and lam_b based on the index
+def compute_lam_index(lam, N_a, N_b):
+    lam_a = lam[N_a] - np.min(np.abs(lam)) * 0.1
+    lam_b = lam[N_b] + np.min(np.abs(lam)) * 0.1
+    N_b += 1
     return lam_a, lam_b, N_a, N_b
 
 
@@ -187,7 +198,6 @@ def deriv_exict(
     lam_a=None,
     lam_b=None,
     Ddot=None,
-    ndvs=1,
 ):
     """
     Compute the forward mode derivative
@@ -198,7 +208,7 @@ def deriv_exict(
 
     # compute the h value
     h = fun_h(eta, Q, D)
-    hdot = np.zeros(ndvs)
+    hdot = 0.0
 
     for j in range(np.shape(A)[0]):
         for i in range(np.shape(A)[0]):
@@ -229,7 +239,7 @@ def deriv_exict(
     return hdot
 
 
-def deriv_exict2(rho, A, B, D, Adot, Bdot, Ddot=None, ndvs=1):
+def deriv_exict2(rho, A, B, D, Adot, Bdot, Ddot=None):
     lam, Q = eigh(A, B)
 
     lam_min = np.min(lam)
@@ -239,7 +249,7 @@ def deriv_exict2(rho, A, B, D, Adot, Bdot, Ddot=None, ndvs=1):
 
     # compute the h value
     h = fun_h(eta, Q, D)
-    hdot = np.zeros(ndvs)
+    hdot = 0.0
 
     for i in range(np.shape(A)[0]):
         Ar = A - lam[i] * B
@@ -290,7 +300,6 @@ def deriv_approx(
     lam_a=None,
     lam_b=None,
     Ddot=None,
-    ndvs=1,
     rho=1.0,
 ):
     """
@@ -310,7 +319,7 @@ def deriv_approx(
 
     # compute the h value
     h = fun_h(eta, Q, D)
-    hdot = np.zeros(ndvs)
+    hdot = 0.0
 
     # only compute the lower triangle of the matrix since it is symmetric
     for i in range(N_a, N_b):
@@ -328,7 +337,7 @@ def deriv_approx(
                 scale = qDq - h
             else:
                 scale = qDq
-
+                
             hdot += Eij * scale * (qAdotq - lam[j] * qBdotq)
 
     C = B @ Q[:, N_a:N_b]
@@ -379,7 +388,6 @@ def deriv_approx2(
     lam_a=None,
     lam_b=None,
     Ddot=None,
-    ndvs=1,
     rho=1.0,
 ):
     # normalize the eta vector
@@ -388,10 +396,10 @@ def deriv_approx2(
 
     # compute the h value
     h = fun_h(eta, Q, D)
-    hdot = np.zeros(ndvs)
+    hdot = 0.0
 
-    for i in range(N_a, N_b):
-        for j in range(N_a, N_b):
+    for i in range(N_b):
+        for j in range(i + 1):
             qDq = Q[:, i].T @ D @ Q[:, j]
             qAdotq = Q[:, i].T @ Adot @ Q[:, j]
             qBdotq = Q[:, i].T @ Bdot @ Q[:, j]
@@ -402,25 +410,55 @@ def deriv_approx2(
             else:
                 Eij = Eij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
                 Gij = Gij_fun(fun, rho, trace, lam[i], lam[j], lam_a, lam_b)
+            
+            ic(i, j, Eij, Gij)
+            
 
             if i == j:
                 scale = qDq - h
             else:
-                scale = qDq
+                scale = 2 * qDq
 
             hdot += scale * (Eij * qAdotq - Gij * qBdotq)
 
     # compute the orthogonal projector
-    C = B @ Q[:, N_a:N_b]
+    C = B @ Q[:, :N_b]
     U, _ = np.linalg.qr(C)
-    Z = np.eye(np.shape(A)[0]) - U @ U.T
 
-    for j in range(N_a, N_b):
+    factor = 0.99
+    P = A - factor * lam[0] * B
+    Pfactor = scipy.sparse.linalg.factorized(P)
+
+    def preconditioner(x):
+        y = Pfactor(x)
+        t = np.dot(U.T, y)
+        y = y - np.dot(U, t)
+        return y
+
+    preop = scipy.sparse.linalg.LinearOperator((n, n), matvec=preconditioner)
+
+    # Z = np.eye(np.shape(A)[0]) - U @ U.T
+
+    for j in range(N_b):
         Dq = D @ Q[:, j]
-        Ak = A - lam[j] * B
-        Abar = Z.T @ Ak @ Z
-        bbar = Z.T @ (-2.0 * eta[j] * Dq)
-        phi = Z @ np.linalg.solve(Abar, bbar)
+        bkr = -2.0 * eta[j] * Dq
+
+        def matrix(x):
+            y = A.dot(x) - lam[j] * B.dot(x)
+            t = np.dot(U.T, y)
+            y = y - np.dot(U, t)
+            return y
+
+        matop = scipy.sparse.linalg.LinearOperator((n, n), matvec=matrix)
+
+        t = np.dot(U.T, bkr)
+        bkr = bkr - np.dot(U, t)
+        phi, _ = scipy.sparse.linalg.gmres(matop, bkr, tol=1e-10, atol=1e-15, M=preop)
+
+        # Ak = A - lam[j] * B
+        # Abar = Z.T @ Ak @ Z
+        # bbar = Z.T @ (-2.0 * eta[j] * Dq)
+        # phi = Z @ np.linalg.solve(Abar, bbar)
 
         hdot += Q[:, j].T @ (Adot - lam[j] * Bdot) @ phi
 
@@ -432,57 +470,115 @@ def deriv_approx2(
     return hdot
 
 
-# Set parameters
-rho = 1000.0
-n = 100
-dh = 1e-30
-ndvs = 5
+if __name__ == "__main__":
+    # Set parameters
+    rho = 1000.0  # how large rho is depends on how close the eigenvalues are
+    n = 100
+    dh = 1e-6
+    ndvs = 1
 
-np.random.seed(123)
+    np.random.seed(0)
+    # x = np.random.uniform(size=ndvs)
+    # p = np.random.uniform(size=ndvs)
 
-x = 0.1 * np.ones(ndvs)
-p = np.random.uniform(size=ndvs)
+    A = rand_symm_mat(n)
+    B = rand_symm_mat(n)  #
+    # B = np.eye(n)
+    D = rand_symm_mat(n)
+    Adot = rand_symm_mat(n)
+    Bdot = rand_symm_mat(n)
+    Ddot = rand_symm_mat(n)
 
-A = rand_symm_mat(n)
-B = rand_symm_mat(n)
-# B = np.eye(n)
-Adot = rand_symm_mat(n)
-Bdot = rand_symm_mat(n)
-Ddot = rand_symm_mat(n)
-D = rand_symm_mat(n)
+    # use central difference to check the derivative
+    A1 = A + dh * Adot
+    B1 = B + dh * Bdot
+    D1 = D + dh * Ddot
 
-lam, Q = eigh(A, B)
+    A2 = A - dh * Adot
+    B2 = B - dh * Bdot
+    D2 = D - dh * Ddot
 
-for softmax in ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
-    print("Softmax =", softmax)
+    # use complex step to check the derivative
+    Acs = A + 1j * dh * Adot
+    Bcs = B + 1j * dh * Bdot
+    Dcs = D + 1j * dh * Ddot
 
-    if softmax in ["exp", "sech"]:
-        fun = getattr(mp, softmax)
+    lam, Q = eigh(A, B)
+    lam1, Q1 = eigh(A1, B1)
+    lam2, Q2 = eigh(A2, B2)
+    lamcs, Qcs = eigh(Acs, Bcs)
 
-        N = 10
-        N_a = 0
-        N_b = N
-        lam_a = None
-        lam_b = None
+    # ["exp", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
+    for softmax in ["tanh"]:
+        print("Softmax =", softmax)
 
-        eta = softmax_a(fun, rho, lam, np.min(lam))
-        Eij_fun = Eij_a
-        Gij_fun = Gij_a
+        if softmax in ["sech"]:
+            fun = getattr(mp, softmax)
 
-    else:
-        fun = getattr(mp, softmax)
+            N = 10
+            N_a = 0
+            N_b = N
+            lam_a = None
+            lam_b = None
 
-        a = lam[0] + 10.0
-        b = lam[0] + 50.0
+            eta = softmax_a(fun, rho, lam)
+            eta1 = softmax_a(fun, rho, lam1)
+            eta2 = softmax_a(fun, rho, lam2)
+            etacs = softmax_a(fun, rho, lamcs)
 
-        lam_a, lam_b, N_a, N_b = compute_lam_ab(lam, a, b)
-        eta = softmax_ab(fun, rho, lam, lam_a, lam_b)
+            Eij_fun = Eij_a
+            Gij_fun = Gij_a
 
-        Eij_fun = Eij_ab
-        Gij_fun = Gij_ab
+            # use complex step to compute the derivative
+            h1 = fun_h(eta1, Q1, D1)
+            h2 = fun_h(eta2, Q2, D2)
+            # ic(h1, h2)
 
-    ans = np.dot(
-        deriv_exict(
+            ans_cs = (h1 - h2) / (2 * dh)
+            ans_cs = fun_h(etacs, Qcs, Dcs, n).imag / dh
+
+        else:
+            fun = getattr(mp, softmax)
+
+            a = lam[0] + 10.0
+            b = lam[0] + 50.0
+            lam_a, lam_b, N_a, N_b = compute_lam_value(lam, a, b)
+            lam_a, lam_b, N_a, N_b = compute_lam_index(lam, 3, 5)
+
+            if fun == mp.exp:
+                rho *= -1.0
+                eta = -softmax_ab(fun, rho, lam, lam_a, lam_b)
+                eta1 = -softmax_ab(fun, rho, lam1, lam_a, lam_b)
+                eta2 = -softmax_ab(fun, rho, lam2, lam_a, lam_b)
+                etacs = -softmax_ab(fun, rho, lamcs, lam_a, lam_b)
+
+                h1 = fun_h(eta1, Q1, D1)
+                h2 = fun_h(eta2, Q2, D2)
+
+                ans_cs = (h1 - h2) / (2 * dh)
+                # ans_cs = fun_h(etacs, Qcs, Dcs, n).imag / dh
+            else:
+                eta = softmax_ab(fun, rho, lam, lam_a, lam_b)
+                eta1 = softmax_ab(fun, rho, lam1, lam_a, lam_b)
+                eta2 = softmax_ab(fun, rho, lam2, lam_a, lam_b)
+                etacs = softmax_ab(fun, rho, lamcs, lam_a, lam_b)
+
+                h1 = fun_h(eta1, Q1, D1)
+                h2 = fun_h(eta2, Q2, D2)
+
+                ans_cs = (h1 - h2) / (2 * dh)
+                # ans_cs = fun_h(etacs, Qcs, Dcs, n).imag / dh
+
+            ic(fun)
+            ic(rho)
+            ic(lam_a, lam_b, N_a, N_b)
+            ic(lam[:10])
+            ic(eta[:10])
+
+            Eij_fun = Eij_ab
+            Gij_fun = Gij_ab
+
+        ans = deriv_exict(
             rho,
             A,
             B,
@@ -498,12 +594,9 @@ for softmax in ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
             lam_a,
             lam_b,
             Ddot,
-            ndvs=ndvs,
-        ),
-        p,
-    )
-    ans_approx = np.dot(
-        deriv_approx(
+        )
+
+        ans_approx = deriv_approx(
             A,
             B,
             D,
@@ -519,13 +612,10 @@ for softmax in ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
             lam_a,
             lam_b,
             Ddot,
-            ndvs=ndvs,
             rho=rho,
-        ),
-        p,
-    )
-    ans_approx2 = np.dot(
-        deriv_approx2(
+        )
+
+        ans_approx2 = deriv_approx2(
             A,
             B,
             D,
@@ -542,19 +632,45 @@ for softmax in ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
             lam_a,
             lam_b,
             Ddot,
-            ndvs=ndvs,
             rho=rho,
-        ),
-        p,
-    )
+        )
 
-    # print("ans = ", ans)
-    # print("ans_approx1 = ", ans_approx)
-    # print("ans_approx2 = ", ans_approx2)
-    print("error1  =", np.abs(ans - ans_approx) / np.abs(ans))
-    print("error2  =", np.abs(ans - ans_approx2) / np.abs(ans))
-    print("")
+        # if softmax in ["sech"]:
+        print("ans", ans)
+        print("ans_cs =", ans_cs)
+        print("error_cs_1 =", np.abs(ans_cs - ans_approx) / np.abs(ans_cs))
+        print("error_cs_2 =", np.abs(ans_cs - ans_approx2) / np.abs(ans_cs))
 
-    plt.plot(lam, eta, "o-", label=softmax)
-    plt.legend()
-plt.show()
+        print("ans = ", ans)
+        print("ans_approx1 = ", ans_approx)
+        print("ans_approx2 = ", ans_approx2)
+        print("error1  =", np.abs(ans - ans_approx) / np.abs(ans))
+        print("error2  =", np.abs(ans - ans_approx2) / np.abs(ans))
+        print("")
+
+    #     plt.plot(lam, eta / np.sum(eta), "o-", label=softmax)
+    #     plt.legend()
+    # plt.show()
+    
+        lam = np.array([-0.03699669, -0.02408163, -0.02408163, -0.02373252, -0.02215617,
+                     -0.01048916, -0.01034584, -0.00960726, -0.009055806, -0.00904732])
+        a = 1
+        b = 4
+        rho = 10000.0
+        lam_a, lam_b, N_a, N_b = compute_lam_index(lam, a, b)
+        ic(lam_a, lam_b, N_a, N_b)
+        eta = softmax_ab(fun, rho, lam, lam_a, lam_b)
+        eta_sum = np.sum(eta)
+        ic(eta)
+        ic(eta / np.sum(eta))
+        
+        for i in range(len(lam)):
+            for j in range(i+1):
+                # ic(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
+                Eij = Eij_ab(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
+                Gij = Gij_ab(fun, rho, eta_sum, lam[i], lam[j], lam_a, lam_b)
+                ic(i, j, Eij, Gij)
+                
+        plt.plot(lam, eta / np.sum(eta), "o-", label=softmax)
+        plt.legend()
+        plt.show()

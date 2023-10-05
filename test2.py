@@ -11,10 +11,11 @@ from icecream import ic
 import matplotlib.pylab as plt
 import matplotlib.tri as tri
 import mpmath as mp
+import numpy
 import numpy as np
 from paropt import ParOpt
 from scipy import sparse, spatial
-from scipy.linalg import eigh, eigvalsh
+from scipy.linalg import cholesky, eigh, lu
 from scipy.sparse import coo_matrix, linalg
 
 import kokkos as kokkos
@@ -486,9 +487,9 @@ class TopologyAnalysis:
         m=None,
         D_index=None,
         fun="tanh",
-        N_a=0,
-        N_b=10,
-        atype=True,
+        aa=0,
+        bb=1,
+        index_based=True,
         E=1.0,  # to make sure eigs is not too large, E=10.0 * 1e6,
         nu=0.3,
         ptype_K="ramp",
@@ -533,9 +534,9 @@ class TopologyAnalysis:
         self.M0 = None
 
         self.fun = getattr(mp, fun)
-        self.N_a = N_a
-        self.N_b = N_b
-        self.atype = atype
+        self.aa = aa
+        self.bb = bb
+        self.index_based = index_based
 
         self.check_gradient = check_gradient
         self.check_kokkos = check_kokkos
@@ -1378,73 +1379,44 @@ class TopologyAnalysis:
             a = fun(rho * (lam[i] - lam_a))
             b = fun(rho * (lam[i] - lam_b))
             eta[i] = a - b
+
         return eta
+
+    def compute_lam_value(self, lam, a, b):
+        """
+        Compute the lam_a and lam_b values
+        """
+        lam_a = np.min(lam[lam > a]) - np.min(np.abs(lam))
+        lam_b = np.max(lam[lam < b]) + np.min(np.abs(lam))
+        N_a = np.sum(lam < lam_a)
+        N_b = lam.shape[0] - np.sum(lam > lam_b)
+        return lam_a, lam_b, N_a, N_b
+
+    # compute lam_a and lam_b based on the index
+    def compute_lam_index(self, lam, N_a, N_b):
+        if N_b + 1 > len(lam):
+            print("Warning: N_b > k, increase k to %d" % N_b)
+            exit()
+
+        lam_a = lam[N_a]
+        lam_b = lam[N_b]
+        N_b += 1
+        return lam_a, lam_b, N_a, N_b
 
     @time_this
     def solve_eigenvalue_problem(
-        self, x, ks_rho=1000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
+        self, x, k=6, ks_rho=100.0, sigma=0.0, nodal_sols=None, nodal_vecs=None
     ):
         """
         Compute the k-th smallest natural frequencies
         Populate nodal_sols and cell_sols if provided
         """
-        self.N = self.N_b + 1
 
-        if ks_rho > 1000.0:
-            ks_rho = 1000.0
-
-        if self.N > len(self.reduced):
-            self.N = len(self.reduced)
+        if k > len(self.reduced):
+            k = len(self.reduced)
 
         # Compute the density at each node
         self.rho = self.fltr.apply(x)
-
-        # Compute detJ, Be, and Te
-        gauss_pts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
-        xe = self.X[self.conn, 0]
-        ye = self.X[self.conn, 1]
-
-        self.detJ = np.zeros((2, 2, self.nelems))
-        self.Be = np.zeros((2, 2, self.nelems, 3, 8))
-        self.Be00 = np.zeros((self.nelems, 3, 8))
-        self.Te = np.zeros((2, 2, self.nelems, 3, 4, 4))
-
-        for j in range(2):
-            for i in range(2):
-                xi = gauss_pts[i]
-                eta = gauss_pts[j]
-                if not self.kokkos or self.check_kokkos:
-                    Be_python = np.zeros((self.nelems, 3, 8))
-                    Te_python = np.zeros((self.nelems, 3, 4, 4))
-                    detJ_python = _populate_Be_and_Te(
-                        self.nelems, xi, eta, xe, ye, Be_python, Te_python
-                    )
-                    if i == 0 and j == 0:
-                        _populate_Be(self.nelems, 0.0, 0.0, xe, ye, self.Be00)
-
-                if self.kokkos or self.check_kokkos:
-                    detJ_kokkos, Be_kokkos, Te_kokkos = kokkos.populate_Be_Te(
-                        xi, eta, xe, ye
-                    )
-                    Be_kokkos = Be_kokkos.reshape((self.nelems, 3, 8))
-                    Te_kokkos = Te_kokkos.reshape((self.nelems, 3, 4, 4))
-                    if i == 0 and j == 0:
-                        _, self.Be00 = kokkos.populate_Be(0.0, 0.0, xe, ye)
-                        self.Be00 = self.Be00.reshape((self.nelems, 3, 8))
-
-                if self.check_kokkos:
-                    ic(np.allclose(detJ_python, detJ_kokkos))
-                    ic(np.allclose(Be_python, Be_kokkos))
-                    ic(np.allclose(Te_python, Te_kokkos))
-
-                if not self.kokkos:
-                    self.detJ[i, j, :] = detJ_python
-                    self.Be[i, j, :, :, :] = Be_python
-                    self.Te[i, j, :, :, :, :] = Te_python
-                else:
-                    self.detJ[i, j, :] = detJ_kokkos
-                    self.Be[i, j, :, :, :] = Be_kokkos
-                    self.Te[i, j, :, :, :, :] = Te_kokkos
 
         K = self.assemble_stiffness_matrix(self.rho)
         Kr = self.reduce_matrix(K)
@@ -1456,17 +1428,17 @@ class TopologyAnalysis:
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
-        if self.N == len(self.reduced):
+        if k == len(self.reduced):
             eigs, Qr = eigh(Kr.todense(), Mr.todense())
         else:
             eigs, Qr = sparse.linalg.eigsh(
-                Kr, M=Mr, k=self.N, sigma=sigma, which="LM", tol=1e-10
+                Kr, M=Mr, k=k, sigma=sigma, which="LM", tol=1e-10
             )
 
         ic(np.allclose(Kr @ Qr, Mr @ Qr @ np.diag(eigs), atol=1e-10))
 
-        Q = np.zeros((self.nvars, self.N), dtype=self.rho.dtype)
-        for i in range(self.N):
+        Q = np.zeros((self.nvars, k), dtype=self.rho.dtype)
+        for i in range(k):
             Q[self.reduced, i] = Qr[:, i]
 
         # Save vtk output data
@@ -1475,7 +1447,7 @@ class TopologyAnalysis:
             nodal_sols["rho"] = np.array(self.rho)
 
         if nodal_vecs is not None:
-            for i in range(self.N):
+            for i in range(k):
                 nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
 
         self.A = K
@@ -1493,40 +1465,40 @@ class TopologyAnalysis:
         self.dB = lambda q1, q2: self.mass_matrix_derivative(self.rho, q1, q2)
         self.lam = self.eigs  # Ar @ Qr = lam * Br @ Qr
 
-        self.lam_a = self.lam[self.N_a] - np.min(np.abs(self.lam)) * 0.5
-        self.lam_b = self.lam[self.N_b] + np.min(np.abs(self.lam)) * 0.5
-
-        if self.atype:
-            eta = np.exp(-ks_rho * (self.lam - np.min(self.lam)))
-            self.N = len(eta[eta > 1e-50])
-            self.ks_rho = ks_rho
-            self.eta = eta[: self.N]
+        if self.index_based:
+            self.lam_a, self.lam_b, self.N_a, self.N_b = self.compute_lam_index(
+                self.lam, self.aa, self.bb
+            )
         else:
-            if self.fun == mp.exp:
-                self.ks_rho = -ks_rho
-                self.eta = -self.softmax_ab(
-                    self.fun, self.ks_rho, self.lam, self.lam_a, self.lam_b
-                )
-            else:
-                self.ks_rho = ks_rho
-                self.eta = self.softmax_ab(
-                    self.fun, self.ks_rho, self.lam, self.lam_a, self.lam_b
-                )
+            self.lam_a, self.lam_b, self.N_a, self.N_b = self.compute_lam_value(
+                self.lam, self.aa, self.bb
+            )
 
-        ic(self.ks_rho, self.N_a, self.N_b, self.N)
-        ic(self.lam)
-        ic(self.eigs)
-        ic(self.eta)
-        ic(self.eta / np.sum(self.eta))
+        if self.fun == mp.exp:
+            self.ks_rho = -ks_rho
+            eta = -self.softmax_ab(
+                self.fun, self.ks_rho, self.lam, self.lam_a, self.lam_b
+            )
+        else:
+            self.ks_rho = ks_rho
+            eta = self.softmax_ab(
+                self.fun, self.ks_rho, self.lam, self.lam_a, self.lam_b
+            )
+            
+        self.eta_sum = np.sum(eta)
+        self.eta = eta / np.sum(eta)
+
+        ic(self.ks_rho, self.N_a, self.N_b)
+        ic(eigs)
+        ic(eta)
+
         return np.sqrt(self.eigs)
 
     def solve_buckling(
-        self, x, ks_rho=10000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
+        self, x, k=6, ks_rho=3000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
     ):
-        self.N = self.N_b + 1
-
-        if self.N > len(self.reduced):
-            self.N = len(self.reduced)
+        if k > len(self.reduced):
+            k = len(self.reduced)
 
         # Compute the density at each node
         self.rho = self.fltr.apply(x)
@@ -1597,27 +1569,27 @@ class TopologyAnalysis:
         ic("Solving eigenvalue problem")
         start = time.time()
 
-        if self.N == len(self.reduced) or (
+        if k == len(self.reduced) or (
             self.check_gradient and self.rho.dtype == np.complex128
         ):
             mu, Qr = eigh(Gr.todense(), Kr.todense())
-            mu, Qr = mu[: self.N], Qr[:, : self.N]
+            mu, Qr = mu[:k], Qr[:, :k]
             pass
         else:
             # Method 0: this is the fast and most accurate way to solve the eigenvalue problem
-            mu, Qr = sparse.linalg.eigsh(Gr, M=Kr, k=self.N, sigma=sigma, which="SM")
+            mu, Qr = sparse.linalg.eigsh(Gr, M=Kr, k=k, sigma=sigma, which="SM")
 
         eigs = -1.0 / mu
         end = time.time()
         print("scipy::eigsh", end - start)
         ic(np.allclose(Kr @ Qr, -Gr @ Qr @ np.diag(eigs), atol=1e-10))
 
-        self.QGQ = np.zeros(self.N, dtype=x.dtype)
-        for i in range(self.N):
+        self.QGQ = np.zeros(k, dtype=x.dtype)
+        for i in range(k):
             self.QGQ[i] = np.dot(Qr[:, i], Gr @ Qr[:, i])
 
-        Q = np.zeros((self.nvars, self.N), dtype=x.dtype)
-        for i in range(self.N):
+        Q = np.zeros((self.nvars, k), dtype=x.dtype)
+        for i in range(k):
             Q[self.reduced, i] = Qr[:, i]
 
         # Save vtk output data
@@ -1626,7 +1598,7 @@ class TopologyAnalysis:
             nodal_sols["rho"] = np.array(self.rho)
 
         if nodal_vecs is not None:
-            for i in range(self.N):
+            for i in range(k):
                 nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
 
         self.A, self.B = G, K
@@ -1639,62 +1611,34 @@ class TopologyAnalysis:
 
         self.eigs, self.lam, self.Q = eigs, mu, Q  # Ar @ Qr = lam * Br @ Qr
 
-        self.lam_a = self.lam[self.N_a] - np.min(np.abs(self.lam)) * 0.5
-        self.lam_b = self.lam[self.N_b] + np.min(np.abs(self.lam)) * 0.5
-
-        if self.atype:
-            self.ks_rho = ks_rho
-            eta = np.exp(-self.ks_rho * (self.lam - np.min(self.lam)))
-            ic(eta)
-            self.N = len(eta[eta > 1e-50])
-            self.eta = eta[: self.N]
+        if self.index_based:
+            self.lam_a, self.lam_b, self.N_a, self.N_b = self.compute_lam_index(
+                self.lam, self.aa, self.bb
+            )
         else:
-            if self.fun == mp.exp:
-                self.ks_rho = -ks_rho
-                self.eta = -self.softmax_ab(
-                    self.fun, self.ks_rho, self.lam, self.lam_a, self.lam_b
-                )
-            else:
-                self.ks_rho = ks_rho
-                self.eta = self.softmax_ab(
-                    self.fun, self.ks_rho, self.lam, self.lam_a, self.lam_b
-                )
+            self.lam_a, self.lam_b, self.N_a, self.N_b = self.compute_lam_value(
+                self.lam, self.aa, self.bb
+            )
 
-        ic(self.ks_rho, self.N_a, self.N_b, self.N)
-        ic(self.lam)
-        ic(self.eigs)
-        ic(self.eta)
-        ic(self.eta / np.sum(self.eta))
+        if self.fun == mp.exp:
+            self.ks_rho = -ks_rho
+            eta = -self.softmax_ab(
+                self.fun, self.ks_rho, self.lam, self.lam_a, self.lam_b
+            )
+        else:
+            self.ks_rho = ks_rho
+            eta = self.softmax_ab(
+                self.fun, self.ks_rho, self.lam, self.lam_a, self.lam_b
+            )
 
-        # self.store_EG(Gr, Kr, ks_rho, self.N_a, self.N_b)
+        self.eta_sum = np.sum(eta)
+        self.eta = eta / np.sum(eta)
+
+        ic(self.ks_rho, self.N_a, self.N_b)
+        ic(eigs)
+        ic(eta)
 
         return np.sqrt(self.eigs)
-
-    def store_EG(self, Gr, Kr, ks_rho, N_a, N_b):
-        n = 100
-
-        mu = eigvalsh(Gr.todense(), Kr.todense(), eigvals=(0, n))
-        lam_a, lam_b = mu[N_a], mu[N_b]
-        eta = self.softmax_ab(self.fun, ks_rho, mu, lam_a, lam_b)
-        eta_sum = np.sum(self.eta)
-
-        ic(mu[:20])
-        ic(eta[:20] / eta_sum)
-
-        E = np.zeros((n, n))
-        G = np.zeros((n, n))
-
-        for i in range(n):
-            for j in range(n):
-                E[i, j] = self.Eij_ab(
-                    self.fun, ks_rho, eta_sum, mu[i], mu[j], lam_a, lam_b
-                )
-                G[i, j] = self.Gij_ab(
-                    self.fun, ks_rho, eta_sum, mu[i], mu[j], lam_a, lam_b
-                )
-
-        np.save("data/E.npy", E)
-        np.save("data/G.npy", G)
 
     def ks_omega(self, ks_rho=100.0):
         """
@@ -1769,14 +1713,25 @@ class TopologyAnalysis:
         return self.fltr.applyGradient(dfdrho, x)
 
     @time_this
-    def eigenvector_displacement(self):
-        sum_eta = np.sum(self.eta)
-        eta = self.eta / sum_eta
+    def eigenvector_displacement(self, ks_rho=100.0):
+        # Ar = self.reduce_matrix(self.A)
+        # Br = self.reduce_matrix(self.B)
+
+        # lam, Q = eigh(Ar.todense(), Br.todense())
+
+        # eta = np.exp(-self.ks_rho * (lam - np.min(lam)))
+        # eta = eta / np.sum(eta)
+
+        # D = np.zeros((self.nvars, self.nvars))
+        # D[self.D_index, self.D_index] = 1.0
+        # D = self.reduce_matrix(D)
+
+        # h = np.trace(np.diag(eta) @ Q.T @ D @ Q)
 
         h = 0.0
-        for i in range(len(eta)):
+        for i in range(self.N_b):
             q = self.Q[self.D_index, i]
-            h += eta[i] * np.dot(q, q)
+            h += self.eta[i] * np.dot(q, q)
         return h
 
     def precise(self, rho, trace, lam_min, lam1, lam2):
@@ -1843,7 +1798,7 @@ class TopologyAnalysis:
         return np.float64(val)
 
     @time_this
-    def eigenvector_displacement_deriv(self, x):
+    def eigenvector_displacement_deriv(self, x, ks_rho=100.0):
         """
         Approximately compute the forward derivative
         """
@@ -1870,9 +1825,32 @@ class TopologyAnalysis:
             D,
             self.reduced,
             self.fun,
+            self.N_a,
+            self.N_b,
             self.lam_a,
             self.lam_b,
         )
+
+        # if self.check_gradient:
+        #     dhdrho_exact = self.kernel_exact(
+        #         self.ks_rho,
+        #         self.eta_full,
+        #         self.lam_full,
+        #         self.Q_full,
+        #         h,
+        #         self.A,
+        #         self.B,
+        #         self.dA,
+        #         self.dB,
+        #         D,
+        #         self.reduced,
+        #     )
+
+        #     error_displacement_derivatives = np.linalg.norm(
+        #         dhdrho_exact - dhdrho
+        #     ) / np.linalg.norm(dhdrho_exact)
+
+        #     ic(error_displacement_derivatives)
 
         return self.fltr.applyGradient(dhdrho, x)
 
@@ -1925,8 +1903,7 @@ class TopologyAnalysis:
         """
         Compute the stress at each element
         """
-        sum_eta = np.sum(eta)
-        eta = eta / sum_eta
+
         # Loop over all the eigenvalues
         # stress = np.zeros(self.nelems)
         # set stress maybe complex
@@ -1955,7 +1932,7 @@ class TopologyAnalysis:
             eta_ = 0.0
             _populate_Be_single(xi, eta_, xe_, ye_, Be_)
 
-            for k in range(len(eta)):
+            for k in range(N_a, N_b):
                 qe = np.zeros((self.nelems, 8), dtype=rho.dtype)
                 qe[:, ::2] = Q[2 * self.conn, k]
                 qe[:, 1::2] = Q[2 * self.conn + 1, k]
@@ -1987,7 +1964,7 @@ class TopologyAnalysis:
             # eta_ = 0.0
             # _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
 
-            for k in range(len(eta)):
+            for k in range(N_a, N_b):
                 qe = np.zeros((self.nelems, 8), dtype=rho.dtype)
                 qe[:, ::2] = Q[2 * self.conn, k]
                 qe[:, 1::2] = Q[2 * self.conn + 1, k]
@@ -2010,7 +1987,9 @@ class TopologyAnalysis:
         return stress
 
     @time_this
-    def eigenvector_stress(self, x, ks_rho_stress=10.0, allowable=1.0, cell_sols=None):
+    def eigenvector_stress(
+        self, x, ks_rho=100.0, ks_rho_stress=10.0, allowable=1.0, cell_sols=None
+    ):
         # Compute the stress values
         stress = self.get_stress_values(
             self.rho, self.eta, self.Q, self.N_a, self.N_b, allowable=allowable
@@ -2030,7 +2009,9 @@ class TopologyAnalysis:
         return h
 
     @time_this
-    def eigenvector_stress_derivative(self, x, ks_rho_stress=10.0, allowable=1.0):
+    def eigenvector_stress_derivative(
+        self, x, ks_rho=100.0, ks_rho_stress=10.0, allowable=1.0
+    ):
         # Compute the stress values
         stress = self.get_stress_values(
             self.rho, self.eta, self.Q, self.N_a, self.N_b, allowable=allowable
@@ -2064,6 +2045,8 @@ class TopologyAnalysis:
             D,
             self.reduced,
             self.fun,
+            self.N_a,
+            self.N_b,
             self.lam_a,
             self.lam_b,
         )
@@ -2078,13 +2061,37 @@ class TopologyAnalysis:
             allowable=allowable,
         )
 
+        # if self.check_gradient:
+        #     dhdrho_exact = self.kernel_exact(
+        #         self.ks_rho,
+        #         self.eta_full,
+        #         self.lam_full,
+        #         self.Q_full,
+        #         h_eta,
+        #         self.A,
+        #         self.B,
+        #         self.dA,
+        #         self.dB,
+        #         D,
+        #         self.reduced,
+        #     )
+
+        #     dhdrho_exact += self.get_stress_values_deriv(
+        #         self.rho, eta_stress, self.eta, self.Q, allowable=allowable
+        #     )
+
+        #     error_stress_derivative = np.linalg.norm(
+        #         dhdrho_exact - dhdrho
+        #     ) / np.linalg.norm(dhdrho_exact)
+
+        #     ic(error_stress_derivative)
+
         return self.fltr.applyGradient(dhdrho, x)
 
     @time_this
     def get_stress_values_deriv(self, rho, eta_stress, eta, Q, N_a, N_b, allowable=1.0):
         dfdrhoE = np.zeros(self.nelems)
-        sum_eta = np.sum(eta)
-        eta = eta / sum_eta
+
         # Average the density to get the element-wise density
         rhoE = 0.25 * (
             rho[self.conn[:, 0]]
@@ -2108,7 +2115,7 @@ class TopologyAnalysis:
             eta_ = 0.0
             _populate_Be_single(xi, eta_, xe_, ye_, Be_)
 
-            for k in range(len(eta)):
+            for k in range(N_a, N_b):
                 qe = np.zeros((self.nelems, 8))
                 qe[:, ::2] = Q[2 * self.conn, k]
                 qe[:, 1::2] = Q[2 * self.conn + 1, k]
@@ -2141,7 +2148,7 @@ class TopologyAnalysis:
             # eta_ = 0.0
             # _populate_Be(self.nelems, xi, eta_, xe, ye, Be)
 
-            for k in range(len(eta)):
+            for k in range(N_a, N_b):
                 qe = np.zeros((self.nelems, 8))
                 qe[:, ::2] = Q[2 * self.conn, k]
                 qe[:, 1::2] = Q[2 * self.conn + 1, k]
@@ -2256,6 +2263,8 @@ class TopologyAnalysis:
         D,
         reduced,
         fun,
+        N_a,
+        N_b,
         lam_a,
         lam_b,
     ):
@@ -2280,41 +2289,28 @@ class TopologyAnalysis:
             ic(np.allclose(Ar @ Qr, Br @ Qr @ np.diag(lam)))
 
         dh = np.zeros(self.nnodes)
-        eta_sum = np.sum(eta)
-        eta = eta / eta_sum
+        # eta_sum = np.sum(eta)
 
-        for j in range(self.N):
-            for i in range(j + 1):
+        for i in range(N_a, N_b):
+            for j in range(N_a, N_b):
                 qDq = Q[:, i].T @ D(Q[:, j])
                 qAdotq = dA(Q[:, i], Q[:, j])
                 qBdotq = dB(Q[:, i], Q[:, j])
 
-                if i == j:
-                    scalar = qDq - h
-                else:
-                    scalar = 2 * qDq
+                Eij = self.Eij_ab(fun, ks_rho, self.eta_sum, lam[i], lam[j], lam_a, lam_b)
+                Gij = self.Gij_ab(fun, ks_rho, self.eta_sum, lam[i], lam[j], lam_a, lam_b)
 
-                if self.atype:
-                    Eij = self.precise(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
-                    Gij = self.preciseG(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
-                else:
-                    Eij = self.Eij_ab(
-                        fun, ks_rho, eta_sum, lam[i], lam[j], lam_a, lam_b
-                    )
-                    Gij = self.Gij_ab(
-                        fun, ks_rho, eta_sum, lam[i], lam[j], lam_a, lam_b
-                    )
+                scalar = qDq - h if i == j else qDq
 
                 dh += scalar * (Eij * qAdotq - Gij * qBdotq)
 
         Br = Br.tocsc()
-        C = B.dot(Q)
-
+        C = B.dot(Q[:, N_a:N_b])  # here Q is the first N eigenvectors
         nr = len(reduced)
-        Cr = np.zeros((nr, self.N))
-        for k in range(self.N):
+        Cr = np.zeros((nr, C.shape[1]))
+        for k in range(C.shape[1]):
             Cr[:, k] = C[reduced, k]
-        Ur, R = np.linalg.qr(Cr)
+        Ur, _ = np.linalg.qr(Cr)
 
         # Form a full factorization for the preconditioner
         factor = 0.99  # Should always be < 1 to ensure P is positive definite.
@@ -2332,7 +2328,7 @@ class TopologyAnalysis:
         preop = linalg.LinearOperator((nr, nr), preconditioner)
 
         # Form the augmented linear system of equations
-        for k in range(self.N):
+        for k in range(N_a, N_b):
             # Compute B * uk = D * qk
             Dq = D(Q[:, k])
             bkr = -2 * eta[k] * Dq[reduced]
@@ -2353,6 +2349,48 @@ class TopologyAnalysis:
             phi = self.full_vector(phir)
             dh += dA(Q[:, k], phi) - lam[k] * dB(Q[:, k], phi)
 
+            qDq = np.dot(Q[:, k], Dq)
+            dh -= eta[k] * qDq * dB(Q[:, k], Q[:, k])
+
+        return dh
+
+    @time_this
+    def kernel_exact(self, ks_rho, eta, lam, Q, h, A, B, dA, dB, D, reduced):
+        dh = np.zeros(self.nnodes)
+        eta_sum = np.sum(eta)
+
+        if self.check_gradient:
+            Ar = self.reduce_matrix(A)
+            Br = self.reduce_matrix(B)
+            Qr = self.reduce_vector(Q)
+            ic(np.allclose(Ar @ Qr, Br @ Qr @ np.diag(lam)))
+
+        for j in range(self.nvars):
+            if j + 1 < self.N:
+                a = j + 1
+            else:
+                a = self.N
+
+            for i in range(a):
+                qDq = Q[:, i].T @ D(Q[:, j])
+                qAdotq = dA(Q[:, i], Q[:, j])
+                qBdotq = dB(Q[:, i], Q[:, j])
+
+                if i == j:
+                    scalar = qDq - h
+                else:
+                    scalar = 2 * qDq
+
+                Eij = self.precise(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
+                Gij = self.preciseG(ks_rho, eta_sum, np.min(lam), lam[i], lam[j])
+
+                dh += scalar * (Eij * qAdotq - Gij * qBdotq)
+
+            if j % 100 == 0:
+                ic(j / self.nvars)
+
+        for k in range(self.nvars):
+            Dq = D(Q[:, k])
             qDq = np.dot(Q[:, k], Dq)
             dh -= eta[k] * qDq * dB(Q[:, k], Q[:, k])
 
@@ -2400,10 +2438,8 @@ class TopOptProb:
         vol_frac_ub=None,
         vol_frac_lb=None,
         dis_ub=None,
-        ks_rho_natural_freq=100,
-        ks_rho_buckling=10000,
+        ks_rho=100,
         ks_rho_stress=10,
-        ks_rho_freq=100,
         m0=10.0,
         draw_history=True,
         draw_every=1,
@@ -2459,10 +2495,8 @@ class TopOptProb:
 
         self.fixed_dis_ub = dis_ub
 
-        self.ks_rho_natural_freq = ks_rho_natural_freq
-        self.ks_rho_buckling = ks_rho_buckling
+        self.ks_rho = ks_rho
         self.ks_rho_stress = ks_rho_stress
-        self.ks_rho_freq = ks_rho_freq
 
         self.ndv = np.sum(self.design_nodes)
         if dv_mapping is not None:
@@ -2540,17 +2574,11 @@ class TopOptProb:
         # compute ks_rho, N, and eta
         if self.prob == "natural_frequency":
             omega = self.analysis.solve_eigenvalue_problem(
-                self.xfull,
-                ks_rho=self.ks_rho_natural_freq,
-                nodal_sols=vtk_nodal_sols,
-                nodal_vecs=vtk_nodal_vecs,
+                self.xfull, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
             )
         elif self.prob == "buckling":
             omega = self.analysis.solve_buckling(
-                self.xfull,
-                ks_rho=self.ks_rho_buckling,
-                nodal_sols=vtk_nodal_sols,
-                nodal_vecs=vtk_nodal_vecs,
+                self.xfull, nodal_sols=vtk_nodal_sols, nodal_vecs=vtk_nodal_vecs
             )
 
         # Evaluate objectives
@@ -2567,9 +2595,9 @@ class TopOptProb:
             foi["area"] = area
         elif self.objf == "frequency":
             if self.prob == "natural_frequency":
-                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
+                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
             elif self.prob == "buckling":
-                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho)
             obj = -self.frequency_scale * omega_ks
             foi["omega_ks"] = omega_ks
         elif self.objf == "compliance":
@@ -2577,12 +2605,12 @@ class TopOptProb:
             obj = self.compliance_scale * compliance
             foi["compliance"] = compliance
         elif self.objf == "displacement":
-            displacement = self.analysis.eigenvector_displacement()
+            displacement = self.analysis.eigenvector_displacement(ks_rho=self.ks_rho)
             obj = 10 * displacement
             foi["displacement"] = displacement
         else:  # objf == "stress"
             stress_ks = self.analysis.eigenvector_stress(
-                self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
+                self.xfull, self.ks_rho, self.ks_rho_stress, cell_sols=vtk_cell_sols
             )
             obj = stress_ks * self.stress_scale
             foi["stress_ks"] = stress_ks
@@ -2596,7 +2624,7 @@ class TopOptProb:
             foi["area"] = area / np.sum(self.area_gradient)
             # if self.it_counter  can be devide by 10, compute the stress
             stress_ks = self.analysis.eigenvector_stress(
-                self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
+                self.xfull, self.ks_rho, self.ks_rho_stress, cell_sols=vtk_cell_sols
             )
             foi["stress_ks"] = stress_ks
 
@@ -2610,23 +2638,23 @@ class TopOptProb:
         if "frequency" in self.confs:
             assert self.omega_lb is not None
             if self.prob == "natural_frequency":
-                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
+                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
             elif self.prob == "buckling":
-                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho)
             con.append(omega_ks - self.omega_lb)
             foi["omega_ks"] = omega_ks
 
         if "stress" in self.confs:
             assert self.stress_ub is not None
             stress_ks = self.analysis.eigenvector_stress(
-                self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
+                self.xfull, self.ks_rho, self.ks_rho_stress, cell_sols=vtk_cell_sols
             )
             con.append(1.0 - stress_ks / self.stress_ub)
             foi["stress_ks"] = stress_ks
 
         if "displacement" in self.confs:
             assert self.fixed_dis_ub is not None
-            displacement = self.analysis.eigenvector_displacement()
+            displacement = self.analysis.eigenvector_displacement(ks_rho=self.ks_rho)
             con.append(self.fixed_dis_ub - displacement)
             foi["displacement"] = displacement
 
@@ -2639,12 +2667,12 @@ class TopOptProb:
         # Evaluate all quantities of interest
         if eval_all:
             stress_ks = self.analysis.eigenvector_stress(
-                self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
+                self.xfull, self.ks_rho, self.ks_rho_stress, cell_sols=vtk_cell_sols
             )
             if self.prob == "natural_frequency":
-                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
+                omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho)
             elif self.prob == "buckling":
-                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho)
             foi["stress_ks"] = stress_ks
             foi["omega_ks"] = omega_ks
 
@@ -2746,12 +2774,14 @@ class TopOptProb:
                 )
             elif self.objf == "displacement":
                 g[:] = 10 * self.dv_mapping.T.dot(
-                    self.analysis.eigenvector_displacement_deriv(self.xfull)
+                    self.analysis.eigenvector_displacement_deriv(
+                        self.xfull, self.ks_rho
+                    )
                 )
             else:  # objf == "stress"
                 g[:] = self.stress_scale * self.dv_mapping.T.dot(
                     self.analysis.eigenvector_stress_derivative(
-                        self.xfull, self.ks_rho_stress
+                        self.xfull, self.ks_rho, self.ks_rho_stress
                     )
                 )
 
@@ -2783,7 +2813,7 @@ class TopOptProb:
             if "stress" in self.confs:
                 A[index][:] = -self.dv_mapping.T.dot(
                     self.analysis.eigenvector_stress_derivative(
-                        self.xfull, self.ks_rho_stress
+                        self.xfull, self.ks_rho, self.ks_rho_stress
                     )
                     / self.stress_ub
                 )
@@ -2791,7 +2821,9 @@ class TopOptProb:
 
             if "displacement" in self.confs:
                 A[index][:] = -self.dv_mapping.T.dot(
-                    self.analysis.eigenvector_displacement_deriv(self.xfull)
+                    self.analysis.eigenvector_displacement_deriv(
+                        self.xfull, self.ks_rho
+                    )
                 )
                 index += 1
 
@@ -2833,15 +2865,15 @@ class TopOptProb:
             elif self.objf == "displacement":
                 g[:] = (
                     10
-                    * self.analysis.eigenvector_displacement_deriv(self.xfull)[
-                        self.design_nodes
-                    ]
+                    * self.analysis.eigenvector_displacement_deriv(
+                        self.xfull, self.ks_rho
+                    )[self.design_nodes]
                 )
             else:  # objf == "stress"
                 g[:] = (
                     self.stress_scale
                     * self.analysis.eigenvector_stress_derivative(
-                        self.xfull, self.ks_rho_stress
+                        self.xfull, self.ks_rho, self.ks_rho_stress
                     )[self.design_nodes]
                 )
 
@@ -2873,7 +2905,7 @@ class TopOptProb:
             if "stress" in self.confs:
                 A[index][:] = (
                     -self.analysis.eigenvector_stress_derivative(
-                        self.xfull, self.ks_rho_stress
+                        self.xfull, self.ks_rho, self.ks_rho_stress
                     )[self.design_nodes]
                     / self.stress_ub
                 )
@@ -2881,9 +2913,9 @@ class TopOptProb:
 
             if "displacement" in self.confs:
                 A[index][:] = (
-                    -self.analysis.eigenvector_displacement_deriv(self.xfull)[
-                        self.design_nodes
-                    ]
+                    -self.analysis.eigenvector_displacement_deriv(
+                        self.xfull, self.ks_rho
+                    )[self.design_nodes]
                     / self.disp_ub
                 )
                 index += 1
@@ -3763,28 +3795,13 @@ def parse_cmd_args():
         help="density filter type",
     )
     p.add_argument(
-        "--ks-rho-natural-freq",
-        default=1000.0,
-        type=float,
-        help="ks aggregation parameter",
-    )
-    p.add_argument(
-        "--ks-rho-buckling",
-        default=1000.0,
-        type=float,
-        help="ks aggregation parameter",
+        "--ks-rho", default=1000.0, type=float, help="ks aggregation parameter"
     )
     p.add_argument(
         "--ks-rho-stress",
-        default=10.0,
+        default=1.0,
         type=float,
         help="stress ks aggregation parameter",
-    )
-    p.add_argument(
-        "--ks_rho_freq",
-        default=100.0,
-        type=float,
-        help="frequency ks aggregation parameter",
     )
     p.add_argument(
         "--fun",
@@ -3793,22 +3810,22 @@ def parse_cmd_args():
         help="softmax function",
     )
     p.add_argument(
-        "--N_a",
-        default=0,  # have to adjust to get accurate results
-        type=int,
-        help="lower bound of selected index of eigenvalues",
-    )
-    p.add_argument(
-        "--N_b",
-        default=5,  # have to adjust to get accurate results
-        type=int,
-        help="upper bound of selected index of eigenvalues",
-    )
-    p.add_argument(
-        "--atype",
+        "--a",
         default=0,
+        type=int,
+        help="lower bound of selected eigenvalues",
+    )
+    p.add_argument(
+        "--b",
+        default=5,
+        type=int,
+        help="upper bound of selected eigenvalues",
+    )
+    p.add_argument(
+        "--index_based",
+        default=True,
         action="store_true",
-        help="a_tpye or ab_type",
+        help="index based range, otherwise value based range",
     )
     p.add_argument(
         "--ptype-K",
@@ -4077,14 +4094,15 @@ def create_folder(args):
 
 
 def gradient_check(topo, problem):
-    ks_rho_stress = 10.0
+    ks_rho_stress = 1.0
+    N = 20
 
     def init(x):
         if problem == "natural_frequency":
-            _ = topo.solve_eigenvalue_problem(x)
+            _ = topo.solve_eigenvalue_problem(x, k=N)
 
         elif problem == "buckling":
-            _ = topo.solve_buckling(x)
+            _ = topo.solve_buckling(x, k=N)
 
     def compute_u(f, K):
         fr = topo.reduce_vector(f)
@@ -4113,8 +4131,8 @@ def gradient_check(topo, problem):
     dK = topo.stiffness_matrix_derivative(topo.rho, q1, q2) @ px
     dM = topo.mass_matrix_derivative(topo.rho, q1, q2) @ px
     dG = topo.stress_stiffness_derivative(topo.rho, u, q1, q2, Kfact) @ px
-    dis_grad = topo.eigenvector_displacement_deriv(x) @ px
-    stress_grad = topo.eigenvector_stress_derivative(x, ks_rho_stress) @ px
+    dis_grad = topo.eigenvector_displacement_deriv(x, topo.ks_rho) @ px
+    stress_grad = topo.eigenvector_stress_derivative(x, topo.ks_rho, ks_rho_stress) @ px
 
     # s = topo.get_stress_values(rho, topo.eta, topo.Q)
     # eta_stress = np.exp(ks_rho_stress * (s - np.max(s)))
@@ -4128,8 +4146,8 @@ def gradient_check(topo, problem):
     elif problem == "buckling":
         omega1 = topo.ks_buckling()
 
-    dis1 = topo.eigenvector_displacement()
-    stress1 = topo.eigenvector_stress(x + dh * px, ks_rho_stress)
+    dis1 = topo.eigenvector_displacement(topo.ks_rho)
+    stress1 = topo.eigenvector_stress(x + dh * px, topo.ks_rho, ks_rho_stress)
     # s1 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     init(x - dh * px)
@@ -4138,8 +4156,8 @@ def gradient_check(topo, problem):
     elif problem == "buckling":
         omega2 = topo.ks_buckling()
 
-    dis2 = topo.eigenvector_displacement()
-    stress2 = topo.eigenvector_stress(x - dh * px, ks_rho_stress)
+    dis2 = topo.eigenvector_displacement(topo.ks_rho)
+    stress2 = topo.eigenvector_stress(x - dh * px, topo.ks_rho, ks_rho_stress)
     # s2 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     dis_grad_cf = (dis1 - dis2) / (2 * dh)
@@ -4158,39 +4176,39 @@ def gradient_check(topo, problem):
     ic(error_d_omega_cf)
     # ic(error_s_cf)
 
-    # dh = 1e-15
-    # init(x + dh * px * 1j)
-    # dis1 = topo.eigenvector_displacement()
-    # stress1 = topo.eigenvector_stress(x + dh * px * 1j, topo.ks_rho, ks_rho_stress)
-    # K1 = topo.assemble_stiffness_matrix(topo.rho)
-    # M1 = topo.assemble_mass_matrix(topo.rho)
-    # u1, _ = compute_u(topo.f, K1)
-    # G1 = topo.assemble_stress_stiffness(topo.rho, u1)
+    dh = 1e-15
+    init(x + dh * px * 1j)
+    dis1 = topo.eigenvector_displacement(topo.ks_rho)
+    stress1 = topo.eigenvector_stress(x + dh * px * 1j, topo.ks_rho, ks_rho_stress)
+    K1 = topo.assemble_stiffness_matrix(topo.rho)
+    M1 = topo.assemble_mass_matrix(topo.rho)
+    u1, _ = compute_u(topo.f, K1)
+    G1 = topo.assemble_stress_stiffness(topo.rho, u1)
 
-    # dis_grad_cs = np.imag(dis1) / dh
-    # stress_grad_cs = np.imag(stress1) / dh
-    # K_grad_cs = q1.T @ np.imag(K1) @ q2 / dh
-    # M_grad_cs = q1.T @ np.imag(M1) @ q2 / dh
-    # G_grad_cs = q1.T @ np.imag(G1) @ q2 / dh
+    dis_grad_cs = np.imag(dis1) / dh
+    stress_grad_cs = np.imag(stress1) / dh
+    K_grad_cs = q1.T @ np.imag(K1) @ q2 / dh
+    M_grad_cs = q1.T @ np.imag(M1) @ q2 / dh
+    G_grad_cs = q1.T @ np.imag(G1) @ q2 / dh
 
-    # ic(dis_grad_cf)
-    # ic(dis_grad_cs)
-    # ic(dis_grad)
-    # ic(stress_grad_cf)
-    # ic(stress_grad_cs)
-    # ic(stress_grad)
+    ic(dis_grad_cf)
+    ic(dis_grad_cs)
+    ic(dis_grad)
+    ic(stress_grad_cf)
+    ic(stress_grad_cs)
+    ic(stress_grad)
 
-    # error_dis_cs = np.abs(dis_grad_cs - dis_grad) / np.abs(dis_grad_cs)
-    # error_stress_cs = np.abs(stress_grad_cs - stress_grad) / np.abs(stress_grad_cs)
-    # error_K_cs = np.abs(K_grad_cs - dK) / np.abs(K_grad_cs)
-    # error_M_cs = np.abs(M_grad_cs - dM) / np.abs(M_grad_cs)
-    # error_G_cs = np.abs(G_grad_cs - dG) / np.abs(G_grad_cs)
+    error_dis_cs = np.abs(dis_grad_cs - dis_grad) / np.abs(dis_grad_cs)
+    error_stress_cs = np.abs(stress_grad_cs - stress_grad) / np.abs(stress_grad_cs)
+    error_K_cs = np.abs(K_grad_cs - dK) / np.abs(K_grad_cs)
+    error_M_cs = np.abs(M_grad_cs - dM) / np.abs(M_grad_cs)
+    error_G_cs = np.abs(G_grad_cs - dG) / np.abs(G_grad_cs)
 
-    # ic(error_dis_cs)
-    # ic(error_stress_cs)
-    # ic(error_K_cs)
-    # ic(error_M_cs)
-    # ic(error_G_cs)
+    ic(error_dis_cs)
+    ic(error_stress_cs)
+    ic(error_K_cs)
+    ic(error_M_cs)
+    ic(error_G_cs)
 
 
 def main(args):
@@ -4305,9 +4323,9 @@ def main(args):
         m,
         D_index,
         fun=args.fun,
-        N_a=args.N_a,
-        N_b=args.N_b,
-        atype=args.atype,
+        aa=args.a,
+        bb=args.b,
+        index_based=args.index_based,
         ptype_K=args.ptype_K,
         ptype_M=args.ptype_M,
         rho0_K=args.rho0_K,
@@ -4331,10 +4349,8 @@ def main(args):
     topo = TopOptProb(
         analysis,
         non_design_nodes,
-        ks_rho_natural_freq=args.ks_rho_natural_freq,
-        ks_rho_buckling=args.ks_rho_buckling,
+        ks_rho=args.ks_rho,
         ks_rho_stress=args.ks_rho_stress,
-        ks_rho_freq=args.ks_rho_freq,
         m0=args.m0,
         draw_every=5,
         prefix=args.prefix,
@@ -4387,9 +4403,8 @@ def main(args):
         paroptprob = ParOptProb(MPI.COMM_SELF, topo)
 
         if args.check_gradient:
-            for i in range(1):
-                # Note: the accuracy highly depends on the value N_a and N_b
-                gradient_check(analysis, args.problem)
+            for i in range(5):
+                # gradient_check(analysis, args.problem)
                 paroptprob.checkGradients(1e-6)
             exit(0)
 
@@ -4426,7 +4441,7 @@ if __name__ == "__main__":
 # gradient check: complex step method
 # dh = 1e-30
 # init(x + 1j * dh * px)
-# f = analysis.eigenvector_displacement()
+# f = analysis.eigenvector_displacement(ks_rho)
 # ic(f)
 # dfdx_d_cs = f.imag / dh
 # ic(dfdx_d_cs)
@@ -4436,7 +4451,7 @@ if __name__ == "__main__":
 
 # dh = 1e-30
 # init(x + 1j * dh * px)
-# f = analysis.eigenvector_stress(x + 1j * dh * px, ks_rho_stress)
+# f = analysis.eigenvector_stress(x + 1j * dh * px, ks_rho, ks_rho_stress)
 # ic(f)
 # dfdx = f.imag / dh
 # ic(dfdx)
