@@ -12,3 +12,4 @@ build
 # *test*
 *darwin*
 data
+*.so

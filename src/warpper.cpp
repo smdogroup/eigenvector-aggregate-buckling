@@ -8,7 +8,7 @@
 #include "K.h"
 #include "buckling.h"
 #include "converter.h"
-#include "lobpcg.hpp"
+// #include "lobpcg.hpp"
 
 namespace py = pybind11;
 
@@ -168,33 +168,33 @@ std::tuple<py::array_t<T>, py::array_t<T>, py::array_t<T>> assembleGDerivative(
   return std::make_tuple(rhoE_py, dfdu_py, dfdC_py);
 }
 
-template <typename T, typename I>
-std::tuple<py::array_t<T>, py::array_t<T>> py_lobpcg(py::array_t<T> Ax, py::array_t<I> Ap,
-                                                     py::array_t<I> Aj, py::array_t<T> Bx,
-                                                     py::array_t<I> Bp, py::array_t<I> Bj, int n,
-                                                     int m, py::array_t<T> Mp) {
-  // Extract data pointers from NumPy arrays
-  T* Ax_ptr = Ax.mutable_data();
-  I* Ap_ptr = Ap.mutable_data();
-  I* Aj_ptr = Aj.mutable_data();
-  T* Bx_ptr = Bx.mutable_data();
-  I* Bp_ptr = Bp.mutable_data();
-  I* Bj_ptr = Bj.mutable_data();
-  T* Mp_ptr = Mp.mutable_data();
+// template <typename T, typename I>
+// std::tuple<py::array_t<T>, py::array_t<T>> py_lobpcg(py::array_t<T> Ax, py::array_t<I> Ap,
+//                                                      py::array_t<I> Aj, py::array_t<T> Bx,
+//                                                      py::array_t<I> Bp, py::array_t<I> Bj, int n,
+//                                                      int m, py::array_t<T> Mp) {
+//   // Extract data pointers from NumPy arrays
+//   T* Ax_ptr = Ax.mutable_data();
+//   I* Ap_ptr = Ap.mutable_data();
+//   I* Aj_ptr = Aj.mutable_data();
+//   T* Bx_ptr = Bx.mutable_data();
+//   I* Bp_ptr = Bp.mutable_data();
+//   I* Bj_ptr = Bj.mutable_data();
+//   T* Mp_ptr = Mp.mutable_data();
 
-  // create output arrays
-  py::array_t<T> wp_py = py::array_t<T>(m);
-  py::array_t<T> vp_py = py::array_t<T>(n * m);
+//   // create output arrays
+//   py::array_t<T> wp_py = py::array_t<T>(m);
+//   py::array_t<T> vp_py = py::array_t<T>(n * m);
 
-  // Extract data pointers from NumPy arrays
-  T* wp = wp_py.mutable_data();
-  T* vp = vp_py.mutable_data();
+//   // Extract data pointers from NumPy arrays
+//   T* wp = wp_py.mutable_data();
+//   T* vp = vp_py.mutable_data();
 
-  // call lobpcg function
-  linalg::sparse::lobpcg<T, I>(Ax_ptr, Ap_ptr, Aj_ptr, Bx_ptr, Bp_ptr, Bj_ptr, n, m, wp, vp, Mp_ptr);
+//   // call lobpcg function
+//   linalg::sparse::lobpcg<T, I>(Ax_ptr, Ap_ptr, Aj_ptr, Bx_ptr, Bp_ptr, Bj_ptr, n, m, wp, vp, Mp_ptr);
 
-  return std::make_tuple(wp_py, vp_py);
-}
+//   return std::make_tuple(wp_py, vp_py);
+// }
 
 PYBIND11_MODULE(kokkos, m) {
   m.def("populate_Be", &populate_Be<double>, "Populate the Be matrix");
@@ -211,7 +211,7 @@ PYBIND11_MODULE(kokkos, m) {
   m.def("stress_stiffness_derivative", &assembleGDerivative<double>,
         "Compute the derivative of the stress stiffness matrix");
 
-  m.def("lobpcg", &py_lobpcg<double, int>, "Run lobpcg function");
+  // m.def("lobpcg", &py_lobpcg<double, int>, "Run lobpcg function");
 
   m.def("initialize", &initializeKokkos, "Initialize Kokkos");
 

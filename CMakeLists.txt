@@ -18,7 +18,7 @@ add_compile_options(
 # Find the required packages
 # find_package(pybind11 REQUIRED)
 find_package(Kokkos REQUIRED)
-find_package(KokkosKernels REQUIRED)
+# find_package(KokkosKernels REQUIRED)
 # using for finding the correct Python version
 find_package(Python COMPONENTS Interpreter Development)
 
@@ -42,7 +42,7 @@ set_target_properties(kokkos PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT
 target_link_libraries(kokkos 
   PRIVATE 
     Kokkos::kokkos 
-    Kokkos::kokkoskernels 
+    # Kokkos::kokkoskernels 
     pybind11::pybind11)
 
 # Add optimization flags specific to the target architecture

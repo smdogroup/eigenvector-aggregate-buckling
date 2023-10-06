@@ -1,7 +1,7 @@
 #ifndef STIFFNESS_H
 #define STIFFNESS_H
 
-#include <KokkosBlas.hpp>
+// #include <KokkosBlas.hpp>
 #include <Kokkos_Core.hpp>
 #include <cstring>
 

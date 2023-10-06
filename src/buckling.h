@@ -1,12 +1,12 @@
 #ifndef BUCLING_H
 #define BUCLING_H
 
-#include <KokkosBlas1_axpby.hpp>
-#include <KokkosBlas1_mult.hpp>
-#include <KokkosBlas1_reciprocal.hpp>
-#include <KokkosBlas1_scal.hpp>
-#include <KokkosBlas1_update.hpp>
-#include <KokkosBlas2_gemv.hpp>
+// #include <KokkosBlas1_axpby.hpp>
+// #include <KokkosBlas1_mult.hpp>
+// #include <KokkosBlas1_reciprocal.hpp>
+// #include <KokkosBlas1_scal.hpp>
+// #include <KokkosBlas1_update.hpp>
+// #include <KokkosBlas2_gemv.hpp>
 #include <Kokkos_Core.hpp>
 
 #include "converter.h"
