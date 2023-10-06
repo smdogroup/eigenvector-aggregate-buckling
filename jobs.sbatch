@@ -5,7 +5,7 @@
 #SBATCH -N1                      # Number of nodes
 #SBATCH --ntasks-per-node=1      # Number of cores per node required
 #SBATCH --mem-per-cpu=16gb
-#SBATCH --time=1:00:00
+#SBATCH --time=12:00:00
 #SBATCH -o out/Report-%j.out
 
 # stress minimization under frequency and volume constraint
@@ -19,12 +19,11 @@
 # omega_lb=$(printf "%.5f" $(echo "$k * $omega0" | bc))
 
 
-
-# srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 120 --r0 2.1 --vol-frac-ub 0.3 --maxit 100
+srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 240 --r0 2.1 --vol-frac-ub 0.3 --maxit 100
 
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 120 --r0 2.1 --vol-frac-ub 0.3 --compliance-ub 3.3e-05 --maxit 500
 
-srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.5 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160
+# srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.5 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160
 
 # ###################### building ######################
 # srun python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.25 --maxit 300 --compliance-scale 1e7 --note scale=1e7

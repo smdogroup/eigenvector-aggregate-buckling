@@ -1382,7 +1382,7 @@ class TopologyAnalysis:
 
     @time_this
     def solve_eigenvalue_problem(
-        self, x, ks_rho=1000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
+        self, x, ks_rho=1000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None, solve=True
     ):
         """
         Compute the k-th smallest natural frequencies
@@ -1456,14 +1456,18 @@ class TopologyAnalysis:
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
-        if self.N == len(self.reduced):
-            eigs, Qr = eigh(Kr.todense(), Mr.todense())
-        else:
-            eigs, Qr = sparse.linalg.eigsh(
-                Kr, M=Mr, k=self.N, sigma=sigma, which="LM", tol=1e-10
-            )
+        if solve:
+            if self.N == len(self.reduced):
+                eigs, Qr = eigh(Kr.todense(), Mr.todense())
+            else:
+                eigs, Qr = sparse.linalg.eigsh(
+                    Kr, M=Mr, k=self.N, sigma=sigma, which="LM", tol=1e-10
+                )
 
-        ic(np.allclose(Kr @ Qr, Mr @ Qr @ np.diag(eigs), atol=1e-10))
+            ic(np.allclose(Kr @ Qr, Mr @ Qr @ np.diag(eigs), atol=1e-10))
+        else:
+            eigs = np.zeros(self.N)
+            Qr = np.zeros((Kr.shape[0], self.N))
 
         Q = np.zeros((self.nvars, self.N), dtype=self.rho.dtype)
         for i in range(self.N):
@@ -1520,7 +1524,7 @@ class TopologyAnalysis:
         return np.sqrt(self.eigs)
 
     def solve_buckling(
-        self, x, ks_rho=10000.0, sigma=1.0, nodal_sols=None, nodal_vecs=None
+        self, x, ks_rho=10000.0, sigma=1.0, nodal_sols=None, nodal_vecs=None, solve=True
     ):
         self.N = self.N_b + 1
 
@@ -1593,23 +1597,32 @@ class TopologyAnalysis:
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
-        ic("Solving eigenvalue problem")
-        start = time.time()
+        ic(solve)
+        
+        if solve:
+            ic("Solving eigenvalue problem")
+            start = time.time()
 
-        if self.N == len(self.reduced) or (
-            self.check_gradient and self.rho.dtype == np.complex128
-        ):
-            mu, Qr = eigh(Gr.todense(), Kr.todense())
-            mu, Qr = mu[: self.N], Qr[:, : self.N]
-            pass
+            if self.N == len(self.reduced) or (
+                self.check_gradient and self.rho.dtype == np.complex128
+            ):
+                mu, Qr = eigh(Gr.todense(), Kr.todense())
+                mu, Qr = mu[: self.N], Qr[:, : self.N]
+                pass
+            else:
+                # Method 0: this is the fast and most accurate way to solve the eigenvalue problem
+                mu, Qr = sparse.linalg.eigsh(
+                    Gr, M=Kr, k=self.N, sigma=sigma, which="SM"
+                )
+
+            eigs = -1.0 / mu
+            end = time.time()
+            ic(end - start)
+            ic(np.allclose(Kr @ Qr, -Gr @ Qr @ np.diag(eigs), atol=1e-10))
         else:
-            # Method 0: this is the fast and most accurate way to solve the eigenvalue problem
-            mu, Qr = sparse.linalg.eigsh(Gr, M=Kr, k=self.N, sigma=sigma, which="SM")
-
-        eigs = -1.0 / mu
-        end = time.time()
-        print("scipy::eigsh", end - start)
-        ic(np.allclose(Kr @ Qr, -Gr @ Qr @ np.diag(eigs), atol=1e-10))
+            eigs = np.zeros(self.N)
+            Qr = np.zeros((Kr.shape[0], self.N))
+            mu = np.zeros(self.N)
 
         self.QGQ = np.zeros(self.N, dtype=x.dtype)
         for i in range(self.N):
@@ -1627,6 +1640,8 @@ class TopologyAnalysis:
         if nodal_vecs is not None:
             for i in range(self.N):
                 nodal_vecs["phi%d" % i] = [Q[0::2, i], Q[1::2, i]]
+
+        # check if frequency is on the constraint
 
         self.A, self.B = G, K
         self.Kr, self.u, self.Bfact = Kr, u, Kfact
@@ -2547,12 +2562,20 @@ class TopOptProb:
 
         # Solve the genrealized eigenvalue problem
         # compute ks_rho, N, and eta
+        if self.objf == "compliance" and self.confs == ["volume_ub"]:
+            solve = False
+        else:
+            solve = True
+        
+        ic(solve)
+
         if self.prob == "natural_frequency":
             omega = self.analysis.solve_eigenvalue_problem(
                 self.xfull,
                 ks_rho=self.ks_rho_natural_freq,
                 nodal_sols=vtk_nodal_sols,
                 nodal_vecs=vtk_nodal_vecs,
+                solve=solve,
             )
         elif self.prob == "buckling":
             omega = self.analysis.solve_buckling(
@@ -2560,6 +2583,7 @@ class TopOptProb:
                 ks_rho=self.ks_rho_buckling,
                 nodal_sols=vtk_nodal_sols,
                 nodal_vecs=vtk_nodal_vecs,
+                solve=solve,
             )
 
         # Evaluate objectives
@@ -2725,12 +2749,12 @@ class TopOptProb:
             Logger.log("%20s" % v, end="")
 
         fail = 0
-        
-        # update the filter beta: after step 400, increase it by 1 every 25 steps, up to 16
-        iter_crit = 400
+
+        # update the filter beta: after step 100, increase it by 1 every 25 steps, up to 16
+        iter_crit = 100
         if self.it_counter >= iter_crit:
-            if (self.it_counter - iter_crit) % 25 == 0:
-                self.analysis.fltr.beta += 1
+            if (self.it_counter - iter_crit) % 100 == 0:
+                self.analysis.fltr.beta += 0.5
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
         ic(self.it_counter, self.analysis.fltr.beta)
         
@@ -3212,7 +3236,9 @@ def main(args):
         kokkos.initialize()
 
     # Create the filter
-    fltr = NodeFilter(conn, X, r0, ftype=args.filter, beta=args.beta0, projection=args.proj)
+    fltr = NodeFilter(
+        conn, X, r0, ftype=args.filter, beta=args.beta0, projection=args.proj
+    )
     # Create analysis
     analysis = TopologyAnalysis(
         fltr,

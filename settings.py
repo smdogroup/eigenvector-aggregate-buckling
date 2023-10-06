@@ -53,8 +53,8 @@ def parse_cmd_args():
         "q": 5.0,  # RAMP penalization parameter
         "rho0_K": 1e-3,  # rho offset to prevent singular K
         "rho0_M": 1e-7,  # rho offset to prevent singular M
-        "proj": True,  # projector for filter
-        "beta0": 2.0,  # projector parameter at the beginning
+        "proj": False,  # projector for filter
+        "beta0": 3.0,  # projector parameter at the beginning
     }
 
     optimizer = {
