@@ -12,28 +12,14 @@ def parse_cmd_args():
         "objf": "frequency",  #  ["frequency", "stress", "volume", "compliance", "displacement"]
         "confs": [
             "volume_ub",
-            "frequency",
+            "compliance",
         ],  # ["volume_ub", "volume_lb", "frequency", "stress", "displacement", "compliance"]
-        "nx": 50,  # number of elements along x direction
+        "nx": 100,  # number of elements along x direction
         "frequency_scale": 3.5,  # scale the frequency objective obj = frequency * scale
         "stress_scale": 1.0,  # scale the stress objective obj = stress * scale
-        "compliance_scale": 1e7,  # scale the compliance objective obj = compliance * scale
+        "compliance_scale": 1e5,  # scale the compliance objective obj = compliance * scale
     }
-
-    ks_rho = {
-        "ks_rho_buckling": 1000.0,
-        "ks_rho_natural_freq": 1000.0,
-        "ks_rho_stress": 10.0,
-        "ks_rho_freq": 100.0,
-    }
-
-    softmax = {
-        "N_a": 2,  # lower bound of selected indices of eigenvalues
-        "N_b": 5,  # upper bound of selected indices of eigenvalues
-        "atype": 0,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
-        "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
-    }
-
+    
     constraint_bounds = {
         "omega_lb": None,
         "stress_ub": None,
@@ -41,6 +27,20 @@ def parse_cmd_args():
         "vol_frac_ub": None,
         "vol_frac_lb": None,
         "dis_ub": None,
+    }
+
+    ks_rho = {
+        "ks_rho_buckling": 1000.0,
+        "ks_rho_natural_freq": 1000.0,
+        "ks_rho_stress": 10.0,
+        "ks_rho_freq": 160.0, # from ferrari2021 paper
+    }
+
+    softmax = {
+        "N_a": 0,  # lower bound of selected indices of eigenvalues
+        "N_b": 5,  # upper bound of selected indices of eigenvalues
+        "atype": 1,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
+        "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     }
 
     filter = {
@@ -53,7 +53,8 @@ def parse_cmd_args():
         "q": 5.0,  # RAMP penalization parameter
         "rho0_K": 1e-3,  # rho offset to prevent singular K
         "rho0_M": 1e-7,  # rho offset to prevent singular M
-        "proj": False,  # projector for filter
+        "proj": True,  # projector for filter
+        "beta0": 2.0,  # projector parameter at the beginning
     }
 
     optimizer = {

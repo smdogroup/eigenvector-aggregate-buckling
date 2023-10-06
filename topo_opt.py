@@ -297,7 +297,6 @@ class NodeFilter:
         """
         Initialize the spatial filter
         """
-
         # Create a KD tree
         tree = spatial.KDTree(self.X)
 
@@ -1521,7 +1520,7 @@ class TopologyAnalysis:
         return np.sqrt(self.eigs)
 
     def solve_buckling(
-        self, x, ks_rho=10000.0, sigma=0.1, nodal_sols=None, nodal_vecs=None
+        self, x, ks_rho=10000.0, sigma=1.0, nodal_sols=None, nodal_vecs=None
     ):
         self.N = self.N_b + 1
 
@@ -2726,6 +2725,15 @@ class TopOptProb:
             Logger.log("%20s" % v, end="")
 
         fail = 0
+        
+        # update the filter beta: after step 400, increase it by 1 every 25 steps, up to 16
+        iter_crit = 400
+        if self.it_counter >= iter_crit:
+            if (self.it_counter - iter_crit) % 25 == 0:
+                self.analysis.fltr.beta += 1
+                self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
+        ic(self.it_counter, self.analysis.fltr.beta)
+        
         self.it_counter += 1
         return fail, obj, con
 
@@ -3204,7 +3212,7 @@ def main(args):
         kokkos.initialize()
 
     # Create the filter
-    fltr = NodeFilter(conn, X, r0, ftype=args.filter, projection=args.proj)
+    fltr = NodeFilter(conn, X, r0, ftype=args.filter, beta=args.beta0, projection=args.proj)
     # Create analysis
     analysis = TopologyAnalysis(
         fltr,
