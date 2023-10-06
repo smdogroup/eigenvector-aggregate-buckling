@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 project(buckling, LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Set warning flags
 add_compile_options(
@@ -23,6 +24,11 @@ find_package(Python COMPONENTS Interpreter Development)
 
 # build a shared library
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+SET(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+SET(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+SET(CMAKE_INCLUDE_CURRENT_DIR      ON)
+SET(CMAKE_UNITY_BUILD              OFF)
 
 # Set the source files and add module
 set(SOURCE_FILES src/warpper.cpp)
