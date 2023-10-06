@@ -408,7 +408,7 @@ def building(r0_=2.1, l=1.0, frac=2, nx=100, m0_block_frac=0.0):
     P = 1e-3
     forces = {}
     # apply a force at the top middle
-    offset = int(np.floor(m / 30))
+    offset = int(np.ceil(m / 30))
     for i in range(offset):
         forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
         forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
@@ -663,3 +663,113 @@ def visualize(prefix, X, bcs, non_design_nodes=None, forces=None):
 
     fig.savefig(os.path.join(prefix, "domain.png"), dpi=500, bbox_inches="tight")
     return
+
+
+# def building(r0_=2.1, l=1.0, frac=2, nx=100, m0_block_frac=0.0):
+#     """
+#     _______
+#     |     |
+#     |     |
+#     |     | n
+#     |     |
+#     |_____|
+#        m
+#     """
+
+#     m = nx
+#     n = int(np.ceil((frac * nx)))
+
+#     # make sure m and n is even
+#     if n % 2 == 0:
+#         n -= 1
+#     if m % 2 == 0:
+#         m -= 1
+
+#     nelems = m * n
+#     nnodes = (m + 1) * (n + 1)
+#     y = np.linspace(0, l * frac, n + 1)
+#     x = np.linspace(0, l, m + 1)
+#     nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
+
+#     ic(nodes.T.shape)
+
+#     # Set the node locations
+#     X = np.zeros((nnodes, 2))
+#     for j in range(n + 1):
+#         for i in range(m + 1):
+#             X[i + j * (m + 1), 0] = x[i]
+#             X[i + j * (m + 1), 1] = y[j]
+
+#     # Set the connectivity
+#     conn = np.zeros((nelems, 4), dtype=int)
+#     for j in range(n):
+#         for i in range(m):
+#             conn[i + j * m, 0] = nodes[j, i]
+#             conn[i + j * m, 1] = nodes[j, i + 1]
+#             conn[i + j * m, 2] = nodes[j + 1, i + 1]
+#             conn[i + j * m, 3] = nodes[j + 1, i]
+
+#     non_design_nodes = []
+#     # apply top middle a square block
+#     offset = int(np.ceil(m / 30))
+#     nm = 2 * offset
+
+#     for i in range(n - int(nm / 2) + 1, n + 1):
+#         for j in range((m - nm) // 2 + 1, (m + nm) // 2 + 1):
+#             non_design_nodes.append(nodes[i, j])
+
+#     # for i in range(n - nm + 1, n + 1):
+#     #     for j in range(0, nm):
+#     #         non_design_nodes.append(nodes[i, j])
+#     # for i in range(n - nm + 1, n + 1):
+#     #     for j in range(m - nm + 1, m + 1):
+#     #         non_design_nodes.append(nodes[i, j])
+
+#     # for i in range(n - nm + 1, n + 1):
+#     #     for j in range(0, m + 1):
+#     #         non_design_nodes.append(nodes[i, j])
+
+#     # h = n // 8
+#     # for i in range(1, 9):
+#     #     for j in range(m + 1):
+#     #         non_design_nodes.append(nodes[i * h, j])
+
+#     bcs = {}
+#     for j in range(m + 1):
+#         bcs[nodes[0, j]] = [0, 1]
+
+#     # bcs[nodes[0, 0]] = [0, 1]
+#     # bcs[nodes[0, m]] = [0, 1]
+
+#     # force is independent of the mesh size
+#     P = 1e-3
+#     forces = {}
+#     # apply a force at the top middle
+#     for i in range(offset):
+#         forces[nodes[n, m // 2 - i]] = [0, -P / nm]
+#         forces[nodes[n, m // 2 + 1 + i]] = [0, -P / nm]
+
+#     r0 = l / nx * r0_
+#     ic(r0)
+
+#     Ei = []
+#     Ej = []
+
+#     # 2-way reflection left to right
+#     for j in range(2 * (n + 1)):
+#         for i in range((m + 1) // 2):
+#             if j % 2 == 0:
+#                 Ej.extend([i + j * (m + 1) // 4])
+#             else:
+#                 Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
+#             Ei.extend([i + j * (m + 1) // 2])
+
+#     Ev = np.ones(len(Ei))
+#     dv_mapping = coo_matrix((Ev, (Ei, Ej)))
+
+#     # change dv_mapping to np.array
+#     # dv_mapping = np.array(dv_mapping.todense())
+#     # ic(dv_mapping.shape)
+#     # ic(dv_mapping)
+
+#     return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
