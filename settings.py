@@ -15,7 +15,7 @@ def parse_cmd_args():
             "compliance",
         ],  # ["volume_ub", "volume_lb", "frequency", "stress", "displacement", "compliance"]
         "nx": 100,  # number of elements along x direction
-        "frequency_scale": 3.5,  # scale the frequency objective obj = frequency * scale
+        "frequency_scale": 1.0,  # scale the frequency objective obj = frequency * scale
         "stress_scale": 1.0,  # scale the stress objective obj = stress * scale
         "compliance_scale": 1e5,  # scale the compliance objective obj = compliance * scale
     }
@@ -54,7 +54,7 @@ def parse_cmd_args():
         "rho0_K": 1e-3,  # rho offset to prevent singular K
         "rho0_M": 1e-7,  # rho offset to prevent singular M
         "proj": False,  # projector for filter
-        "beta0": 3.0,  # projector parameter at the beginning
+        "beta0": 1e-6,  # projector parameter at the beginning
     }
 
     optimizer = {

@@ -19,9 +19,9 @@
 # omega_lb=$(printf "%.5f" $(echo "$k * $omega0" | bc))
 
 
-srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 240 --r0 2.1 --vol-frac-ub 0.3 --maxit 100
+# srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 240 --r0 2.1 --vol-frac-ub 0.3 --maxit 100 --proj --beta0 1.0 --note proj0=1
 
-# srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 120 --r0 2.1 --vol-frac-ub 0.3 --compliance-ub 3.3e-05 --maxit 500
+srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 2.1 --vol-frac-ub 0.3 --compliance-ub 1.86e-05 --maxit 500 --frequency-scale 1.0 --note freq_scale=1
 
 # srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.5 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160
 

@@ -1598,7 +1598,7 @@ class TopologyAnalysis:
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
         ic(solve)
-        
+
         if solve:
             ic("Solving eigenvalue problem")
             start = time.time()
@@ -1615,12 +1615,13 @@ class TopologyAnalysis:
                     Gr, M=Kr, k=self.N, sigma=sigma, which="SM"
                 )
 
-            eigs = -1.0 / mu
+            BLF = -1.0 / mu
             end = time.time()
             ic(end - start)
-            ic(np.allclose(Kr @ Qr, -Gr @ Qr @ np.diag(eigs), atol=1e-10))
+            # BLF = - (Q^T * K * Q) / (Q^T * G * Q) or (K + BLF * G) * Q = 0
+            ic(np.allclose(Kr @ Qr + Gr @ Qr @ np.diag(BLF), 0.0, atol=1e-10))
         else:
-            eigs = np.zeros(self.N)
+            BLF = np.zeros(self.N)
             Qr = np.zeros((Kr.shape[0], self.N))
             mu = np.zeros(self.N)
 
@@ -1651,7 +1652,7 @@ class TopologyAnalysis:
         )
         self.dB = lambda q1, q2: self.stiffness_matrix_derivative(self.rho, q1, q2)
 
-        self.eigs, self.lam, self.Q = eigs, mu, Q  # Ar @ Qr = lam * Br @ Qr
+        self.eigs, self.lam, self.Q = BLF, mu, Q  # Ar @ Qr = lam * Br @ Qr
 
         self.lam_a = self.lam[self.N_a] - np.min(np.abs(self.lam)) * 0.5
         self.lam_b = self.lam[self.N_b] + np.min(np.abs(self.lam)) * 0.5
@@ -1680,7 +1681,7 @@ class TopologyAnalysis:
 
         # self.store_EG(Gr, Kr, ks_rho, self.N_a, self.N_b)
 
-        return np.sqrt(self.eigs)
+        return self.eigs
 
     def store_EG(self, Gr, Kr, ks_rho, N_a, N_b):
         # if this function is called, no need to call it again
@@ -2531,7 +2532,10 @@ class TopOptProb:
         # Functions of interest to be logged
         foi = OrderedDict()
         foi["area"] = "n/a"
-        foi["omega_ks"] = "n/a"
+        if self.prob == "natural_frequency":
+            foi["omega_ks"] = "n/a"
+        elif self.prob == "buckling":
+            foi["BLF_ks"] = "n/a"
         foi["stress_ks"] = "n/a"
 
         t_start = timer()
@@ -2566,7 +2570,7 @@ class TopOptProb:
             solve = False
         else:
             solve = True
-        
+
         ic(solve)
 
         if self.prob == "natural_frequency":
@@ -2578,7 +2582,7 @@ class TopOptProb:
                 solve=solve,
             )
         elif self.prob == "buckling":
-            omega = self.analysis.solve_buckling(
+            BLF = self.analysis.solve_buckling(
                 self.xfull,
                 ks_rho=self.ks_rho_buckling,
                 nodal_sols=vtk_nodal_sols,
@@ -2601,10 +2605,12 @@ class TopOptProb:
         elif self.objf == "frequency":
             if self.prob == "natural_frequency":
                 omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
+                obj = -self.frequency_scale * omega_ks
+                foi["omega_ks"] = omega_ks
             elif self.prob == "buckling":
-                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
-            obj = -self.frequency_scale * omega_ks
-            foi["omega_ks"] = omega_ks
+                BLF_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                obj = -self.frequency_scale * BLF_ks
+                foi["BLF_ks"] = BLF_ks
         elif self.objf == "compliance":
             compliance = self.analysis.compliance(self.xfull)
             obj = self.compliance_scale * compliance
@@ -2644,10 +2650,12 @@ class TopOptProb:
             assert self.omega_lb is not None
             if self.prob == "natural_frequency":
                 omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
+                con.append(omega_ks - self.omega_lb)
+                foi["omega_ks"] = omega_ks
             elif self.prob == "buckling":
-                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
-            con.append(omega_ks - self.omega_lb)
-            foi["omega_ks"] = omega_ks
+                BLF_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                con.append(BLF_ks - self.omega_lb)
+                foi["BLF_ks"] = BLF_ks
 
         if "stress" in self.confs:
             assert self.stress_ub is not None
@@ -2676,10 +2684,11 @@ class TopOptProb:
             )
             if self.prob == "natural_frequency":
                 omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
+                foi["omega_ks"] = omega_ks
             elif self.prob == "buckling":
-                omega_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                BLF_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                foi["BLF_ks"] = BLF_ks
             foi["stress_ks"] = stress_ks
-            foi["omega_ks"] = omega_ks
 
         # Save the design png and vtk
         if eval_all or (self.draw_history and self.it_counter % self.draw_every == 0):
@@ -2722,14 +2731,23 @@ class TopOptProb:
         with open(os.path.join(self.prefix, "frequencies.log"), "a") as f:
             if self.it_counter % 10 == 0:
                 f.write("\n%10s" % "iter")
-                for i in range(len(omega)):
-                    name = "omega[%d]" % i
-                    f.write("%25s" % name)
+                if self.prob == "natural_frequency":
+                    for i in range(len(omega)):
+                        name = "omega[%d]" % i
+                        f.write("%25s" % name)
+                elif self.prob == "buckling":
+                    for i in range(len(BLF)):
+                        name = "BLF[%d]" % i
+                        f.write("%25s" % name)
                 f.write("\n")
 
             f.write("%10d" % self.it_counter)
-            for i in range(len(omega)):
-                f.write("%25.15e" % omega[i])
+            if self.prob == "natural_frequency":
+                for i in range(len(omega)):
+                    f.write("%25.15e" % omega[i])
+            elif self.prob == "buckling":
+                for i in range(len(BLF)):
+                    f.write("%25.15e" % BLF[i])
             f.write("\n")
 
         t_end = timer()
@@ -2757,7 +2775,7 @@ class TopOptProb:
                 self.analysis.fltr.beta += 0.5
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
         ic(self.it_counter, self.analysis.fltr.beta)
-        
+
         self.it_counter += 1
         return fail, obj, con
 
