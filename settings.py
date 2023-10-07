@@ -22,6 +22,7 @@ def parse_cmd_args():
     
     constraint_bounds = {
         "omega_lb": None,
+        "BLF_lb": None,
         "stress_ub": None,
         "compliance_ub": None,
         "vol_frac_ub": None,

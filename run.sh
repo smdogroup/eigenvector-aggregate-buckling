@@ -36,7 +36,7 @@ fi
 
 # python3 topo_opt.py --domain beam --objf frequency --confs volume_ub displacement --nx 200 --maxit 100  --vol-frac-ub 0.5 --dis-ub 0.3 --r0 1.0 --check-gradient
 
-# python3.11 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement --nx 200 --maxit 500 --ptype-K simp  --vol-frac-ub 0.5 --dis-ub 0.3 --mode 3 --r0 2.1 --check-gradient --kokkos
+# python3.11 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement --nx 200 --maxit 800 --ptype-K simp  --vol-frac-ub 0.5 --dis-ub 0.3 --mode 3 --r0 2.1 --check-gradient --kokkos
 
 # python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement stress --nx 50 --maxit 200 --vol-frac-ub 0.5 --dis-ub 0.3 --stress-ub 1.00 --r0 2.1 --ks-rho 1e+6 --kokkos --check-gradient
 
@@ -55,27 +55,27 @@ fi
 # ###################### beam ######################
 # python3 topo_opt.py --domain beam --objf compliance --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.5 --maxit 100
 
-# python3 topo_opt.py --domain beam --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.5 --omega-lb 1000 --maxit 500
+# python3 topo_opt.py --domain beam --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.5 --omega-lb 1000 --maxit 800
 
 # smpirun
 # ###################### building ######################
 # python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 120 --r0 2.1 --vol-frac-ub 0.3 --maxit 100
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.25 --maxit 500 --kokkos --check-gradient
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.25 --maxit 800 --kokkos --check-gradient
 
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --kokkos --check-gradient 
+python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 120 --r0 2.1 --vol-frac-ub 0.3 --BLF-lb 8 --maxit 800
 
-python3 topo_opt.py --domain building --problem natural_frequency --objf frequency --confs volume_ub compliance --nx 120 --r0 2.1 --vol-frac-ub 0.3 --compliance-ub 3.36e-05 --maxit 500
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 120 --r0 2.1 --vol-frac-ub 0.3 --compliance-ub 1.86e-05 --maxit 800
  
 
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6 --note ks_rho=160 --kokkos
+# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 800 --stress-ub 5.0e+6 --note ks_rho=160 --kokkos
 
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 500 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160 --check-gradient
+# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 800 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160 --check-gradient
 
 # ###################### leg ######################
 # python3 topo_opt.py --domain leg --objf compliance --confs volume_ub --nx 50 --r0 1.1 --vol-frac-ub 0.2 --maxit 100
 
-# python3 topo_opt.py --domain leg --objf compliance --confs volume_ub frequency --nx 50 --r0 1.0 --vol-frac-ub 0.2 --omega-lb 600 --maxit 500 
+# python3 topo_opt.py --domain leg --objf compliance --confs volume_ub frequency --nx 50 --r0 1.0 --vol-frac-ub 0.2 --omega-lb 600 --maxit 800 
 
 
 # ###################### rhombus ######################

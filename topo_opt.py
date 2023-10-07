@@ -1597,8 +1597,6 @@ class TopologyAnalysis:
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
-        ic(solve)
-
         if solve:
             ic("Solving eigenvalue problem")
             start = time.time()
@@ -1625,9 +1623,9 @@ class TopologyAnalysis:
             Qr = np.zeros((Kr.shape[0], self.N))
             mu = np.zeros(self.N)
 
-        self.QGQ = np.zeros(self.N, dtype=x.dtype)
-        for i in range(self.N):
-            self.QGQ[i] = np.dot(Qr[:, i], Gr @ Qr[:, i])
+        # self.QGQ = np.zeros(self.N, dtype=x.dtype)
+        # for i in range(self.N):
+        #     self.QGQ[i] = np.dot(Qr[:, i], Gr @ Qr[:, i])
 
         Q = np.zeros((self.nvars, self.N), dtype=x.dtype)
         for i in range(self.N):
@@ -1756,34 +1754,36 @@ class TopologyAnalysis:
         """
         Compute the smoothed approximation of the smallest eigenvalue
         """
-        c = np.min(self.eigs)
-        eta = np.exp(-ks_rho * (self.eigs - c))
-        a = np.sum(eta)
-        ks_min = c - np.log(a) / ks_rho
-
+        # c = np.min(self.eigs)
+        # eta = np.exp(-ks_rho * (self.eigs - c))
+        # a = np.sum(eta)
+        # ks_min = c - np.log(a) / ks_rho
+        
+        mu = 1 / self.eigs
+        c = np.max(mu)
+        eta = np.exp(ks_rho * (mu - c))
+        ks_min = c + np.log(np.sum(eta)) / ks_rho
         return ks_min
 
     def ks_buckling_derivative(self, x, ks_rho=100.0):
-        c = np.min(self.eigs)
-        eta = np.exp(-ks_rho * (self.eigs - c))
-        a = np.sum(eta)
-        eta *= 1.0 / a
-
-        # Solve for the load path again here...
-        K = self.assemble_stiffness_matrix(self.rho)
-        Kr = self.reduce_matrix(K)
-        fr = self.reduce_vector(self.f)
-        Kfact = linalg.factorized(Kr)
-        ur = Kfact(fr)
-        u = self.full_vector(ur)
+        # c = np.min(self.eigs)
+        # eta = np.exp(-ks_rho * (self.eigs - c))
+        # a = np.sum(eta)
+        # eta *= 1.0 / a
+        
+        mu = 1 / self.eigs
+        c = np.max(mu)
+        eta = np.exp(ks_rho * (mu - c))
+        eta *= 1.0 / np.sum(eta)
 
         dfdrho = np.zeros(self.nnodes)
         Q = self.Q
 
         for i in range(len(self.eigs)):
             kx = self.stiffness_matrix_derivative(self.rho, Q[:, i], Q[:, i])
-            gx = self.stress_stiffness_derivative(self.rho, u, Q[:, i], Q[:, i], Kfact)
-            dfdrho -= eta[i] * (kx + self.eigs[i] * gx) / self.QGQ[i]
+            gx = self.stress_stiffness_derivative(self.rho, self.u, Q[:, i], Q[:, i], self.Bfact)
+            # dfdrho -= eta[i] * (kx + self.eigs[i] * gx) / self.QGQ[i]
+            dfdrho -= eta[i] * (gx + mu[i] * kx) # / self.QGQ[i]
 
         return self.fltr.applyGradient(dfdrho, x)
 
@@ -2439,6 +2439,7 @@ class TopOptProb:
         objf="frequency",
         confs="volume_ub",
         omega_lb=None,
+        BLF_lb=None,
         stress_ub=None,
         compliance_ub=None,
         frequency_scale=1e-2,
@@ -2458,6 +2459,7 @@ class TopOptProb:
         self.objf = objf
         self.confs = confs
         self.omega_lb = omega_lb
+        self.BLF_lb = BLF_lb
         self.stress_ub = stress_ub
         self.compliance_ub = compliance_ub
         self.frequency_scale = frequency_scale
@@ -2571,8 +2573,6 @@ class TopOptProb:
         else:
             solve = True
 
-        ic(solve)
-
         if self.prob == "natural_frequency":
             omega = self.analysis.solve_eigenvalue_problem(
                 self.xfull,
@@ -2608,9 +2608,9 @@ class TopOptProb:
                 obj = -self.frequency_scale * omega_ks
                 foi["omega_ks"] = omega_ks
             elif self.prob == "buckling":
-                BLF_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
-                obj = -self.frequency_scale * BLF_ks
-                foi["BLF_ks"] = BLF_ks
+                mu_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                obj = self.frequency_scale * mu_ks
+                foi["BLF_ks"] = 1 / mu_ks
         elif self.objf == "compliance":
             compliance = self.analysis.compliance(self.xfull)
             obj = self.compliance_scale * compliance
@@ -2647,15 +2647,17 @@ class TopOptProb:
                 foi["area"] = area / np.sum(self.area_gradient)
 
         if "frequency" in self.confs:
-            assert self.omega_lb is not None
             if self.prob == "natural_frequency":
+                assert self.omega_lb is not None 
                 omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
                 con.append(omega_ks - self.omega_lb)
                 foi["omega_ks"] = omega_ks
             elif self.prob == "buckling":
-                BLF_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
-                con.append(BLF_ks - self.omega_lb)
-                foi["BLF_ks"] = BLF_ks
+                assert self.BLF_lb is not None
+                mu_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                mu_ub = 1 / self.BLF_lb
+                con.append(1 - mu_ks / mu_ub)
+                foi["BLF_ks"] = 1 / mu_ks
 
         if "stress" in self.confs:
             assert self.stress_ub is not None
@@ -2686,8 +2688,8 @@ class TopOptProb:
                 omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
                 foi["omega_ks"] = omega_ks
             elif self.prob == "buckling":
-                BLF_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
-                foi["BLF_ks"] = BLF_ks
+                mu_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+                foi["BLF_ks"] = 1 / mu_ks
             foi["stress_ks"] = stress_ks
 
         # Save the design png and vtk
@@ -2771,7 +2773,7 @@ class TopOptProb:
         # update the filter beta: after step 100, increase it by 1 every 25 steps, up to 16
         iter_crit = 100
         if self.it_counter >= iter_crit:
-            if (self.it_counter - iter_crit) % 100 == 0:
+            if (self.it_counter - iter_crit) % 50 == 0:
                 self.analysis.fltr.beta += 0.5
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
         ic(self.it_counter, self.analysis.fltr.beta)
@@ -2812,12 +2814,12 @@ class TopOptProb:
                     )
             elif self.prob == "buckling":
                 if self.dv_mapping is not None:
-                    g[:] = -self.frequency_scale * self.dv_mapping.T.dot(
+                    g[:] = self.frequency_scale * self.dv_mapping.T.dot(
                         self.analysis.ks_buckling_derivative(self.xfull)
                     )
                 else:
                     g[:] = (
-                        -self.frequency_scale
+                        self.frequency_scale
                         * self.analysis.ks_buckling_derivative(self.xfull)[
                             self.design_nodes
                         ]
@@ -2896,11 +2898,11 @@ class TopOptProb:
                     ]
             elif self.prob == "buckling":
                 if self.dv_mapping is not None:
-                    A[index][:] = self.dv_mapping.T.dot(
+                    A[index][:] = -self.dv_mapping.T.dot(
                         self.analysis.ks_buckling_derivative(self.xfull)
                     )
                 else:
-                    A[index][:] = self.analysis.ks_buckling_derivative(self.xfull)[
+                    A[index][:] = -self.analysis.ks_buckling_derivative(self.xfull)[
                         self.design_nodes
                     ]
             index += 1
@@ -3306,6 +3308,7 @@ def main(args):
         objf=args.objf,
         confs=args.confs,
         omega_lb=args.omega_lb,
+        BLF_lb=args.BLF_lb,
         stress_ub=args.stress_ub,
         compliance_ub=args.compliance_ub,
         vol_frac_ub=args.vol_frac_ub,
