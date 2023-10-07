@@ -206,7 +206,7 @@ def create_folder(args):
             args.prefix = args.prefix + ", w=" + w
 
     if "compliance" in args.confs:
-        c = f"{args.compliance_ub:.2e}"
+        c = f"{args.compliance_ub_percent:.2f}"
         args.prefix = args.prefix + ", c=" + c
 
     if "displacement" in args.confs:

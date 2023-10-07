@@ -1524,7 +1524,7 @@ class TopologyAnalysis:
         return np.sqrt(self.eigs)
 
     def solve_buckling(
-        self, x, ks_rho=10000.0, sigma=1.0, nodal_sols=None, nodal_vecs=None, solve=True
+        self, x, ks_rho=10000.0, sigma=10.0, nodal_sols=None, nodal_vecs=None, solve=True
     ):
         self.N = self.N_b + 1
 
@@ -1758,7 +1758,7 @@ class TopologyAnalysis:
         # eta = np.exp(-ks_rho * (self.eigs - c))
         # a = np.sum(eta)
         # ks_min = c - np.log(a) / ks_rho
-        
+
         mu = 1 / self.eigs
         c = np.max(mu)
         eta = np.exp(ks_rho * (mu - c))
@@ -1770,7 +1770,7 @@ class TopologyAnalysis:
         # eta = np.exp(-ks_rho * (self.eigs - c))
         # a = np.sum(eta)
         # eta *= 1.0 / a
-        
+
         mu = 1 / self.eigs
         c = np.max(mu)
         eta = np.exp(ks_rho * (mu - c))
@@ -1781,9 +1781,11 @@ class TopologyAnalysis:
 
         for i in range(len(self.eigs)):
             kx = self.stiffness_matrix_derivative(self.rho, Q[:, i], Q[:, i])
-            gx = self.stress_stiffness_derivative(self.rho, self.u, Q[:, i], Q[:, i], self.Bfact)
+            gx = self.stress_stiffness_derivative(
+                self.rho, self.u, Q[:, i], Q[:, i], self.Bfact
+            )
             # dfdrho -= eta[i] * (kx + self.eigs[i] * gx) / self.QGQ[i]
-            dfdrho -= eta[i] * (gx + mu[i] * kx) # / self.QGQ[i]
+            dfdrho -= eta[i] * (gx + mu[i] * kx)  # / self.QGQ[i]
 
         return self.fltr.applyGradient(dfdrho, x)
 
@@ -2633,11 +2635,12 @@ class TopOptProb:
             area = self.analysis.eval_area(self.xfull)
             con.append(self.fixed_area_ub - area)
             foi["area"] = area / np.sum(self.area_gradient)
-            # if self.it_counter  can be devide by 10, compute the stress
-            stress_ks = self.analysis.eigenvector_stress(
-                self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
-            )
-            foi["stress_ks"] = stress_ks
+            # if self.it_counter  can be devide by 10, and stress is not in the confs, then compute stress
+            if self.it_counter % 5 == 0 and "stress" not in self.confs:
+                stress_ks = self.analysis.eigenvector_stress(
+                    self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
+                )
+                foi["stress_ks"] = stress_ks
 
         if "volume_lb" in self.confs:
             assert self.fixed_area_lb is not None
@@ -2648,7 +2651,7 @@ class TopOptProb:
 
         if "frequency" in self.confs:
             if self.prob == "natural_frequency":
-                assert self.omega_lb is not None 
+                assert self.omega_lb is not None
                 omega_ks = self.analysis.ks_omega(ks_rho=self.ks_rho_freq)
                 con.append(omega_ks - self.omega_lb)
                 foi["omega_ks"] = omega_ks
@@ -2771,9 +2774,9 @@ class TopOptProb:
         fail = 0
 
         # update the filter beta: after step 100, increase it by 1 every 25 steps, up to 16
-        iter_crit = 100
-        if self.it_counter >= iter_crit:
-            if (self.it_counter - iter_crit) % 50 == 0:
+        iter_crit = 0
+        if self.it_counter > iter_crit:
+            if (self.it_counter - iter_crit) % 25 == 0:
                 self.analysis.fltr.beta += 0.5
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
         ic(self.it_counter, self.analysis.fltr.beta)
@@ -3288,8 +3291,8 @@ def main(args):
 
     # if args.stress_ub is not None:
     #     args.ks_rho_stress = 100.0 / args.stress_ub
-    # if args.compliance_ub is not None and args.domain == "building":
-    #     args.compliance_ub = args.compliance_ub * 8.85 * 1e-6
+    if args.compliance_ub_percent is not None and args.domain == "building":
+        args.compliance_ub_percent = args.compliance_ub_percent * 7.5 * 1e-6
 
     # Create optimization problem
     topo = TopOptProb(
@@ -3310,7 +3313,7 @@ def main(args):
         omega_lb=args.omega_lb,
         BLF_lb=args.BLF_lb,
         stress_ub=args.stress_ub,
-        compliance_ub=args.compliance_ub,
+        compliance_ub=args.compliance_ub_percent,
         vol_frac_ub=args.vol_frac_ub,
         vol_frac_lb=args.vol_frac_lb,
         frequency_scale=args.frequency_scale,

@@ -24,7 +24,7 @@ def parse_cmd_args():
         "omega_lb": None,
         "BLF_lb": None,
         "stress_ub": None,
-        "compliance_ub": None,
+        "compliance_ub_percent": None,
         "vol_frac_ub": None,
         "vol_frac_lb": None,
         "dis_ub": None,
@@ -39,7 +39,7 @@ def parse_cmd_args():
 
     softmax = {
         "N_a": 0,  # lower bound of selected indices of eigenvalues
-        "N_b": 5,  # upper bound of selected indices of eigenvalues
+        "N_b": 3,  # upper bound of selected indices of eigenvalues
         "atype": 1,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
         "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     }

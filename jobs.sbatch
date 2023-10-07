@@ -21,9 +21,9 @@
 
 # srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 240 --r0 2.1 --vol-frac-ub 0.3 --maxit 100 --proj --beta0 1.0 --note proj0=1
 
-srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 2.1 --vol-frac-ub 0.3 --compliance-ub 1.86e-05 --maxit 800 --frequency-scale 5.0 --proj --note proj_delta=025freq_scale=5.0
+srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 2.1 --vol-frac-ub 0.3 --compliance-ub-percent 1.86e-05 --maxit 1000 --frequency-scale 5.0 --proj --note proj_delta=025freq_scale=5.0
 
-# srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.5 --vol-frac-ub 0.25 --omega-lb 20 --maxit 800 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160
+# srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.5 --vol-frac-ub 0.25 --omega-lb 20 --maxit 1000 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160
 
 # ###################### building ######################
 # srun python3 topo_opt.py --domain building --problem buckling --objf compliance --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.25 --maxit 300 --compliance-scale 1e7 --note scale=1e7
@@ -36,11 +36,11 @@ srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub co
 
 # srun python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub --nx 240 --r0 2.1 --vol-frac-ub 0.25 --maxit 300
 
-# srun python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub compliance --nx 100 --r0 1.0 --vol-frac-ub 0.25 --compliance-ub 1.9 --maxit 1000 
+# srun python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub compliance --nx 100 --r0 1.0 --vol-frac-ub 0.25 --compliance-ub-percent 1.9 --maxit 1000 
 
 # --frequency-scale 3.5 --note frequency_scale=3.5
 
-# srun python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub compliance stress --nx 100 --r0 1.0 --vol-frac-ub 0.25 --compliance-ub 1.5 --stress-ub 23 --maxit 1000
+# srun python3 topo_opt.py --domain building --problem buckling --objf frequency --confs volume_ub compliance stress --nx 100 --r0 1.0 --vol-frac-ub 0.25 --compliance-ub-percent 1.5 --stress-ub 23 --maxit 1000
 
 
 
@@ -62,11 +62,11 @@ srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub co
 # srun python3 topo_opt.py --optimizer pmma --objf frequency --confs volume_ub displacement stress --nx 400 --maxit 1000 --vol-frac-ub 0.4 --dis-ub 0.034 --stress-ub 3.6e+12
 
 ###################### beam ######################
-# srun python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub --nx 800 --maxit 1000 --vol-frac-ub 0.5
+# srun python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub --nx 1000 --maxit 1000 --vol-frac-ub 0.5
 
-# srun python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement --nx 800 --maxit 1000  --vol-frac-ub 0.5 --dis-ub 0.3
+# srun python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement --nx 1000 --maxit 1000  --vol-frac-ub 0.5 --dis-ub 0.3
 
-# srun python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub stress --nx 800 --maxit 1000 --vol-frac-ub 0.5 --stress-ub 0.5e+12
+# srun python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub stress --nx 1000 --maxit 1000 --vol-frac-ub 0.5 --stress-ub 0.5e+12
 
 # srun python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement stress --nx 200 --maxit 100 --vol-frac-ub 0.5 --dis-ub 0.3 --stress-ub 2.5e+12
 
