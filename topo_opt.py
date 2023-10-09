@@ -2778,7 +2778,7 @@ class TopOptProb:
         iter_crit = 0
         if self.it_counter > iter_crit:
             if (self.it_counter - iter_crit) % 1 == 0:
-                self.analysis.fltr.beta += 0.02
+                self.analysis.fltr.beta += 0.05
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
         ic(self.it_counter, self.analysis.fltr.beta)
 
