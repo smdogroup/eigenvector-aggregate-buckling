@@ -36,7 +36,7 @@ fi
 
 # python3 topo_opt.py --domain beam --objf frequency --confs volume_ub displacement --nx 200 --maxit 100  --vol-frac-ub 0.5 --dis-ub 0.3 --r0 1.0 --check-gradient
 
-# python3.11 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement --nx 200 --maxit 800 --ptype-K simp  --vol-frac-ub 0.5 --dis-ub 0.3 --mode 3 --r0 2.1 --check-gradient --kokkos
+# python3.11 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement --nx 200 --maxit 1000 --ptype-K simp  --vol-frac-ub 0.5 --dis-ub 0.3 --mode 3 --r0 2.1 --check-gradient --kokkos
 
 # python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement stress --nx 50 --maxit 200 --vol-frac-ub 0.5 --dis-ub 0.3 --stress-ub 1.00 --r0 2.1 --ks-rho 1e+6 --kokkos --check-gradient
 
@@ -55,27 +55,29 @@ fi
 # ###################### beam ######################
 # python3 topo_opt.py --domain beam --objf compliance --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.5 --maxit 100
 
-# python3 topo_opt.py --domain beam --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.5 --omega-lb 1000 --maxit 800
+# python3 topo_opt.py --domain beam --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.5 --omega-lb 1000 --maxit 1000
 
 # smpirun
 # ###################### building ######################
 # python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 120 --r0 2.1 --vol-frac-ub 0.3 --maxit 100
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.25 --maxit 800 --kokkos --check-gradient
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.25 --maxit 1000 --kokkos --check-gradient
 
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 120 --r0 1.0 --vol-frac-ub 0.3 --BLF-lb 8 --maxit 800
+# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 120 --r0 1.0 --vol-frac-ub 0.3 --BLF-lb 8 --maxit 1000
 
-python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 2.1 --vol-frac-ub 0.3 --proj --compliance-ub-percent 1.5 --maxit 800 --note sigma=100
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --frequency-scale 10.0 --compliance-ub-percent 2.5 --maxit 1000 --note freq_scale=1e6.0
+
+python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 240 --r0 4.0 --vol-frac-ub 0.3  --compliance-ub-percent 2.5 --stress-ub 1.0e+7 --frequency-scale 10.0 --maxit 1000 --note freq_scale=1e6.0
  
 
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 800 --stress-ub 5.0e+6 --note ks_rho=160 --kokkos
+# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 1000 --stress-ub 5.0e+6 --note ks_rho=160 --kokkos
 
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 800 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160 --check-gradient
+# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --maxit 1000 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160 --check-gradient
 
 # ###################### leg ######################
 # python3 topo_opt.py --domain leg --objf compliance --confs volume_ub --nx 50 --r0 1.1 --vol-frac-ub 0.2 --maxit 100
 
-# python3 topo_opt.py --domain leg --objf compliance --confs volume_ub frequency --nx 50 --r0 1.0 --vol-frac-ub 0.2 --omega-lb 600 --maxit 800 
+# python3 topo_opt.py --domain leg --objf compliance --confs volume_ub frequency --nx 50 --r0 1.0 --vol-frac-ub 0.2 --omega-lb 600 --maxit 1000 
 
 
 # ###################### rhombus ######################

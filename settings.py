@@ -31,16 +31,17 @@ def parse_cmd_args():
     }
 
     ks_rho = {
-        "ks_rho_buckling": 1000.0,
+        "ks_rho_buckling": 3000.0,
         "ks_rho_natural_freq": 1000.0,
-        "ks_rho_stress": 10.0,
+        "ks_rho_stress": 30.0,
         "ks_rho_freq": 160.0, # from ferrari2021 paper
     }
 
     softmax = {
         "N_a": 0,  # lower bound of selected indices of eigenvalues
-        "N_b": 3,  # upper bound of selected indices of eigenvalues
-        "atype": 1,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
+        "N_b": 0,  # upper bound of selected indices of eigenvalues
+        "N": 12,  # number of eigenvalues
+        "atype": 0,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
         "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     }
 

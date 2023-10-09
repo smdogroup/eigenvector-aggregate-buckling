@@ -488,6 +488,7 @@ class TopologyAnalysis:
         fun="tanh",
         N_a=0,
         N_b=10,
+        N = 12,
         atype=True,
         E=1.0,  # to make sure eigs is not too large, E=10.0 * 1e6,
         nu=0.3,
@@ -535,6 +536,7 @@ class TopologyAnalysis:
         self.fun = getattr(mp, fun)
         self.N_a = N_a
         self.N_b = N_b
+        self.N = N
         self.atype = atype
 
         self.check_gradient = check_gradient
@@ -1388,8 +1390,6 @@ class TopologyAnalysis:
         Compute the k-th smallest natural frequencies
         Populate nodal_sols and cell_sols if provided
         """
-        self.N = self.N_b + 1
-
         if ks_rho > 1000.0:
             ks_rho = 1000.0
 
@@ -1504,6 +1504,7 @@ class TopologyAnalysis:
             self.eta = np.exp(-ks_rho * (self.lam - np.min(self.lam)))
             self.ks_rho = ks_rho
             self.N_a = 0
+            self.N_b = self.N - 1
         else:
             if self.fun == mp.exp:
                 self.ks_rho = -ks_rho
@@ -1526,8 +1527,6 @@ class TopologyAnalysis:
     def solve_buckling(
         self, x, ks_rho=10000.0, sigma=10.0, nodal_sols=None, nodal_vecs=None, solve=True
     ):
-        self.N = self.N_b + 1
-
         if self.N > len(self.reduced):
             self.N = len(self.reduced)
 
@@ -1651,14 +1650,16 @@ class TopologyAnalysis:
         self.dB = lambda q1, q2: self.stiffness_matrix_derivative(self.rho, q1, q2)
 
         self.eigs, self.lam, self.Q = BLF, mu, Q  # Ar @ Qr = lam * Br @ Qr
-
-        self.lam_a = self.lam[self.N_a] - np.min(np.abs(self.lam)) * 0.5
-        self.lam_b = self.lam[self.N_b] + np.min(np.abs(self.lam)) * 0.5
+        self.lam_a = self.lam[self.N_a] - np.abs(self.lam[self.N_a] - self.lam[np.min([self.N_a - 1, 0])]) * 1e-6
+        self.lam_b = self.lam[self.N_b] + np.abs(self.lam[self.N_b] - self.lam[np.min([self.N_b + 1, self.N - 1])]) * 1e-6
+        
+        ic(self.lam_a, self.lam_b)
 
         if self.atype:
             self.ks_rho = ks_rho
             self.eta = np.exp(-self.ks_rho * (self.lam - np.min(self.lam)))
             self.N_a = 0
+            self.N_b = self.N - 1
         else:
             if self.fun == mp.exp:
                 self.ks_rho = -ks_rho
@@ -2776,8 +2777,8 @@ class TopOptProb:
         # update the filter beta: after step 100, increase it by 1 every 25 steps, up to 16
         iter_crit = 0
         if self.it_counter > iter_crit:
-            if (self.it_counter - iter_crit) % 25 == 0:
-                self.analysis.fltr.beta += 0.5
+            if (self.it_counter - iter_crit) % 1 == 0:
+                self.analysis.fltr.beta += 0.02
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
         ic(self.it_counter, self.analysis.fltr.beta)
 
@@ -3065,12 +3066,13 @@ def gradient_check(topo, problem):
 
     # use the complex step method to check the derivative
     dh = 1e-5
-    x = np.ones(topo.nnodes)
+    x = 0.5 + 0.5 * np.random.uniform(size=topo.nnodes)
     px = np.random.RandomState(0).rand(topo.nnodes)
     q1 = np.random.RandomState(1).rand(topo.nvars)
     q2 = np.random.RandomState(2).rand(topo.nvars)
 
     init(x)
+    # lam_a, lam_b = topo.lam_a, topo.lam_b
     K = topo.assemble_stiffness_matrix(topo.rho)
     u, Kfact = compute_u(topo.f, K)
 
@@ -3092,6 +3094,7 @@ def gradient_check(topo, problem):
 
     # use central difference to check the derivative
     init(x + dh * px)
+    # topo.lam_a, topo.lam_b = lam_a, lam_b
     if problem == "natural_frequency":
         omega1 = topo.ks_omega()
     elif problem == "buckling":
@@ -3102,6 +3105,7 @@ def gradient_check(topo, problem):
     # s1 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     init(x - dh * px)
+    # topo.lam_a, topo.lam_b = lam_a, lam_b
     if problem == "natural_frequency":
         omega2 = topo.ks_omega()
     elif problem == "buckling":
@@ -3274,6 +3278,7 @@ def main(args):
         fun=args.fun,
         N_a=args.N_a,
         N_b=args.N_b,
+        N = args.N,
         atype=args.atype,
         ptype_K=args.ptype_K,
         ptype_M=args.ptype_M,
