@@ -1525,7 +1525,7 @@ class TopologyAnalysis:
         return np.sqrt(self.eigs)
 
     def solve_buckling(
-        self, x, ks_rho=10000.0, sigma=10.0, nodal_sols=None, nodal_vecs=None, solve=True
+        self, x, ks_rho=10000.0, sigma=50.0, nodal_sols=None, nodal_vecs=None, solve=True
     ):
         if self.N > len(self.reduced):
             self.N = len(self.reduced)
@@ -1616,7 +1616,7 @@ class TopologyAnalysis:
             end = time.time()
             ic(end - start)
             # BLF = - (Q^T * K * Q) / (Q^T * G * Q) or (K + BLF * G) * Q = 0
-            ic(np.allclose(Kr @ Qr + Gr @ Qr @ np.diag(BLF), 0.0, atol=1e-10))
+            ic(np.allclose(Kr @ Qr + Gr @ Qr @ np.diag(BLF), 0.0, atol=1e-6))
         else:
             BLF = np.zeros(self.N)
             Qr = np.zeros((Kr.shape[0], self.N))
@@ -1650,8 +1650,14 @@ class TopologyAnalysis:
         self.dB = lambda q1, q2: self.stiffness_matrix_derivative(self.rho, q1, q2)
 
         self.eigs, self.lam, self.Q = BLF, mu, Q  # Ar @ Qr = lam * Br @ Qr
-        self.lam_a = self.lam[self.N_a] - np.abs(self.lam[self.N_a] - self.lam[np.min([self.N_a - 1, 0])]) * 1e-6
-        self.lam_b = self.lam[self.N_b] + np.abs(self.lam[self.N_b] - self.lam[np.min([self.N_b + 1, self.N - 1])]) * 1e-6
+        
+        if self.N_a == self.N_b:
+            scale = 1e-6
+        else:
+            scale = 0.5
+            
+        self.lam_a = self.lam[self.N_a] - np.abs(self.lam[self.N_a] - self.lam[np.min([self.N_a - 1, 0])]) * scale
+        self.lam_b = self.lam[self.N_b] + np.abs(self.lam[self.N_b] - self.lam[np.min([self.N_b + 1, self.N - 1])]) * scale
         
         ic(self.lam_a, self.lam_b)
 
@@ -2346,7 +2352,6 @@ class TopologyAnalysis:
 
         # Form a full factorization for the preconditioner
         factor = 0.99  # Should always be < 1 to ensure P is positive definite.
-        # Make this a parameter we can set??
         P = Ar - factor * lam[0] * Br
         P = P.tocsc()
         Pfactor = linalg.factorized(P)
@@ -2450,6 +2455,7 @@ class TopOptProb:
         compliance_scale=1e6,
         check_gradient=False,
         domain="square",
+        delta_beta=0.1,
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -2471,6 +2477,7 @@ class TopOptProb:
         self.lb = lb
         self.check_gradient = check_gradient
         self.domain = domain
+        self.delta_beta = delta_beta
 
         # Add more non-design constant to matrices
         self.add_mat0("M", non_design_nodes, density=m0)
@@ -2778,7 +2785,7 @@ class TopOptProb:
         iter_crit = 0
         if self.it_counter > iter_crit:
             if (self.it_counter - iter_crit) % 1 == 0:
-                self.analysis.fltr.beta += 0.05
+                self.analysis.fltr.beta += self.delta_beta
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
         ic(self.it_counter, self.analysis.fltr.beta)
 
@@ -3327,6 +3334,7 @@ def main(args):
         dis_ub=args.dis_ub,
         check_gradient=args.check_gradient,
         domain=args.domain,
+        delta_beta=args.delta_beta,
     )
 
     # Print info
