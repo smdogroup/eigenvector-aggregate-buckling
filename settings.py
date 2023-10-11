@@ -14,8 +14,8 @@ def parse_cmd_args():
             "volume_ub",
             "compliance",
         ],  # ["volume_ub", "volume_lb", "frequency", "stress", "displacement", "compliance"]
-        "nx": 100,  # number of elements along x direction
-        "frequency_scale": 1.0,  # scale the frequency objective obj = frequency * scale
+        "nx": 240,  # number of elements along x direction
+        "frequency_scale": 10.0,  # scale the frequency objective obj = frequency * scale
         "stress_scale": 1.0,  # scale the stress objective obj = stress * scale
         "compliance_scale": 1e5,  # scale the compliance objective obj = compliance * scale
         "it_stress_start": 5,  # iteration to start stress constraint
@@ -34,13 +34,13 @@ def parse_cmd_args():
     ks_rho = {
         "ks_rho_buckling": 3000.0,
         "ks_rho_natural_freq": 1000.0,
-        "ks_rho_stress": 30.0,
+        "ks_rho_stress": 10.0,
         "ks_rho_freq": 160.0, # from ferrari2021 paper
     }
 
     softmax = {
-        "N_a": 0,  # lower bound of selected indices of eigenvalues
-        "N_b": 0,  # upper bound of selected indices of eigenvalues
+        "N_a": 5,  # lower bound of selected indices of eigenvalues
+        "N_b": 5,  # upper bound of selected indices of eigenvalues
         "N": 12,  # number of eigenvalues
         "atype": 0,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
         "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
@@ -56,7 +56,7 @@ def parse_cmd_args():
         "q": 5.0,  # RAMP penalization parameter
         "rho0_K": 1e-3,  # rho offset to prevent singular K
         "rho0_M": 1e-7,  # rho offset to prevent singular M
-        "proj": False,  # projector for filter
+        "proj": True,  # projector for filter
         "beta0": 1e-6,  # projector parameter at the beginning
         "delta_beta": 0.1,  # projector parameter increment
     }
@@ -65,7 +65,7 @@ def parse_cmd_args():
         "optimizer": "pmma",  # ["pmma", "mma4py", "tr"]
         "movelim": 0.2,  # move limit for design variables, for mma4py only
         "lb": 1e-06,  # lower bound of design variables
-        "maxit": 200,  # maximum number of iterations
+        "maxit": 1000,  # maximum number of iterations
     }
 
     check = {

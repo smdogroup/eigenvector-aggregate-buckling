@@ -239,14 +239,14 @@ ic(lam)
 # lam, Q = sparse.linalg.eigsh(B, M=A, k=N, sigma=1.0, which="LM", mode="buckling")
 # ic(lam)
 
-eta = np.exp(-rho * (lam - np.min(lam)))
-eta = eta / np.sum(eta)
+# eta = np.exp(-rho * (lam - np.min(lam)))
+# eta = eta / np.sum(eta)
 
-times = []
+# times = []
 
-ans = np.dot(deriv(rho, A, B, D, Adot, Bdot, Ddot, ndvs=ndvs), p)
-ans_approx = np.dot(deriv_approx(A, B, D, Adot, Bdot, Ddot, ndvs=ndvs, rho=rho, N=N), p)
+# ans = np.dot(deriv(rho, A, B, D, Adot, Bdot, Ddot, ndvs=ndvs), p)
+# ans_approx = np.dot(deriv_approx(A, B, D, Adot, Bdot, Ddot, ndvs=ndvs, rho=rho, N=N), p)
 
-print("ans = ", ans)
-print("ans_approx = ", ans_approx)
-print("error = ", np.abs(ans - ans_approx) / np.abs(ans))
+# print("ans = ", ans)
+# print("ans_approx = ", ans_approx)
+# print("error = ", np.abs(ans - ans_approx) / np.abs(ans))

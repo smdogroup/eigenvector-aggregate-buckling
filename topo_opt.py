@@ -1525,7 +1525,7 @@ class TopologyAnalysis:
         return np.sqrt(self.eigs)
 
     def solve_buckling(
-        self, x, ks_rho=10000.0, sigma=50.0, nodal_sols=None, nodal_vecs=None, solve=True
+        self, x, ks_rho=10000.0, sigma=10.0, nodal_sols=None, nodal_vecs=None, solve=True
     ):
         if self.N > len(self.reduced):
             self.N = len(self.reduced)

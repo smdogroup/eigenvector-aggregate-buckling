@@ -23,7 +23,7 @@
 
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 1.7 --maxit 1000 --proj --frequency-scale 10.0 --note proj=1e-6=0=1=0.1freq_scale=10N=12
 
-srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 240 --r0 2.1 --vol-frac-ub 0.3 --compliance-ub-percent 10.0 --stress-ub 10 --maxit 1000 --frequency-scale 10.0 --ks-rho-stress 1000 --note ks_rho_stress=1000sigma=100Na=Nb=1
+srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 25
 
 # srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress displacement --nx 50 --r0 1.5 --vol-frac-ub 0.25 --omega-lb 20 --maxit 1000 --stress-ub 5.0e+6  --dis-ub 0.1 --note ks_rho=160
 
