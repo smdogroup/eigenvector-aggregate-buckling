@@ -2468,7 +2468,9 @@ class TopOptProb:
         compliance_scale=1e6,
         check_gradient=False,
         domain="square",
+        iter_crit=0,
         delta_beta=0.1,
+        delta_p=0.01,
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -2490,7 +2492,9 @@ class TopOptProb:
         self.lb = lb
         self.check_gradient = check_gradient
         self.domain = domain
+        self.iter_crit = iter_crit
         self.delta_beta = delta_beta
+        self.delta_p = delta_p
 
         # Add more non-design constant to matrices
         self.add_mat0("M", non_design_nodes, density=m0)
@@ -2595,6 +2599,11 @@ class TopOptProb:
             solve = False
         else:
             solve = True
+            
+        if self.it_counter == 0:
+            sigma = 10
+        else:
+            sigma = self.analysis.eigs[0]
 
         if self.prob == "natural_frequency":
             omega = self.analysis.solve_eigenvalue_problem(
@@ -2608,6 +2617,7 @@ class TopOptProb:
             BLF = self.analysis.solve_buckling(
                 self.xfull,
                 ks_rho=self.ks_rho_buckling,
+                sigma=sigma,
                 nodal_sols=vtk_nodal_sols,
                 nodal_vecs=vtk_nodal_vecs,
                 solve=solve,
@@ -2795,12 +2805,18 @@ class TopOptProb:
         fail = 0
 
         # update the filter beta: after step 100, increase it by 1 every 25 steps, up to 16
+        if self.it_counter > self.iter_crit:
+            if (self.it_counter - self.iter_crit) % 1 == 0:
+                self.analysis.fltr.beta += self.delta_beta
+                self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
+                
         iter_crit = 0
         if self.it_counter > iter_crit:
             if (self.it_counter - iter_crit) % 1 == 0:
-                self.analysis.fltr.beta += self.delta_beta
-                self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
-        ic(self.it_counter, self.analysis.fltr.beta)
+                self.analysis.p += self.delta_p
+                self.analysis.p = min(self.analysis.p, 6)
+        
+        ic(self.it_counter, self.analysis.fltr.beta, self.analysis.p)
 
         self.it_counter += 1
         return fail, obj, con
@@ -3346,7 +3362,9 @@ def main(args):
         dis_ub=args.dis_ub,
         check_gradient=args.check_gradient,
         domain=args.domain,
+        iter_crit=args.iter_crit,
         delta_beta=args.delta_beta,
+        delta_p=args.delta_p,
     )
 
     # Print info

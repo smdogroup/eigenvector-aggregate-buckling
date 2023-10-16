@@ -39,7 +39,7 @@ def parse_cmd_args():
     }
 
     softmax = {
-        "N_a": 3,  # lower bound of selected indices of eigenvalues
+        "N_a": 0,  # lower bound of selected indices of eigenvalues
         "N_b": 3,  # upper bound of selected indices of eigenvalues
         "N": 6,  # number of eigenvalues
         "atype": 0,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
@@ -58,7 +58,9 @@ def parse_cmd_args():
         "rho0_M": 1e-7,  # rho offset to prevent singular M
         "proj": False,  # projector for filter
         "beta0": 1e-6,  # projector parameter at the beginning
+        "iter_crit": 0,  # iteration to start projector
         "delta_beta": 0.1,  # projector parameter increment
+        "delta_p": 0.0,  # "simp" penalization parameter increment
     }
 
     optimizer = {

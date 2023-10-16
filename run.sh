@@ -63,29 +63,29 @@ fi
 
 
 # ###################### tree ######################
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 100 --r0 2.0 --vol-frac-ub 0.5 --maxit 100 --note tree
+# python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 100 --r0 2.0 --vol-frac-ub 0.5 --maxit 100 
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 100 --r0 2.0 --vol-frac-ub 0.5 --maxit 1000 --note tree
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 100 --r0 2.0 --vol-frac-ub 0.5 --maxit 1000 
 
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 100 --r0 2.0 --vol-frac-ub 0.5 --BLF-lb 10 --maxit 1000 --note tree,BLF-lb=10
+# python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 100 --r0 2.0 --vol-frac-ub 0.5 --BLF-lb 10 --maxit 1000 ,BLF-lb=10
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 100 --r0 2.0 --vol-frac-ub 0.5 --compliance-ub-percent 1.5 --note tree
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 100 --r0 2.0 --vol-frac-ub 0.5 --compliance-ub-percent 1.5 
 
 # smpirun
 # ###################### building ######################
-# python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 100 --r0 2.1 --vol-frac-ub 0.5 --proj --maxit 100 --note tree
+# python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 100 --r0 2.1 --vol-frac-ub 0.3 --proj --maxit 100 
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 100 --r0 2.1 --vol-frac-ub 0.25 --proj --maxit 1000 --note tree
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 100 --r0 2.1 --vol-frac-ub 0.3 --proj --maxit 1000 
 
 # python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 120 --r0 1.0 --vol-frac-ub 0.3 --BLF-lb 8 --proj --maxit 1000
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --proj
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --proj --note speedup
 
-python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --dis-ub 0.1 --proj --note freq_scale=1e6.0 --check-gradient
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --dis-ub 0.1 --proj --note freq_scale=1e6.0 --check-gradient
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 200 --r0 3.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 25 --proj
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 32 --r0 3.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 25 --proj --check-gradient
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress displacement --nx 240 --r0 2.0 --vol-frac-ub 0.3  --compliance-ub-percent 2.5 --stress-ub 50.0 --dis-ub 0.1 --frequency-scale 10.0 --proj --maxit 1000 --note freq_scale=1e6.0 --check-gradient
+python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress displacement --nx 32 --r0 2.0 --vol-frac-ub 0.3  --compliance-ub-percent 2.5 --stress-ub 50.0 --dis-ub 0.1 --frequency-scale 10.0 --proj --maxit 1000 --note freq_scale=1e6.0 --iter-crit 10
 
 # python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --proj --maxit 1000 --stress-ub 5.0e+6 --note ks_rho=160 --kokkos
 
