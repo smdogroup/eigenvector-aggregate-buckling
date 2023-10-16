@@ -782,13 +782,17 @@ def square(r0_, l=1.0, nx=30, m0_block_frac=0.0):
 #     return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
 
 
-def visualize(prefix, X, bcs, non_design_nodes=None, forces=None):
+def visualize(prefix, X, bcs, non_design_nodes=None, forces=None, index=None):
     markersize = 1.0
     fig, ax = plt.subplots()
     ax.set_aspect("equal")
 
     ax.scatter(X[:, 0], X[:, 1], color="black", s=markersize)
 
+    if forces:
+        for i, v in forces.items():
+            ax.scatter(X[i, 0], X[i, 1], color="orange", s=markersize)
+            
     if bcs:
         for i, v in bcs.items():
             if len(v) == 2:
@@ -800,9 +804,9 @@ def visualize(prefix, X, bcs, non_design_nodes=None, forces=None):
         m0_X = np.array([X[i, :] for i in non_design_nodes])
         ax.scatter(m0_X[:, 0], m0_X[:, 1], color="blue", s=markersize)
 
-    if forces:
-        for i, v in forces.items():
-            ax.scatter(X[i, 0], X[i, 1], color="orange", s=markersize)
+    if index:
+        m0_X = np.array([X[index, :]])
+        ax.scatter(m0_X[:, 0], m0_X[:, 1], color="r", s=2*markersize)
 
     fig.savefig(os.path.join(prefix, "domain.png"), dpi=500, bbox_inches="tight")
     return

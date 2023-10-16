@@ -488,7 +488,7 @@ class TopologyAnalysis:
         fun="tanh",
         N_a=0,
         N_b=10,
-        N = 12,
+        N=12,
         atype=True,
         E=1.0,  # to make sure eigs is not too large, E=10.0 * 1e6,
         nu=0.3,
@@ -1525,7 +1525,13 @@ class TopologyAnalysis:
         return np.sqrt(self.eigs)
 
     def solve_buckling(
-        self, x, ks_rho=10000.0, sigma=10.0, nodal_sols=None, nodal_vecs=None, solve=True
+        self,
+        x,
+        ks_rho=10000.0,
+        sigma=10.0,
+        nodal_sols=None,
+        nodal_vecs=None,
+        solve=True,
     ):
         if self.N > len(self.reduced):
             self.N = len(self.reduced)
@@ -1650,15 +1656,22 @@ class TopologyAnalysis:
         self.dB = lambda q1, q2: self.stiffness_matrix_derivative(self.rho, q1, q2)
 
         self.eigs, self.lam, self.Q = BLF, mu, Q  # Ar @ Qr = lam * Br @ Qr
-        
+
         if self.N_a == self.N_b:
             scale = 1e-6
         else:
             scale = 0.5
-            
-        self.lam_a = self.lam[self.N_a] - np.abs(self.lam[self.N_a] - self.lam[np.min([self.N_a - 1, 0])]) * scale
-        self.lam_b = self.lam[self.N_b] + np.abs(self.lam[self.N_b] - self.lam[np.min([self.N_b + 1, self.N - 1])]) * scale
-        
+
+        self.lam_a = (
+            self.lam[self.N_a]
+            - np.abs(self.lam[self.N_a] - self.lam[np.min([self.N_a - 1, 0])]) * scale
+        )
+        self.lam_b = (
+            self.lam[self.N_b]
+            + np.abs(self.lam[self.N_b] - self.lam[np.min([self.N_b + 1, self.N - 1])])
+            * scale
+        )
+
         ic(self.lam_a, self.lam_b)
 
         if self.atype:
@@ -3217,14 +3230,11 @@ def main(args):
         )
         dv_mapping = None
 
-    # Check the mesh
-    domain.visualize(args.prefix, X, bcs, non_design_nodes, forces)
-
     # for there is displacement constraint, we need to use the displacement constraint
     if "beam" in args.domain:
         m = args.nx
         n = int(np.ceil((args.nx / 8)))
-    elif "building" or "leg" in args.domain:
+    elif "building" in args.domain or "leg" in args.domain:
         m = args.nx
         n = int(np.ceil((2 * args.nx)))
     elif "square" in args.domain:
@@ -3237,6 +3247,7 @@ def main(args):
         raise ValueError("Not supported domain")
 
     D_index = None
+    indx = None
     ic(args.domain, args.objf, args.confs, m, n)
     for conf in args.confs:
         if conf == "displacement":
@@ -3262,9 +3273,12 @@ def main(args):
             if args.domain == "building":
                 if args.mode == 1:
                     # node_loc=(0.5*n, 0.5*m), x direction
-                    indx = int((0.5 * n * (m + 1) + 0.5 * m))
+                    # indx = int((0.5 * n * (m + 1) + 0.5 * m))
+                    indx = 47160
                     ic(indx)
-                    D_index = [2 * indx, 2 * indx + 1]
+                    D_index = [2 * indx + 1]
+
+    domain.visualize(args.prefix, X, bcs, non_design_nodes, forces, indx)
 
     if args.kokkos:
         kokkos.initialize()
@@ -3285,7 +3299,7 @@ def main(args):
         fun=args.fun,
         N_a=args.N_a,
         N_b=args.N_b,
-        N = args.N,
+        N=args.N,
         atype=args.atype,
         ptype_K=args.ptype_K,
         ptype_M=args.ptype_M,
@@ -3301,10 +3315,8 @@ def main(args):
         kokkos=args.kokkos,
     )
 
-    # if args.stress_ub is not None:
-    #     args.ks_rho_stress = 100.0 / args.stress_ub
-    if args.compliance_ub_percent is not None and args.domain == "building":
-        args.compliance_ub_percent = args.compliance_ub_percent * 7.5 * 1e-6
+    if args.compliance_ub_percent is not None:
+        args.compliance_ub_percent = args.compliance_ub_percent * args.min_compliance
 
     # Create optimization problem
     topo = TopOptProb(
