@@ -40,6 +40,9 @@ fi
 
 # python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement stress --nx 50 --maxit 200 --vol-frac-ub 0.5 --dis-ub 0.3 --stress-ub 1.00 --r0 2.1 --ks-rho 1e+6 --kokkos --check-gradient
 
+python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 100 --r0 2.0 --vol-frac-ub 0.3 --maxit 500 --compliance-ub-percent 3 --note P=1e-3
+# python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 100 --r0 2.0 --vol-frac-ub 0.3 --maxit 500 --note P=1e-3
+
 # ###################### square ######################
 # echo "Running square problem, check log file in output/square"
 # python3 topo_opt.py --domain square --objf frequency --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.4 --maxit 100 --r0 1.2
@@ -65,9 +68,9 @@ fi
 
 # python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 120 --r0 1.0 --vol-frac-ub 0.3 --BLF-lb 8 --maxit 1000
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --frequency-scale 10.0 --compliance-ub-percent 2.5 --maxit 1000 --note freq_scale=1e6.0
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5
 
-python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 25
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 200 --r0 3.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 25
 
 # python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress displacement --nx 240 --r0 2.0 --vol-frac-ub 0.3  --compliance-ub-percent 2.5 --stress-ub 50.0 --dis-ub 0.1 --frequency-scale 10.0 --maxit 1000 --note freq_scale=1e6.0 --check-gradient
 

@@ -519,7 +519,7 @@ def leg(r0_=2.1, l=8.0, frac=2, nx=100, m0_block_frac=0.0):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
-def square(r0_, l=8.0, nx=30, m0_block_frac=0.0):
+def square(r0_, l=1.0, nx=30, m0_block_frac=0.0):
     """
     Args:
         l: length of the square
@@ -565,29 +565,42 @@ def square(r0_, l=8.0, nx=30, m0_block_frac=0.0):
 
     offset = int(nx * 0.1)
 
-    for i in range(offset):
-        bcs[nodes[0, i]] = [1]
-        bcs[nodes[0, m - i]] = [1]
-        bcs[nodes[n, i]] = [1]
-        bcs[nodes[n, m - i]] = [1]
+    # for i in range(offset):
+    #     bcs[nodes[0, i]] = [1]
+    #     bcs[nodes[0, m - i]] = [1]
+    #     bcs[nodes[n, i]] = [1]
+    #     bcs[nodes[n, m - i]] = [1]
 
-    for j in range(offset):
-        bcs[nodes[j, 0]] = [0]
-        bcs[nodes[j, m]] = [0]
-        bcs[nodes[n - j, 0]] = [0]
-        bcs[nodes[n - j, m]] = [0]
+    # for j in range(offset):
+    #     bcs[nodes[j, 0]] = [0]
+    #     bcs[nodes[j, m]] = [0]
+    #     bcs[nodes[n - j, 0]] = [0]
+    #     bcs[nodes[n - j, m]] = [0]
 
     # fix the bottom left corner
     bcs[nodes[0, 0]] = [0, 1]
     # fix the bottom right corner
-    bcs[nodes[0, m]] = [0, 1]
-    # fix the top left corner
-    bcs[nodes[n, 0]] = [0, 1]
-    # fix the top right corner
-    bcs[nodes[n, m]] = [0, 1]
+    # bcs[nodes[0, m]] = [0, 1]
+    bcs[nodes[0, m]] = [1]
+    # # fix the top left corner
+    # bcs[nodes[n, 0]] = [0, 1]
+    bcs[nodes[n, 0]] = [0]
+    # # fix the top right corner
+    # bcs[nodes[n, m]] = [0, 1]
 
-    # P = 10.0
+    P = 1e-3
     forces = {}
+    # apply force for the four sides uniformly
+    for i in range(nodes.shape[1]):
+        # forces[nodes[0, i]] = [0, P / nodes.shape[1]]
+        forces[nodes[n, i]] = [0, -P / nodes.shape[1]]
+        # forces[nodes[i, 0]] = [P / nodes.shape[1], 0]
+        forces[nodes[i, m]] = [-P / nodes.shape[1], 0]
+
+    # forces[nodes[n, 0]] = [P, -P]
+    # forces[nodes[n, m]] = [-P, -P]
+        
+    
     # pn = n // 10
     # for j in range(pn):
     #     forces[nodes[j, -1]] = [0, -P / pn]
@@ -637,6 +650,136 @@ def square(r0_, l=8.0, nx=30, m0_block_frac=0.0):
     dv_mapping = coo_matrix((Ev, (Ei, Ej)))
 
     return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
+
+
+# def square(r0_, l=1.0, nx=30, m0_block_frac=0.0):
+#     """
+#     Args:
+#         l: length of the square
+#         nx: number of elements along x direction
+#     """
+
+#     # Generate the square domain problem by default
+#     m = nx
+#     n = nx
+
+#     nelems = m * n
+#     nnodes = (m + 1) * (n + 1)
+
+#     y = np.linspace(0, l, n + 1)
+#     x = np.linspace(0, l, m + 1)
+#     nodes = np.arange(0, (n + 1) * (m + 1)).reshape((n + 1, m + 1))
+
+#     # Set the node locations
+#     X = np.zeros((nnodes, 2))
+#     for j in range(n + 1):
+#         for i in range(m + 1):
+#             X[i + j * (m + 1), 0] = x[i]
+#             X[i + j * (m + 1), 1] = y[j]
+
+#     # Set the connectivity
+#     conn = np.zeros((nelems, 4), dtype=int)
+#     for j in range(n):
+#         for i in range(m):
+#             conn[i + j * m, 0] = nodes[j, i]
+#             conn[i + j * m, 1] = nodes[j, i + 1]
+#             conn[i + j * m, 2] = nodes[j + 1, i + 1]
+#             conn[i + j * m, 3] = nodes[j + 1, i]
+
+#     # We would like the center node or element to be the non-design region
+#     non_design_nodes = []
+#     # offset = int(m0_block_frac * nx * 0.5)
+#     # for j in range(n // 2 - offset, (n + 1) // 2 + 1 + offset):
+#     #     for i in range(n // 2 - offset, (n + 1) // 2 + 1 + offset):
+#     #         non_design_nodes.append(nodes[j, i])
+
+#     # Constrain all boundaries
+#     bcs = {}
+
+#     offset = int(nx * 0.1)
+
+#     for i in range(offset):
+#         bcs[nodes[0, i]] = [1]
+#         bcs[nodes[0, m - i]] = [1]
+#         bcs[nodes[n, i]] = [1]
+#         bcs[nodes[n, m - i]] = [1]
+
+#     for j in range(offset):
+#         bcs[nodes[j, 0]] = [0]
+#         bcs[nodes[j, m]] = [0]
+#         bcs[nodes[n - j, 0]] = [0]
+#         bcs[nodes[n - j, m]] = [0]
+
+#     # fix the bottom left corner
+#     bcs[nodes[0, 0]] = [0, 1]
+#     # fix the bottom right corner
+#     bcs[nodes[0, m]] = [0, 1]
+#     # fix the top left corner
+#     bcs[nodes[n, 0]] = [0, 1]
+#     # fix the top right corner
+#     bcs[nodes[n, m]] = [0, 1]
+
+#     P = 1e-3
+#     forces = {}
+#     # # apply force for the four sides uniformly
+#     # for i in range(nodes.shape[1]):
+#     #     forces[nodes[0, i]] = [0, P / nodes.shape[1]]
+#     #     forces[nodes[n, i]] = [0, -P / nodes.shape[1]]
+#     #     forces[nodes[i, 0]] = [P / nodes.shape[1], 0]
+#     #     forces[nodes[i, m]] = [-P / nodes.shape[1], 0]
+    
+#     # apply force at the center in x, y direction
+#     forces[nodes[n//2, m//2]] = [P, P]
+#     forces[nodes[n//2, m//2]] = [-P, -P]
+#     # pn = n // 10
+#     # for j in range(pn):
+#     #     forces[nodes[j, -1]] = [0, -P / pn]
+
+#     r0 = l / nx * r0_
+
+#     # Create the mapping E such that x = E*xr, where xr is the nodal variable
+#     # of a quarter and is controlled by the optimizer, x is the nodal variable
+#     # of the entire domain
+#     Ei = []
+#     Ej = []
+#     redu_idx = 0
+
+#     # 8-way reflection
+#     for j in range(1, (n + 1) // 2):
+#         for i in range(j):
+#             if nodes[j, i] not in non_design_nodes:
+#                 Ej.extend(8 * [redu_idx])
+#                 Ei.extend(
+#                     [nodes[j, i], nodes[j, m - i], nodes[n - j, i], nodes[n - j, m - i]]
+#                 )
+#                 Ei.extend(
+#                     [nodes[i, j], nodes[i, m - j], nodes[n - i, j], nodes[n - i, m - j]]
+#                 )
+#                 redu_idx += 1
+
+#     # 4-way reflection of diagonals
+#     for i in range((n + 1) // 2):
+#         if nodes[i, i] not in non_design_nodes:
+#             Ej.extend(4 * [redu_idx])
+#             Ei.extend(
+#                 [nodes[i, i], nodes[i, m - i], nodes[n - i, i], nodes[n - i, m - i]]
+#             )
+#             redu_idx += 1
+
+#     # 4-way reflection of x- and y-symmetry axes, only apply if number of elements
+#     # along x (and y) is even
+#     if n % 2 == 0:
+#         j = n // 2
+#         for i in range(j + 1):
+#             if nodes[i, j] not in non_design_nodes:
+#                 Ej.extend(4 * [redu_idx])
+#                 Ei.extend([nodes[i, j], nodes[n - i, j], nodes[j, i], nodes[j, n - i]])
+#                 redu_idx += 1
+
+#     Ev = np.ones(len(Ei))
+#     dv_mapping = coo_matrix((Ev, (Ei, Ej)))
+
+#     return conn, X, r0, bcs, forces, non_design_nodes, dv_mapping
 
 
 def visualize(prefix, X, bcs, non_design_nodes=None, forces=None):

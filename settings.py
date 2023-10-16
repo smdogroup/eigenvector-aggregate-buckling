@@ -18,7 +18,6 @@ def parse_cmd_args():
         "frequency_scale": 10.0,  # scale the frequency objective obj = frequency * scale
         "stress_scale": 1.0,  # scale the stress objective obj = stress * scale
         "compliance_scale": 1e5,  # scale the compliance objective obj = compliance * scale
-        "it_stress_start": 5,  # iteration to start stress constraint
     }
     
     constraint_bounds = {
@@ -39,9 +38,9 @@ def parse_cmd_args():
     }
 
     softmax = {
-        "N_a": 5,  # lower bound of selected indices of eigenvalues
-        "N_b": 5,  # upper bound of selected indices of eigenvalues
-        "N": 12,  # number of eigenvalues
+        "N_a": 0,  # lower bound of selected indices of eigenvalues
+        "N_b": 0,  # upper bound of selected indices of eigenvalues
+        "N": 6,  # number of eigenvalues
         "atype": 0,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
         "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     }
