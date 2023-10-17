@@ -189,7 +189,7 @@ def create_folder(args):
     if args.confs != []:
         if args.domain == "square":
             if args.vol_frac_ub != 0.4:
-                v = f"{args.vol_frac_ub:.1f}"
+                v = f"{args.vol_frac_ub:.2f}"
                 args.prefix = args.prefix + ", v=" + v
         elif args.domain == "beam":
             if args.vol_frac_ub != 0.5:

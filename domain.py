@@ -588,7 +588,7 @@ def square(r0_, l=1.0, nx=30, m0_block_frac=0.0):
     # # fix the top right corner
     # bcs[nodes[n, m]] = [0, 1]
 
-    P = 1e-3
+    P = 2e-3
     forces = {}
     # apply force for the four sides uniformly
     for i in range(nodes.shape[1]):

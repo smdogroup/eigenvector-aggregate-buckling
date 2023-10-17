@@ -19,6 +19,7 @@ def parse_cmd_args():
         "stress_scale": 1.0,  # scale the stress objective obj = stress * scale
         "compliance_scale": 1e5,  # scale the compliance objective obj = compliance * scale
         "min_compliance": 7.5e-6,  # building: 7.5e-6, square: 2.75e-5
+        "sigma_scale": 1.0,  # scale the eigenvalue initial guess
     }
     
     constraint_bounds = {
@@ -40,7 +41,7 @@ def parse_cmd_args():
 
     softmax = {
         "N_a": 0,  # lower bound of selected indices of eigenvalues
-        "N_b": 3,  # upper bound of selected indices of eigenvalues
+        "N_b": 0,  # upper bound of selected indices of eigenvalues
         "N": 6,  # number of eigenvalues
         "atype": 0,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
         "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:

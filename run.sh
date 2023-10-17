@@ -44,6 +44,8 @@ fi
 
 # python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 100 --r0 2.0 --vol-frac-ub 0.3 --proj --maxit 500 --compliance-ub-percent 3 --note P=1e-3
 
+python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.3 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 1.1e-4 --proj --note P=2e-3,min-new2 --sigma-scale 2.0
+
 # ###################### square ######################
 # echo "Running square problem, check log file in output/square"
 # python3 topo_opt.py --domain square --objf frequency --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.4 --maxit 100 --r0 1.2
@@ -85,7 +87,7 @@ fi
 
 # python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 32 --r0 3.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 25 --proj --check-gradient
 
-python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress displacement --nx 32 --r0 2.0 --vol-frac-ub 0.3  --compliance-ub-percent 2.5 --stress-ub 50.0 --dis-ub 0.1 --frequency-scale 10.0 --proj --maxit 1000 --note freq_scale=1e6.0 --iter-crit 10
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress displacement --nx 32 --r0 2.0 --vol-frac-ub 0.3  --compliance-ub-percent 2.5 --stress-ub 50.0 --dis-ub 0.1 --frequency-scale 10.0 --proj --maxit 1000 --note freq_scale=1e6.0 --iter-crit 10
 
 # python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency stress --nx 50 --r0 1.0 --vol-frac-ub 0.25 --omega-lb 20 --proj --maxit 1000 --stress-ub 5.0e+6 --note ks_rho=160 --kokkos
 

@@ -21,21 +21,23 @@
 
 # srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 240 --r0 4.0 --vol-frac-ub 0.3 --maxit 100 --proj --note proj=1e-6=0=1=400=0.02
 
-# srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --N 12 --proj --min-compliance 7.5e-6 --note N=12
+# srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 3.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --N 12 --proj --min-compliance 7.5e-6 --delta-p 0.01 --note N=12,delta-p=0.01
 
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 40 --ks-rho-stress 1 --proj --min-compliance 7.5e-6 --note N=12ks_rho_stress=1
 
-srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --dis-ub 0.05 --min-compliance 7.5e-6 --proj
+# srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --dis-ub 0.4 --min-compliance 7.5e-6 --proj
 
 
 ###################### square ######################
-# srun python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 400 --r0 4.0 --vol-frac-ub 0.3 --maxit 1000 --proj --note P=1e-3
+# srun python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 300 --r0 6.0 --vol-frac-ub 0.3 --maxit 500 --delta-p 0.01 --proj --note P=2e-3,delta-p=0.01
 
-# srun python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 400 --r0 4.0 --vol-frac-ub 0.3 --maxit 1000 --compliance-ub-percent 3.0 --delta-beta 0.01 --min-compliance 2.75e-5 --proj --note P=1e-3,delta-beta=0.01
-
-
+srun python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.3 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 1.1e-4 --proj --note P=2e-3,min-new2
 
 
+
+# 1.14e-4
+# 1.475e-4
+# 1.84e-4
 
 
 
