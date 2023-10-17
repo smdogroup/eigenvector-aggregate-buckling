@@ -2464,6 +2464,7 @@ class TopOptProb:
         stress_ub=None,
         compliance_ub=None,
         frequency_scale=1e-2,
+        sigma_fixed=True,
         sigma_scale=1,
         stress_scale=1e-12,
         compliance_scale=1e6,
@@ -2488,6 +2489,7 @@ class TopOptProb:
         self.stress_ub = stress_ub
         self.compliance_ub = compliance_ub
         self.frequency_scale = frequency_scale
+        self.sigma_fixed = sigma_fixed
         self.sigma_scale = sigma_scale
         self.stress_scale = stress_scale
         self.compliance_scale = compliance_scale
@@ -2604,9 +2606,11 @@ class TopOptProb:
             
         if self.it_counter == 0:
             sigma = 10
-        else:
+        elif self.sigma_fixed == False:
             sigma = self.analysis.eigs[0] * self.sigma_scale
-            ic(sigma)
+        else:
+            sigma = self.sigma_scale
+        ic(sigma)
 
         if self.prob == "natural_frequency":
             omega = self.analysis.solve_eigenvalue_problem(
@@ -3360,6 +3364,7 @@ def main(args):
         vol_frac_ub=args.vol_frac_ub,
         vol_frac_lb=args.vol_frac_lb,
         frequency_scale=args.frequency_scale,
+        sigma_fixed=args.sigma_fixed,
         sigma_scale = args.sigma_scale,
         stress_scale=args.stress_scale,
         compliance_scale=args.compliance_scale,
