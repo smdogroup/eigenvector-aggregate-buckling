@@ -31,22 +31,16 @@
 ###################### square ######################
 # srun python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 300 --r0 6.0 --vol-frac-ub 0.3 --maxit 500 --delta-p 0.01 --proj --iter-crit 0 --note P=5e-3,delta-p=0.01,iter_crit=0
 
-srun python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.4 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 8e-5 --delta-p 0.01 --iter-crit 200 --proj --note delta-p=0,iter_crit=200
-
-
-# 1.1e-4
-# 1.475e-4
-# 1.84e-4
+# srun python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.4 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 8e-5 --delta-p 0.01 --iter-crit 200 --proj --note delta-p=0,iter_crit=200
 
 
 
 
 
+###################### beam ######################
+# srun python3 topo_opt.py --domain beam --objf compliance --confs volume_ub --nx 360 --r0 3.6 --vol-frac-ub 0.45 --maxit 500 --proj --note P-offset
 
-
-
-
-
+srun python3 topo_opt.py --domain beam --objf frequency --confs volume_ub compliance --nx 360 --r0 7.2 --vol-frac-ub 0.45 --min-compliance 7.7e-6 --compliance-ub-percent 2.5 --delta-p 0.01 --maxit 1000 --proj --note proj,delta-p=0.01
 
 
 

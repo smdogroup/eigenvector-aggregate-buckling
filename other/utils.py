@@ -189,12 +189,17 @@ def create_folder(args):
     if args.confs != []:
         v = f"{args.vol_frac_ub:.2f}"
         args.prefix = args.prefix + ", v=" + v
-
-    N_a = f"{args.N_a}"
-    args.prefix = args.prefix + ", Na=" + N_a
     
-    N_b = f"{args.N_b}"
-    args.prefix = args.prefix + ", Nb=" + N_b
+    if "compliance-buckling" in args.objf:
+        w = f"{args.weight:.2f}"
+        args.prefix = args.prefix + ", w=" + w
+
+    if "displacement" in args.confs or "stress" in args.confs:
+        N_a = f"{args.N_a}"
+        args.prefix = args.prefix + ", Na=" + N_a
+        
+        N_b = f"{args.N_b}"
+        args.prefix = args.prefix + ", Nb=" + N_b
     
     if args.m0_block_frac != 0.0:
         m = f"{args.m0_block_frac:.2f}"

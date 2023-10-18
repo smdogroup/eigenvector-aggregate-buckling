@@ -61,7 +61,10 @@ fi
 # ###################### beam ######################
 # python3 topo_opt.py --domain beam --objf compliance --confs volume_ub --nx 100 --r0 1.0 --vol-frac-ub 0.15 --maxit 100
 
-python3 topo_opt.py --domain beam --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.5 --min-compliance 8e-6 --compliance-ub-percent 3.0 --maxit 1000 --note new
+# python3 topo_opt.py --domain beam --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.5 --min-compliance 8e-6 --compliance-ub-percent 3.0 --maxit 1000 --note new
+
+
+# python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.5 --maxit 1000 --proj
 
 # python3 topo_opt.py --domain beam --objf compliance --confs volume_ub frequency --nx 100 --r0 1.0 --vol-frac-ub 0.5 --omega-lb 1000 --maxit 1000
 
@@ -89,7 +92,9 @@ python3 topo_opt.py --domain beam --objf frequency --confs volume_ub compliance 
 
 # python3 topo_opt.py --domain building --objf compliance --confs volume_ub frequency --nx 120 --r0 1.0 --vol-frac-ub 0.3 --BLF-lb 8 --proj --maxit 1000
 
-# python3 topo_opt.py --domain bui>lding --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --proj --note speedup
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --proj --note speedup
+
+python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub --nx 240 --r0 6.0 --vol-frac-ub 0.3
 
 # python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --dis-ub 0.1 --proj --note freq_scale=1e6.0 --check-gradient
 

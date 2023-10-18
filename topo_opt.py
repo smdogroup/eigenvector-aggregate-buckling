@@ -2468,6 +2468,9 @@ class TopOptProb:
         sigma_scale=1,
         stress_scale=1e-12,
         compliance_scale=1e6,
+        weight=0.5,
+        c0=1e-6,
+        mu_ks0=1.0,
         check_gradient=False,
         domain="square",
         iter_crit=0,
@@ -2493,6 +2496,9 @@ class TopOptProb:
         self.sigma_scale = sigma_scale
         self.stress_scale = stress_scale
         self.compliance_scale = compliance_scale
+        self.weight = weight
+        self.c0 = c0
+        self.mu_ks0 = mu_ks0
         self.lb = lb
         self.check_gradient = check_gradient
         self.domain = domain
@@ -2569,6 +2575,8 @@ class TopOptProb:
             foi["omega_ks"] = "n/a"
         elif self.prob == "buckling":
             foi["BLF_ks"] = "n/a"
+            if self.objf == "compliance-buckling":
+                foi["compliance"] = "n/a"
         foi["stress_ks"] = "n/a"
 
         t_start = timer()
@@ -2605,11 +2613,12 @@ class TopOptProb:
             solve = True
             
         if self.it_counter == 0:
-            sigma = 10
+            sigma = 100
         elif self.sigma_fixed == False:
             sigma = self.analysis.eigs[0] * self.sigma_scale
         else:
             sigma = self.sigma_scale
+        sigma = np.min([sigma, 1e+3])
         ic(sigma)
 
         if self.prob == "natural_frequency":
@@ -2655,6 +2664,21 @@ class TopOptProb:
             compliance = self.analysis.compliance(self.xfull)
             obj = self.compliance_scale * compliance
             foi["compliance"] = compliance
+        elif self.objf == "compliance-buckling":
+            if self.prob == "natural_frequency":
+                print("compliance-buckling is not available for natural frequency")
+                exit()
+                
+            compliance = self.analysis.compliance(self.xfull)
+            mu_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
+            obj = self.weight * (compliance / self.c0) + (1 - self.weight) * (mu_ks / self.mu_ks0)
+
+            foi["compliance"] = compliance
+            foi["BLF_ks"] = 1 / mu_ks
+            
+            ic((compliance / self.c0))
+            ic((mu_ks / self.mu_ks0))
+
         elif self.objf == "displacement":
             displacement = self.analysis.eigenvector_displacement()
             obj = 10 * displacement
@@ -2881,6 +2905,17 @@ class TopOptProb:
                     self.compliance_scale
                     * self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
                 )
+                
+        elif self.objf == "compliance-buckling":
+            d_compliance = self.analysis.compliance_gradient(self.xfull)
+            d_buckling = self.analysis.ks_buckling_derivative(self.xfull)
+            d_compliance_buckling = self.weight * d_compliance / self.c0 + (1 - self.weight) * d_buckling / self.mu_ks0
+            
+            if self.dv_mapping is not None:
+                g[:] = self.dv_mapping.T.dot(d_compliance_buckling)
+            else:
+                g[:] = d_compliance_buckling[self.design_nodes]
+        
         elif self.objf == "displacement":
             if self.dv_mapping is not None:
                 g[:] = 10 * self.dv_mapping.T.dot(
@@ -3256,7 +3291,7 @@ def main(args):
     # for there is displacement constraint, we need to use the displacement constraint
     if "beam" in args.domain:
         m = args.nx
-        n = int(np.ceil((args.nx / 8)))
+        n = int(np.ceil((args.nx / 3)))
     elif "building" in args.domain or "leg" in args.domain:
         m = args.nx
         n = int(np.ceil((2 * args.nx)))
@@ -3368,6 +3403,9 @@ def main(args):
         sigma_scale = args.sigma_scale,
         stress_scale=args.stress_scale,
         compliance_scale=args.compliance_scale,
+        weight = args.weight,
+        c0 = args.c0,
+        mu_ks0 = args.mu_ks0,
         dis_ub=args.dis_ub,
         check_gradient=args.check_gradient,
         domain=args.domain,

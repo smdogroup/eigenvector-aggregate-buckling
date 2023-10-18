@@ -21,6 +21,9 @@ def parse_cmd_args():
         "min_compliance": 7.5e-6,  # building: 7.5e-6, square: 2.75e-5
         "sigma_fixed": False,  # fix the eigenvalue initial guess
         "sigma_scale": 100.0,  # scale the eigenvalue initial guess
+        "weight": 0.5,  # weight for the compliance for obj=compliance + buckling
+        "c0": 8e-6,  # initial value of the compliance
+        "mu_ks0": 0.1,  # initial value of the KS_BLF
     }
     
     constraint_bounds = {
@@ -51,7 +54,7 @@ def parse_cmd_args():
     filter = {
         "filter": "spatial",  # ["spatial", "helmholtz"]
         "m0": 0.0,  # magnitude of non-design mass
-        "r0": 2.1,  # filter radius = r0 * lx / nx
+        "r0": 6.0,  # filter radius = r0 * lx / nx
         "ptype_K": "simp",  # material penalization for stiffness matrix: ["ramp", "simp"]
         "ptype_M": "linear",  # material penalization for mass matrix: ["ramp", "msimp", "linear"]
         "p": 3.0,  # SIMP penalization parameter
@@ -62,7 +65,7 @@ def parse_cmd_args():
         "beta0": 1e-6,  # projector parameter at the beginning
         "iter_crit": 0,  # iteration to start projector
         "delta_beta": 0.1,  # projector parameter increment
-        "delta_p": 0.0,  # "simp" penalization parameter increment
+        "delta_p": 0.01,  # "simp" penalization parameter increment
     }
 
     optimizer = {
