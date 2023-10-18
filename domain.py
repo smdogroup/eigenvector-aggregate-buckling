@@ -144,7 +144,7 @@ def lbracket(r0_=2.1, l=8.0, lfrac=0.4, nx=96, m0_block_frac=0.0):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
-def beam(r0_=2.1, l=8.0, frac=0.125, nx=100, prob="natural_frequency"):
+def beam(r0_=2.1, l=1.0, frac=1/3, nx=100, prob="natural_frequency"):
     """
     _____________|_____________
     |                         |
@@ -194,23 +194,43 @@ def beam(r0_=2.1, l=8.0, frac=0.125, nx=100, prob="natural_frequency"):
 
     bcs = {}
     forces = {}
-    if prob == "natural_frequency":
-        # fix the middle left and right
-        bcs[nodes[n // 2, 0]] = [0, 1]
-        bcs[nodes[n // 2, m]] = [0, 1]
-    elif prob == "buckling":
-        # fix the bottom left and right
-        offset = int(np.ceil(m * 0.02))
-        for i in range(offset):
-            bcs[nodes[0, i]] = [0, 1]
-            bcs[nodes[0, m - i]] = [0, 1]
+    
+    bcs[nodes[n // 2, 0]] = [1]
+    bcs[nodes[n // 2, m]] = [1]
+    bcs[nodes[n // 2, m // 2]] = [0]
+    # if prob == "natural_frequency":
+    #     # fix the middle left and right
+    #     bcs[nodes[n // 2, 0]] = [0, 1]
+    #     bcs[nodes[n // 2, m]] = [0, 1]
+    # elif prob == "buckling":
+    #     # fix the bottom left and right
+    #     offset = int(np.ceil(m * 0.02))
+    #     for i in range(offset):
+    #         bcs[nodes[0, i]] = [0, 1]
+    #         bcs[nodes[0, m - i]] = [0, 1]
 
-        # force is independent of the mesh size apply a force at the top middle
-        P = 100.0
-        offset = int(np.ceil(m / 40))
-        for i in range(offset):
-            forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
-            forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
+    #     # force is independent of the mesh size apply a force at the top middle
+    #     P = 100.0
+    #     offset = int(np.ceil(m / 40))
+    #     for i in range(offset):
+    #         forces[nodes[n, m // 2 - i]] = [0, -P / (2 * offset)]
+    #         forces[nodes[n, m // 2 + 1 + i]] = [0, -P / (2 * offset)]
+    offset = int(np.ceil(m / 50))
+    P = 1e-3
+    for i in range(offset):
+        forces[nodes[n // 2 - i, 0]] = [P / (2 * offset), 0]
+        forces[nodes[n // 2 + 1 + i, 0]] = [P / (2 * offset), 0]
+        forces[nodes[n // 2 - i, m]] = [-P / (2 * offset), 0]
+        forces[nodes[n // 2 + 1 + i, m]] = [-P / (2 * offset), 0]
+    
+    # for i in range(offset):
+    #     bcs[nodes[n // 2 - i, 0]] = [1]
+    #     bcs[nodes[n // 2 + 1 + i, 0]] = [1]
+    #     bcs[nodes[n // 2 - i, m]] = [1]
+    #     bcs[nodes[n // 2 + 1 + i, m]] = [1]
+    for i in range(n + 1):
+        bcs[nodes[i, 0]] = [1]
+        bcs[nodes[i, m]] = [1]
 
     r0 = l / nx * r0_
     ic(r0)
@@ -219,32 +239,32 @@ def beam(r0_=2.1, l=8.0, frac=0.125, nx=100, prob="natural_frequency"):
     Ej = []
     redu_idx = 0
 
-    if prob == "natural_frequency":
-        # 4-way reflection of x- and y-symmetry axes
-        a = n // 2
-        b = m // 2
-        for i in range(a + 1):
-            for j in range(b + 1):
-                if nodes[i, j] not in non_design_nodes:
-                    Ej.extend(4 * [redu_idx])
-                    Ei.extend(
-                        [
-                            nodes[i, j],
-                            nodes[n - i, j],
-                            nodes[i, m - j],
-                            nodes[n - i, m - j],
-                        ]
-                    )
-                    redu_idx += 1
-    elif prob == "buckling":
-        # 2-way reflection left to right
-        for j in range(2 * (n + 1)):
-            for i in range((m + 1) // 2):
-                if j % 2 == 0:
-                    Ej.extend([i + j * (m + 1) // 4])
-                else:
-                    Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
-                Ei.extend([i + j * (m + 1) // 2])
+    # if prob == "natural_frequency":
+    # 4-way reflection of x- and y-symmetry axes
+    a = n // 2
+    b = m // 2
+    for i in range(a + 1):
+        for j in range(b + 1):
+            if nodes[i, j] not in non_design_nodes:
+                Ej.extend(4 * [redu_idx])
+                Ei.extend(
+                    [
+                        nodes[i, j],
+                        nodes[n - i, j],
+                        nodes[i, m - j],
+                        nodes[n - i, m - j],
+                    ]
+                )
+                redu_idx += 1
+    # elif prob == "buckling":
+    #     # 2-way reflection left to right
+    #     for j in range(2 * (n + 1)):
+    #         for i in range((m + 1) // 2):
+    #             if j % 2 == 0:
+    #                 Ej.extend([i + j * (m + 1) // 4])
+    #             else:
+    #                 Ej.extend([i + (m // 2 - 2 * i) + (j - 1) * (m + 1) // 4])
+    #             Ei.extend([i + j * (m + 1) // 2])
 
     Ev = np.ones(len(Ei))
     dv_mapping = coo_matrix((Ev, (Ei, Ej)))

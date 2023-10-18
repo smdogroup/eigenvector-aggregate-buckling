@@ -29,13 +29,12 @@
 
 
 ###################### square ######################
-# srun python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 300 --r0 6.0 --vol-frac-ub 0.3 --maxit 500 --delta-p 0.01 --proj --note P=2e-3,delta-p=0.01
+# srun python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 300 --r0 6.0 --vol-frac-ub 0.3 --maxit 500 --delta-p 0.01 --proj --iter-crit 0 --note P=5e-3,delta-p=0.01,iter_crit=0
 
-srun python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.3 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 1.1e-4 --proj --note P=2e-3,min-new2
+srun python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.4 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 8e-5 --delta-p 0.01 --iter-crit 200 --proj --note delta-p=0,iter_crit=200
 
 
-
-# 1.14e-4
+# 1.1e-4
 # 1.475e-4
 # 1.84e-4
 

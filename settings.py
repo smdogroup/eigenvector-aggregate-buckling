@@ -19,8 +19,8 @@ def parse_cmd_args():
         "stress_scale": 1.0,  # scale the stress objective obj = stress * scale
         "compliance_scale": 1e5,  # scale the compliance objective obj = compliance * scale
         "min_compliance": 7.5e-6,  # building: 7.5e-6, square: 2.75e-5
-        "sigma_fixed": True,  # fix the eigenvalue initial guess
-        "sigma_scale": 1.0,  # scale the eigenvalue initial guess
+        "sigma_fixed": False,  # fix the eigenvalue initial guess
+        "sigma_scale": 100.0,  # scale the eigenvalue initial guess
     }
     
     constraint_bounds = {
