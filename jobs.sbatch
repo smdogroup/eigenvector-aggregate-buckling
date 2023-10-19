@@ -19,20 +19,19 @@
 # omega_lb=$(printf "%.5f" $(echo "$k * $omega0" | bc))
 
 
+
+# ###################### building ######################
 # srun python3 topo_opt.py --domain building --objf compliance --confs volume_ub --nx 240 --r0 4.0 --vol-frac-ub 0.3 --maxit 100 --proj --note proj=1e-6=0=1=400=0.02
 
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 3.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --N 12 --proj --min-compliance 7.5e-6 --delta-p 0.01 --note N=12,delta-p=0.01
 
+# srun python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub --nx 240 --r0 6.0 --vol-frac-ub 0.3 --delta-p 0.01 --weight 1.0 --delta-beta 0.1 --maxit 1000 --note delta-p=0.01,delta-beta=0.1
+
+# srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 240 --r0 3.0 --vol-frac-ub 0.3 --delta-p 0.01 --maxit 1000 --delta-beta 0.2 --note delta-p=0.01,delta-beta=0.2
+
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 40 --ks-rho-stress 1 --proj --min-compliance 7.5e-6 --note N=12ks_rho_stress=1
 
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --dis-ub 0.4 --min-compliance 7.5e-6 --proj
-
-
-###################### square ######################
-# srun python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 300 --r0 6.0 --vol-frac-ub 0.3 --maxit 500 --delta-p 0.01 --proj --iter-crit 0 --note P=5e-3,delta-p=0.01,iter_crit=0
-
-# srun python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.4 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 8e-5 --delta-p 0.01 --iter-crit 200 --proj --note delta-p=0,iter_crit=200
-
 
 
 
@@ -40,13 +39,56 @@
 ###################### beam ######################
 # srun python3 topo_opt.py --domain beam --objf compliance --confs volume_ub --nx 360 --r0 3.6 --vol-frac-ub 0.45 --maxit 500 --proj --note P-offset
 
-srun python3 topo_opt.py --domain beam --objf frequency --confs volume_ub compliance --nx 360 --r0 7.2 --vol-frac-ub 0.45 --min-compliance 7.7e-6 --compliance-ub-percent 2.5 --delta-p 0.01 --maxit 1000 --proj --note proj,delta-p=0.01
+# srun python3 topo_opt.py --domain beam --objf frequency --confs volume_ub compliance --nx 360 --r0 7.2 --vol-frac-ub 0.45 --min-compliance 7.7e-6 --compliance-ub-percent 2.5 --delta-p 0.01 --maxit 1000 --proj --note proj,delta-p=0.01
+
+# srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub --nx 360 --r0 6.0 --vol-frac-ub 0.45 --delta-p 0.01 --weight 1.0 --delta-beta 0.2 --maxit 1000 --note delta-p=0.01,delta-beta=0.2
+
+# srun python3 topo_opt.py --domain beam --objf frequency --confs volume_ub --nx 360 --r0 6.0 --vol-frac-ub 0.45 --delta-p 0.01 --maxit 1000 --delta-beta 0.2 --note delta-p=0.01,delta-beta=0.2
+
+srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub stress --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.0 --stress-ub 100 --delta-p 0.01 --delta-beta 0.1 --maxit 1000
+
+srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --maxit 1000 --dis-ub 2.0 --stress-ub 3.6 --delta-p 0.01 --delta-beta 0.2 --note delta-p=0.01,delta-beta=0.2
 
 
 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###################### square ######################
+# srun python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 300 --r0 6.0 --vol-frac-ub 0.3 --maxit 500 --delta-p 0.01 --proj --iter-crit 0 --note P=5e-3,delta-p=0.01,iter_crit=0
+
+# srun python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.4 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 8e-5 --delta-p 0.01 --iter-crit 200 --proj --note delta-p=0,iter_crit=200
 
 
 # ###################### building ######################

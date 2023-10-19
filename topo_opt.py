@@ -2330,7 +2330,8 @@ class TopologyAnalysis:
         eta_sum = np.sum(eta)
         eta = eta / eta_sum
 
-        for j in range(N_a, N_b + 1):
+        # for j in range(np.max([0, N_a - 1]), np.min([N_b + 2, self.N])):
+        for j in range(self.N):
             for i in range(j + 1):
                 qDq = Q[:, i].T @ D(Q[:, j])
                 qAdotq = dA(Q[:, i], Q[:, j])
@@ -2355,7 +2356,7 @@ class TopologyAnalysis:
                 dh += scalar * (Eij * qAdotq - Gij * qBdotq)
 
         Br = Br.tocsc()
-        C = B.dot(Q[:, : N_b + 1])
+        C = B.dot(Q[:, : self.N])  # np.min([N_b + 2, self.N])
 
         nr = len(reduced)
         Cr = np.zeros((nr, C.shape[1]))
@@ -2378,7 +2379,7 @@ class TopologyAnalysis:
         preop = linalg.LinearOperator((nr, nr), preconditioner)
 
         # Form the augmented linear system of equations
-        for k in range(np.max([0, N_a - 1]), N_b + 1):
+        for k in range(self.N):   # range(np.max([0, N_a - 1]), np.min([N_b + 2, self.N]))
             # Compute B * uk = D * qk
             Dq = D(Q[:, k])
             bkr = -2 * eta[k] * Dq[reduced]
@@ -2611,14 +2612,14 @@ class TopOptProb:
             solve = False
         else:
             solve = True
-            
+
         if self.it_counter == 0:
             sigma = 100
         elif self.sigma_fixed == False:
             sigma = self.analysis.eigs[0] * self.sigma_scale
         else:
             sigma = self.sigma_scale
-        sigma = np.min([sigma, 1e+3])
+        sigma = np.min([sigma, 1e3])
         ic(sigma)
 
         if self.prob == "natural_frequency":
@@ -2668,14 +2669,16 @@ class TopOptProb:
             if self.prob == "natural_frequency":
                 print("compliance-buckling is not available for natural frequency")
                 exit()
-                
+
             compliance = self.analysis.compliance(self.xfull)
             mu_ks = self.analysis.ks_buckling(ks_rho=self.ks_rho_freq)
-            obj = self.weight * (compliance / self.c0) + (1 - self.weight) * (mu_ks / self.mu_ks0)
+            obj = self.weight * (compliance / self.c0) + (1 - self.weight) * (
+                mu_ks / self.mu_ks0
+            )
 
             foi["compliance"] = compliance
             foi["BLF_ks"] = 1 / mu_ks
-            
+
             ic((compliance / self.c0))
             ic((mu_ks / self.mu_ks0))
 
@@ -2840,13 +2843,13 @@ class TopOptProb:
             if (self.it_counter - self.iter_crit) % 1 == 0:
                 self.analysis.fltr.beta += self.delta_beta
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
-                
+
         iter_crit = 0
         if self.it_counter > iter_crit:
             if (self.it_counter - iter_crit) % 1 == 0:
                 self.analysis.p += self.delta_p
                 self.analysis.p = min(self.analysis.p, 6)
-        
+
         ic(self.it_counter, self.analysis.fltr.beta, self.analysis.p)
 
         self.it_counter += 1
@@ -2905,17 +2908,20 @@ class TopOptProb:
                     self.compliance_scale
                     * self.analysis.compliance_gradient(self.xfull)[self.design_nodes]
                 )
-                
+
         elif self.objf == "compliance-buckling":
             d_compliance = self.analysis.compliance_gradient(self.xfull)
             d_buckling = self.analysis.ks_buckling_derivative(self.xfull)
-            d_compliance_buckling = self.weight * d_compliance / self.c0 + (1 - self.weight) * d_buckling / self.mu_ks0
-            
+            d_compliance_buckling = (
+                self.weight * d_compliance / self.c0
+                + (1 - self.weight) * d_buckling / self.mu_ks0
+            )
+
             if self.dv_mapping is not None:
                 g[:] = self.dv_mapping.T.dot(d_compliance_buckling)
             else:
                 g[:] = d_compliance_buckling[self.design_nodes]
-        
+
         elif self.objf == "displacement":
             if self.dv_mapping is not None:
                 g[:] = 10 * self.dv_mapping.T.dot(
@@ -3312,7 +3318,9 @@ def main(args):
             if args.domain == "beam":
                 if args.mode == 1:
                     # node_loc=(n, m * 0.5), y direction
-                    D_index = 2 * int((n * m - m * 0.5)) + 1
+                    # D_index = 2 * int((n * m - m * 0.5)) + 1
+                    indx = int((m * 0.5))
+                    D_index = 2 * indx + 1
                 elif args.mode == 2:
                     # node_loc=(n, m * 0.5), y direction
                     D_index = 2 * (m // 2 - 1) + 1
@@ -3376,6 +3384,10 @@ def main(args):
     if args.compliance_ub_percent is not None:
         args.compliance_ub_percent = args.compliance_ub_percent * args.min_compliance
 
+    if not args.atype:
+        args.dis_ub = args.dis_ub / np.abs(args.N_b - args.N_a + 1)
+    ic(args.dis_ub)
+
     # Create optimization problem
     topo = TopOptProb(
         analysis,
@@ -3400,12 +3412,12 @@ def main(args):
         vol_frac_lb=args.vol_frac_lb,
         frequency_scale=args.frequency_scale,
         sigma_fixed=args.sigma_fixed,
-        sigma_scale = args.sigma_scale,
+        sigma_scale=args.sigma_scale,
         stress_scale=args.stress_scale,
         compliance_scale=args.compliance_scale,
-        weight = args.weight,
-        c0 = args.c0,
-        mu_ks0 = args.mu_ks0,
+        weight=args.weight,
+        c0=args.c0,
+        mu_ks0=args.mu_ks0,
         dis_ub=args.dis_ub,
         check_gradient=args.check_gradient,
         domain=args.domain,

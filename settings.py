@@ -29,7 +29,7 @@ def parse_cmd_args():
     constraint_bounds = {
         "omega_lb": None,
         "BLF_lb": None,
-        "stress_ub": None,
+        "stress_ub": None, # stess^2
         "compliance_ub_percent": None,
         "vol_frac_ub": None,
         "vol_frac_lb": None,
@@ -47,7 +47,7 @@ def parse_cmd_args():
         "N_a": 0,  # lower bound of selected indices of eigenvalues
         "N_b": 0,  # upper bound of selected indices of eigenvalues
         "N": 6,  # number of eigenvalues
-        "atype": 0,  # 0: 0-b based index, N_a=0, "exp"; 1: a-b based index
+        "atype": 0,  # 1: 0-b based index, N_a=0, "exp"; 0: a-b based index. "tanh"
         "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     }
 
@@ -61,7 +61,7 @@ def parse_cmd_args():
         "q": 5.0,  # RAMP penalization parameter
         "rho0_K": 1e-3,  # rho offset to prevent singular K
         "rho0_M": 1e-7,  # rho offset to prevent singular M
-        "proj": False,  # projector for filter
+        "proj": True,  # projector for filter
         "beta0": 1e-6,  # projector parameter at the beginning
         "iter_crit": 0,  # iteration to start projector
         "delta_beta": 0.1,  # projector parameter increment
