@@ -2396,7 +2396,7 @@ class TopologyAnalysis:
             # Solve the augmented system of equations for vk
             t = np.dot(Ur.T, bkr)
             bkr = bkr - np.dot(Ur, t)
-            phir, _ = linalg.gmres(matop, bkr, M=preop, atol=1e-15, tol=1e-10)
+            phir, _ = linalg.gmres(matop, bkr, M=preop, atol=1e-8, tol=1e-8)  # atol=1e-15, tol=1e-10
             phi = self.full_vector(phir)
             dh += dA(Q[:, k], phi) - lam[k] * dB(Q[:, k], phi)
 
