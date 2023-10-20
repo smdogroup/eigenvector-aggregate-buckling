@@ -2379,7 +2379,8 @@ class TopologyAnalysis:
         preop = linalg.LinearOperator((nr, nr), preconditioner)
 
         # Form the augmented linear system of equations
-        for k in range(self.N):   # range(np.max([0, N_a - 1]), np.min([N_b + 2, self.N]))
+        # range(np.max([0, N_a - 1]), np.min([N_b + 2, self.N]))
+        for k in range(self.N):
             # Compute B * uk = D * qk
             Dq = D(Q[:, k])
             bkr = -2 * eta[k] * Dq[reduced]
@@ -2396,7 +2397,8 @@ class TopologyAnalysis:
             # Solve the augmented system of equations for vk
             t = np.dot(Ur.T, bkr)
             bkr = bkr - np.dot(Ur, t)
-            phir, _ = linalg.gmres(matop, bkr, M=preop, atol=1e-8, tol=1e-8)  # atol=1e-15, tol=1e-10
+            # atol=1e-15, tol=1e-10
+            phir, _ = linalg.gmres(matop, bkr, M=preop, atol=1e-8, tol=1e-8)
             phi = self.full_vector(phir)
             dh += dA(Q[:, k], phi) - lam[k] * dB(Q[:, k], phi)
 
@@ -2475,6 +2477,9 @@ class TopOptProb:
         check_gradient=False,
         domain="square",
         iter_crit=0,
+        iter_crit_dis=0,
+        restart_beta_p=True,
+        iter_crit_stress=0,
         delta_beta=0.1,
         delta_p=0.01,
     ):
@@ -2504,6 +2509,9 @@ class TopOptProb:
         self.check_gradient = check_gradient
         self.domain = domain
         self.iter_crit = iter_crit
+        self.iter_crit_dis = iter_crit_dis
+        self.iter_crit_stress = iter_crit_stress
+        self.restart_beta_p = restart_beta_p
         self.delta_beta = delta_beta
         self.delta_p = delta_p
 
@@ -2732,13 +2740,20 @@ class TopOptProb:
             stress_ks = self.analysis.eigenvector_stress(
                 self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
             )
-            con.append(1.0 - stress_ks / self.stress_ub)
+            if self.it_counter < self.iter_crit_stress:
+                con.append(1.0)
+            else:
+                con.append(1.0 - stress_ks / self.stress_ub)
+                print("stress added to constraints in iteration %d" % self.it_counter)
             foi["stress_ks"] = stress_ks
 
         if "displacement" in self.confs:
             assert self.fixed_dis_ub is not None
             displacement = self.analysis.eigenvector_displacement()
-            con.append(self.fixed_dis_ub - displacement)
+            if self.it_counter < self.iter_crit_dis:
+                con.append(1.0)
+            else:
+                con.append(self.fixed_dis_ub - displacement)
             foi["displacement"] = displacement
 
         if "compliance" in self.confs:
@@ -2844,11 +2859,15 @@ class TopOptProb:
                 self.analysis.fltr.beta += self.delta_beta
                 self.analysis.fltr.beta = min(self.analysis.fltr.beta, 16)
 
-        iter_crit = 0
-        if self.it_counter > iter_crit:
-            if (self.it_counter - iter_crit) % 1 == 0:
+        if self.it_counter > self.iter_crit:
+            if (self.it_counter - self.iter_crit) % 1 == 0:
                 self.analysis.p += self.delta_p
                 self.analysis.p = min(self.analysis.p, 6)
+        
+        if self.restart_beta_p:
+            if self.it_counter == self.iter_crit_dis or self.it_counter == self.iter_crit_stress:
+                self.analysis.p = 3.0
+                self.analysis.fltr.beta = 1e-6
 
         ic(self.it_counter, self.analysis.fltr.beta, self.analysis.p)
 
@@ -2997,32 +3016,44 @@ class TopOptProb:
 
         if "stress" in self.confs:
             if self.dv_mapping is not None:
-                A[index][:] = (
-                    -self.dv_mapping.T.dot(
-                        self.analysis.eigenvector_stress_derivative(
-                            self.xfull, self.ks_rho_stress
+                if self.it_counter < self.iter_crit_stress:
+                    A[index][:] = 0.0
+                else:
+                    A[index][:] = (
+                        -self.dv_mapping.T.dot(
+                            self.analysis.eigenvector_stress_derivative(
+                                self.xfull, self.ks_rho_stress
+                            )
                         )
+                        / self.stress_ub
                     )
-                    / self.stress_ub
-                )
             else:
-                A[index][:] = (
-                    -self.analysis.eigenvector_stress_derivative(
-                        self.xfull, self.ks_rho_stress
-                    )[self.design_nodes]
-                    / self.stress_ub
-                )
+                if self.it_counter < self.iter_crit_stress:
+                    A[index][:] = 0.0
+                else:
+                    A[index][:] = (
+                        -self.analysis.eigenvector_stress_derivative(
+                            self.xfull, self.ks_rho_stress
+                        )[self.design_nodes]
+                        / self.stress_ub
+                    )
             index += 1
 
         if "displacement" in self.confs:
             if self.dv_mapping is not None:
-                A[index][:] = -self.dv_mapping.T.dot(
-                    self.analysis.eigenvector_displacement_deriv(self.xfull)
-                )
+                if self.it_counter < self.iter_crit_dis:
+                    A[index][:] = 0.0
+                else:
+                    A[index][:] = -self.dv_mapping.T.dot(
+                        self.analysis.eigenvector_displacement_deriv(self.xfull)
+                    )
             else:
-                A[index][:] = -self.analysis.eigenvector_displacement_deriv(self.xfull)[
-                    self.design_nodes
-                ]
+                if self.it_counter < self.iter_crit_dis:
+                    A[index][:] = 0.0
+                else:
+                    A[index][:] = -self.analysis.eigenvector_displacement_deriv(
+                        self.xfull
+                    )[self.design_nodes]
             index += 1
 
         if "compliance" in self.confs:
@@ -3384,8 +3415,8 @@ def main(args):
     if args.compliance_ub_percent is not None:
         args.compliance_ub_percent = args.compliance_ub_percent * args.min_compliance
 
-    if not args.atype:
-        args.dis_ub = args.dis_ub / np.abs(args.N_b - args.N_a + 1)
+    if not args.atype and args.dis_ub is not None:
+        args.dis_ub = args.dis_ub / np.abs(args.N_b - args.N_a + 1.0)
     ic(args.dis_ub)
 
     # Create optimization problem
@@ -3422,6 +3453,9 @@ def main(args):
         check_gradient=args.check_gradient,
         domain=args.domain,
         iter_crit=args.iter_crit,
+        iter_crit_dis=args.iter_crit_dis,
+        iter_crit_stress=args.iter_crit_stress,
+        restart_beta_p=args.restart_beta_p,
         delta_beta=args.delta_beta,
         delta_p=args.delta_p,
     )

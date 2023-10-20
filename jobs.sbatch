@@ -41,13 +41,13 @@
 
 # srun python3 topo_opt.py --domain beam --objf frequency --confs volume_ub compliance --nx 360 --r0 7.2 --vol-frac-ub 0.45 --min-compliance 7.7e-6 --compliance-ub-percent 2.5 --delta-p 0.01 --maxit 1000 --proj --note proj,delta-p=0.01
 
-# srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub --nx 360 --r0 6.0 --vol-frac-ub 0.45 --delta-p 0.01 --weight 1.0 --delta-beta 0.2 --maxit 1000 --note delta-p=0.01,delta-beta=0.2
+srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub --nx 360 --r0 6.0 --vol-frac-ub 0.45 --delta-p 0.01 --weight 0.09 --delta-beta 0.2 --maxit 1000 --note delta-p=0.01,delta-beta=0.2,P-offset
 
 # srun python3 topo_opt.py --domain beam --objf frequency --confs volume_ub --nx 360 --r0 6.0 --vol-frac-ub 0.45 --delta-p 0.01 --maxit 1000 --delta-beta 0.2 --note delta-p=0.01,delta-beta=0.2
 
-srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub stress --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.0 --stress-ub 100 --delta-p 0.01 --delta-beta 0.1 --maxit 1000
+# srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub stress --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --stress-ub 100 --delta-p 0.01 --delta-beta 0.2 --maxit 1000
 
-srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --maxit 1000 --dis-ub 2.0 --stress-ub 3.6 --delta-p 0.01 --delta-beta 0.2 --note delta-p=0.01,delta-beta=0.2
+# srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --maxit 1000 --dis-ub 0.8 --delta-p 0.01 --delta-beta 0.2 --note delta-p=0.01,delta-beta=0.2
 
 
 

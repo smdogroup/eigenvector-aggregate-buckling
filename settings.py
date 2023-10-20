@@ -34,6 +34,9 @@ def parse_cmd_args():
         "vol_frac_ub": None,
         "vol_frac_lb": None,
         "dis_ub": None,
+        "iter_crit_dis": 200,  # iteration to start displacement constraint
+        "iter_crit_stress": 200,  # iteration to start stress constraint
+        "restart_beta_p": False,  # restart beta and p when apply displacement and stress
     }
 
     ks_rho = {
