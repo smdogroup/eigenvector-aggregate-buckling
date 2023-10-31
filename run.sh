@@ -63,11 +63,11 @@ fi
 
 # python3 topo_opt.py --domain beam --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.5 --min-compliance 8e-6 --compliance-ub-percent 3.0 --maxit 1000 --note new
 
-# python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --delta-p 0.01 --delta-beta 0.2 --maxit 1000 --note atype=0
+# python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub --nx 360 --r0 5.0 --vol-frac-ub 0.45 --weight 0.2 --delta-p 0.1 --delta-beta 0.5 --maxit 1000
 
-# python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --maxit 1000 --dis-ub 2.0 --stress-ub 3.6 --delta-p 0.01 --delta-beta 0.2 --note delta-p=0.01,delta-beta=0.2
+python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --dis-ub 0.0 --delta-p 0.01 --delta-beta 0.2 --proj --maxit 1000 --mode 4 --tracking --iter-crit-dis 2 --N 20
 
-python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub stress --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --stress-ub 10 --delta-p 0.01 --delta-beta 0.2 --maxit 1000 --restart-beta-p --note atype=0 
+# python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub stress --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --stress-ub 10 --delta-p 0.01 --delta-beta 0.2 --maxit 1000 --restart-beta-p --note atype=0 
 
 # python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement stress --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --maxit 1000 --dis-ub 1.0 --stress-ub 3.6 --delta-p 0.01 --delta-beta 0.2 --note delta-p=0.01,delta-beta=0.2 --check-gradient
 
@@ -101,7 +101,7 @@ python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub s
 
 # python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub --nx 240 --r0 6.0 --vol-frac-ub 0.3
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --dis-ub 0.1 --proj --note freq_scale=1e6.0 --check-gradient
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 4.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --dis-ub 0.1 --proj --note freq_scale=1e6.0 --mode 2
 
 # python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance stress --nx 32 --r0 3.0 --vol-frac-ub 0.3 --compliance-ub-percent 2.5 --stress-ub 25 --proj --check-gradient
 

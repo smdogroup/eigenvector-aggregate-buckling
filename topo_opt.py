@@ -12,7 +12,7 @@ import mpmath as mp
 import numpy as np
 from paropt import ParOpt
 from scipy import sparse, spatial
-from scipy.linalg import eigh, eigvalsh
+from scipy.linalg import cholesky, eigh, eigvalsh, qr, solve
 from scipy.sparse import coo_matrix, linalg
 
 import domain as domain
@@ -483,7 +483,6 @@ class TopologyAnalysis:
         X,
         bcs,
         forces={},
-        m=None,
         D_index=None,
         fun="tanh",
         N_a=0,
@@ -529,7 +528,7 @@ class TopologyAnalysis:
         self.nnodes = int(np.max(self.conn)) + 1
         self.nvars = 2 * self.nnodes
 
-        self.D_index = D_index
+        self.D_index = D_index.astype(int)
         self.K0 = None
         self.M0 = None
 
@@ -1532,6 +1531,10 @@ class TopologyAnalysis:
         nodal_sols=None,
         nodal_vecs=None,
         solve=True,
+        Qcrit=None,
+        iter=0,
+        iter_crit=0,
+        tracking=False,
     ):
         if self.N > len(self.reduced):
             self.N = len(self.reduced)
@@ -1603,7 +1606,7 @@ class TopologyAnalysis:
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
         if solve:
-            ic("Solving eigenvalue problem")
+            print("Solving eigenvalue problem")
             start = time.time()
 
             if self.N == len(self.reduced) or (
@@ -1618,9 +1621,13 @@ class TopologyAnalysis:
                     Gr, M=Kr, k=self.N, sigma=sigma, which="SM"
                 )
 
+                # X = np.eye(Kr.shape[0], self.N)
+                # M = sparse.diags(1.0 / np.diag(Kr.todense()))
+                # mu_lobpcg, Qr_lobpcg = sparse.linalg.lobpcg(Gr, X, B=Kr,  M=M, largest=False, tol=1e-8, maxiter=1000)
+
             BLF = -1.0 / mu
             end = time.time()
-            ic(end - start)
+            print("Solving eigenvalue problem: %f" % (end - start))
             # BLF = - (Q^T * K * Q) / (Q^T * G * Q) or (K + BLF * G) * Q = 0
             ic(np.allclose(Kr @ Qr + Gr @ Qr @ np.diag(BLF), 0.0, atol=1e-6))
         else:
@@ -1657,6 +1664,37 @@ class TopologyAnalysis:
 
         self.eigs, self.lam, self.Q = BLF, mu, Q  # Ar @ Qr = lam * Br @ Qr
 
+        self.D_index_modify = self.D_index
+
+        # check the difference between Q and Qcrit to recapture the N_a and N_b
+        norm = np.zeros(self.N)
+        if tracking:
+            if iter >= iter_crit:
+                for i in range(self.N):
+                    norm[i] = np.linalg.norm(Q[:, i] @ Qcrit) ** 2 / (
+                        np.linalg.norm(Qcrit) ** 2 * np.linalg.norm(Q[:, i]) ** 2
+                    )
+
+                if norm[self.N_a] < 0.9:
+                    index = np.argmax(norm)
+                    self.N_a = self.N_b = index
+
+                ic(norm)
+                ic(self.N_a, self.N_b)
+
+        if len(self.D_index) != 1:
+            q_max = np.zeros(self.N_b - self.N_a + 1)
+            q_max_index = np.zeros(self.N_b - self.N_a + 1)
+            for i in range(self.N_a, self.N_b + 1):
+                q = self.Q[self.D_index, i]
+                q_max[i - self.N_a] = np.max(np.abs(q))
+                q_max_index[i - self.N_a] = np.argmax(np.abs(q))
+                print(
+                    "D_indx: %d, %d, %f,"
+                    % (i, q_max_index[i - self.N_a], q_max[i - self.N_a])
+                )
+            self.D_index_modify = q_max_index.astype(int)
+
         if self.N_a == self.N_b:
             scale = 1e-6
         else:
@@ -1671,8 +1709,6 @@ class TopologyAnalysis:
             + np.abs(self.lam[self.N_b] - self.lam[np.min([self.N_b + 1, self.N - 1])])
             * scale
         )
-
-        ic(self.lam_a, self.lam_b)
 
         if self.atype:
             self.ks_rho = ks_rho
@@ -1694,7 +1730,6 @@ class TopologyAnalysis:
         ic(self.ks_rho, self.N_a, self.N_b, self.N)
         ic(self.lam)
         ic(self.eigs)
-        ic(self.eta)
         ic(self.eta / np.sum(self.eta))
 
         # self.store_EG(Gr, Kr, ks_rho, self.N_a, self.N_b)
@@ -1816,7 +1851,7 @@ class TopologyAnalysis:
 
         h = 0.0
         for i in range(len(eta)):
-            q = self.Q[self.D_index, i]
+            q = self.Q[self.D_index_modify, i]
             h += eta[i] * np.dot(q, q)
         return h
 
@@ -1891,7 +1926,7 @@ class TopologyAnalysis:
 
         def D(q):
             Dq = np.zeros(self.Q.shape[0])
-            Dq[self.D_index] = q[self.D_index]
+            Dq[self.D_index_modify] = q[self.D_index_modify]
             return Dq
 
         # Compute the h values
@@ -2330,8 +2365,8 @@ class TopologyAnalysis:
         eta_sum = np.sum(eta)
         eta = eta / eta_sum
 
-        # for j in range(np.max([0, N_a - 1]), np.min([N_b + 2, self.N])):
-        for j in range(self.N):
+        for j in range(np.max([0, N_a - 1]), np.min([N_b + 2, self.N])):
+            # for j in range(self.N):
             for i in range(j + 1):
                 qDq = Q[:, i].T @ D(Q[:, j])
                 qAdotq = dA(Q[:, i], Q[:, j])
@@ -2356,8 +2391,8 @@ class TopologyAnalysis:
                 dh += scalar * (Eij * qAdotq - Gij * qBdotq)
 
         Br = Br.tocsc()
-        C = B.dot(Q[:, : self.N])  # np.min([N_b + 2, self.N])
-
+        C = B.dot(Q[:, : np.min([N_b + 2, self.N])])
+        # C = B.dot(Q[:, : self.N])
         nr = len(reduced)
         Cr = np.zeros((nr, C.shape[1]))
         for k in range(C.shape[1]):
@@ -2379,8 +2414,8 @@ class TopologyAnalysis:
         preop = linalg.LinearOperator((nr, nr), preconditioner)
 
         # Form the augmented linear system of equations
-        # range(np.max([0, N_a - 1]), np.min([N_b + 2, self.N]))
-        for k in range(self.N):
+        for k in range(np.max([0, N_a - 1]), np.min([N_b + 2, self.N])):
+            # for k in range(self.N):
             # Compute B * uk = D * qk
             Dq = D(Q[:, k])
             bkr = -2 * eta[k] * Dq[reduced]
@@ -2398,7 +2433,15 @@ class TopologyAnalysis:
             t = np.dot(Ur.T, bkr)
             bkr = bkr - np.dot(Ur, t)
             # atol=1e-15, tol=1e-10
-            phir, _ = linalg.gmres(matop, bkr, M=preop, atol=1e-8, tol=1e-8)
+            time_start = time.time()
+            phir, state = linalg.gmres(
+                matop, bkr, M=preop, atol=1e-8, tol=1e-8, maxiter=100
+            )
+            time_end = time.time()
+            print(
+                "GMRES %d/%d, state %d, time %f"
+                % (k + 1, self.N, state, time_end - time_start)
+            )
             phi = self.full_vector(phir)
             dh += dA(Q[:, k], phi) - lam[k] * dB(Q[:, k], phi)
 
@@ -2482,6 +2525,7 @@ class TopOptProb:
         iter_crit_stress=0,
         delta_beta=0.1,
         delta_p=0.01,
+        tracking=False,
     ):
         self.analysis = analysis
         self.non_design_nodes = non_design_nodes
@@ -2514,6 +2558,7 @@ class TopOptProb:
         self.restart_beta_p = restart_beta_p
         self.delta_beta = delta_beta
         self.delta_p = delta_p
+        self.tracking = tracking
 
         # Add more non-design constant to matrices
         self.add_mat0("M", non_design_nodes, density=m0)
@@ -2550,6 +2595,7 @@ class TopOptProb:
         self.prefix = prefix
 
         self.it_counter = 0
+        self.Qcrit = None
         return
 
     def add_mat0(self, which, non_design_nodes, density=1.0):
@@ -2597,6 +2643,9 @@ class TopOptProb:
         vtk_path = None
         stress_ks = None
 
+        print("")
+        print("it_counter: ", self.it_counter)
+
         # Save the design to vtk every certain iterations
         if eval_all or self.it_counter % self.draw_every == 0:
             if not os.path.isdir(os.path.join(self.prefix, "vtk")):
@@ -2639,6 +2688,10 @@ class TopOptProb:
                 solve=solve,
             )
         elif self.prob == "buckling":
+            if self.tracking:
+                if self.it_counter >= self.iter_crit_dis and self.iter_crit_dis != 0:
+                    self.Qcrit = self.analysis.Q[:, self.analysis.N_a]
+
             BLF = self.analysis.solve_buckling(
                 self.xfull,
                 ks_rho=self.ks_rho_buckling,
@@ -2646,6 +2699,10 @@ class TopOptProb:
                 nodal_sols=vtk_nodal_sols,
                 nodal_vecs=vtk_nodal_vecs,
                 solve=solve,
+                Qcrit=self.Qcrit,
+                iter=self.it_counter,
+                iter_crit=self.iter_crit_dis,
+                tracking=self.tracking,
             )
 
         # Evaluate objectives
@@ -2709,11 +2766,11 @@ class TopOptProb:
             con.append(self.fixed_area_ub - area)
             foi["area"] = area / np.sum(self.area_gradient)
             # if self.it_counter  can be devide by 10, and stress is not in the confs, then compute stress
-            if self.it_counter % 5 == 0 and "stress" not in self.confs:
-                stress_ks = self.analysis.eigenvector_stress(
-                    self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
-                )
-                foi["stress_ks"] = stress_ks
+            # if self.it_counter % 5 == 0 and "stress" not in self.confs:
+            stress_ks = self.analysis.eigenvector_stress(
+                self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
+            )
+            foi["stress_ks"] = stress_ks
 
         if "volume_lb" in self.confs:
             assert self.fixed_area_lb is not None
@@ -2863,13 +2920,16 @@ class TopOptProb:
             if (self.it_counter - self.iter_crit) % 1 == 0:
                 self.analysis.p += self.delta_p
                 self.analysis.p = min(self.analysis.p, 6)
-        
+
         if self.restart_beta_p:
-            if self.it_counter == self.iter_crit_dis or self.it_counter == self.iter_crit_stress:
+            if (
+                self.it_counter == self.iter_crit_dis
+                or self.it_counter == self.iter_crit_stress
+            ):
                 self.analysis.p = 3.0
                 self.analysis.fltr.beta = 1e-6
 
-        ic(self.it_counter, self.analysis.fltr.beta, self.analysis.p)
+        ic(self.analysis.fltr.beta, self.analysis.p)
 
         self.it_counter += 1
         return fail, obj, con
@@ -3341,39 +3401,57 @@ def main(args):
     else:
         raise ValueError("Not supported domain")
 
-    D_index = None
-    indx = None
+    D_index = np.array([])
+    indx = np.array([])
     ic(args.domain, args.objf, args.confs, m, n)
     for conf in args.confs:
         if conf == "displacement":
             if args.domain == "beam":
                 if args.mode == 1:
                     # node_loc=(n, m * 0.5), y direction
-                    # D_index = 2 * int((n * m - m * 0.5)) + 1
-                    indx = int((m * 0.5))
-                    D_index = 2 * indx + 1
+                    # indx = int((m * 0.5))
+                    indx = np.append(indx, int((n * m - m * 0.5)) - 1)
+                    D_index = np.append(D_index, 2 * indx + 1)
                 elif args.mode == 2:
                     # node_loc=(n, m * 0.5), y direction
-                    D_index = 2 * (m // 2 - 1) + 1
-                else:
-                    # node_loc=(n * 0.5, m * 0.5), y direction
-                    D_index = n * m - 1
+                    D_index = np.append(D_index, 2 * (m // 2 - 1) + 1)
+                elif args.mode == 3:
+                    for i in range(m):
+                        indx = np.append(indx, i)
+                        indx = np.append(indx, n * m - 1 - i)
+                        D_index = np.append(D_index, 2 * i + 1)
+                        D_index = np.append(D_index, 2 * (n * m - 1 - i) + 1)
+                elif args.mode == 4:
+                    for i in range(m):
+                        indx = np.append(indx, n / 2 * m - 1 - i)
+                        indx = np.append(indx, n / 2 * m + i)
+                        D_index = np.append(D_index, 2 * (n / 2 * m - 1 - i) + 1)
+                        D_index = np.append(D_index, 2 * (n / 2 * m + i) + 1)
             if args.domain == "square":
                 if args.mode == 1:
                     # node_loc=(0.75*n, 0.75*m), x direction
                     indx = int((0.1 * n * (m + 1) + 0.1 * m))
-                    ic(indx)
                     D_index = [2 * indx, 2 * indx + 1]
                 elif args.mode == 2:
                     indx = int((0.67 * n * (m + 1) + 0.67 * m))
                     D_index = [2 * indx, 2 * indx + 1]
             if args.domain == "building":
                 if args.mode == 1:
-                    # node_loc=(0.5*n, 0.5*m), x direction
-                    # indx = int((0.5 * n * (m + 1) + 0.5 * m))
-                    indx = 47160
-                    ic(indx)
-                    D_index = [2 * indx + 1]
+                    indx = np.append(indx, int((n * m - m * 0.5)))
+                    D_index = np.append(D_index, 2 * indx)
+                elif args.mode == 2:
+                    indx = np.append(indx, int(58200))
+                    D_index = np.append(D_index, 2 * 58200 + 1)
+                elif args.mode == 3:
+                    for i in range(n):
+                        indx = np.append(indx, i * m)
+                        indx = np.append(indx, i * m + m - 1)
+                        D_index = np.append(D_index, 2 * (i * m))
+                        D_index = np.append(D_index, 2 * (i * m + m - 1))
+                elif args.mode == 4:
+                    for i in range(n):
+                        indx = np.append(indx, i * m + m // 2)
+                        D_index = np.append(D_index, 2 * (i * m + m // 2) + 1)
 
     domain.visualize(args.prefix, X, bcs, non_design_nodes, forces, indx)
 
@@ -3391,7 +3469,6 @@ def main(args):
         X,
         bcs,
         forces,
-        m,
         D_index,
         fun=args.fun,
         N_a=args.N_a,
@@ -3414,10 +3491,6 @@ def main(args):
 
     if args.compliance_ub_percent is not None:
         args.compliance_ub_percent = args.compliance_ub_percent * args.min_compliance
-
-    if not args.atype and args.dis_ub is not None:
-        args.dis_ub = args.dis_ub / np.abs(args.N_b - args.N_a + 1.0)
-    ic(args.dis_ub)
 
     # Create optimization problem
     topo = TopOptProb(
@@ -3458,6 +3531,7 @@ def main(args):
         restart_beta_p=args.restart_beta_p,
         delta_beta=args.delta_beta,
         delta_p=args.delta_p,
+        tracking=args.tracking,
     )
 
     # Print info

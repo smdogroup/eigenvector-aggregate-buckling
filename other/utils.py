@@ -190,9 +190,9 @@ def create_folder(args):
         v = f"{args.vol_frac_ub:.2f}"
         args.prefix = args.prefix + ", v=" + v
     
-    if "compliance-buckling" in args.objf:
-        w = f"{args.weight:.2f}"
-        args.prefix = args.prefix + ", w=" + w
+    if "displacement" in args.confs:
+        if args.mode != 1:
+            args.prefix = args.prefix + ", mode=" + str(args.mode)
 
     if "displacement" in args.confs or "stress" in args.confs:
         N_a = f"{args.N_a}"
@@ -201,6 +201,16 @@ def create_folder(args):
         N_b = f"{args.N_b}"
         args.prefix = args.prefix + ", Nb=" + N_b
     
+    r = f"{args.r0}"
+    args.prefix = args.prefix + ", r=" + r
+        
+    if args.note != "":
+        args.prefix = args.prefix + ", " + args.note
+    
+    if "compliance-buckling" in args.objf:
+        w = f"{args.weight:.2f}"
+        args.prefix = args.prefix + ", w=" + w
+
     if args.m0_block_frac != 0.0:
         m = f"{args.m0_block_frac:.2f}"
         args.prefix = args.prefix + ", m0=" + m
@@ -214,27 +224,20 @@ def create_folder(args):
         c = f"{args.compliance_ub_percent:.2f}"
         args.prefix = args.prefix + ", c=" + c
 
-    if "displacement" in args.confs:
-        if args.mode != 1:
-            args.prefix = args.prefix + ", mode=" + str(args.mode)
-        d = f"{args.dis_ub:.2f}"
-        args.prefix = args.prefix + ", d=" + d
-
     if "stress" in args.confs:
         s = f"{args.stress_ub}"
         args.prefix = args.prefix + ", s=" + s
+    
+    if "displacement" in args.confs:
+        d = f"{args.dis_ub:.2f}"
+        args.prefix = args.prefix + ", d=" + d
 
-    r = f"{args.r0}"
-    args.prefix = args.prefix + ", r=" + r
 
     # if args.proj:
     #     beta0 = f"{args.beta0}"
     #     args.prefix = args.prefix + ", beta0=" + beta0
     #     delta_beta = f"{args.delta_beta}"
     #     args.prefix = args.prefix + ", dbeta=" + delta_beta
-
-    if args.note != "":
-        args.prefix = args.prefix + ", " + args.note
 
     # if args.dis_ub is not None:
     #     d = f"{args.dis_ub:.3f}"

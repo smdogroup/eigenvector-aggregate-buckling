@@ -18,11 +18,11 @@ def parse_cmd_args():
         "frequency_scale": 10.0,  # scale the frequency objective obj = frequency * scale
         "stress_scale": 1.0,  # scale the stress objective obj = stress * scale
         "compliance_scale": 1e5,  # scale the compliance objective obj = compliance * scale
-        "min_compliance": 7.5e-6,  # building: 7.5e-6, square: 2.75e-5
+        "min_compliance": 7.4e-6,  # building: 7.4e-6, square: 7.7e-5
         "sigma_fixed": False,  # fix the eigenvalue initial guess
         "sigma_scale": 100.0,  # scale the eigenvalue initial guess
         "weight": 0.5,  # weight for the compliance for obj=compliance + buckling
-        "c0": 8e-6,  # initial value of the compliance
+        "c0": 1e-5,  # initial value of the compliance
         "mu_ks0": 0.1,  # initial value of the KS_BLF
     }
     
@@ -34,8 +34,9 @@ def parse_cmd_args():
         "vol_frac_ub": None,
         "vol_frac_lb": None,
         "dis_ub": None,
-        "iter_crit_dis": 200,  # iteration to start displacement constraint
-        "iter_crit_stress": 200,  # iteration to start stress constraint
+        "iter_crit_dis": 0,  # iteration to start displacement constraint
+        "iter_crit_stress": 0,  # iteration to start stress constraint
+        "tracking": False,  # track the eigenvector, only for N_a=N_b, iter_crit_dis!=0
         "restart_beta_p": False,  # restart beta and p when apply displacement and stress
     }
 
