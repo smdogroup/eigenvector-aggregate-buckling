@@ -23,23 +23,40 @@ def read_size(options, vtk):
 
 def read_vol(file):
     vol, dis = [], []
-    total_cols = len(np.loadtxt(file, skiprows=9, max_rows=1))
+    total_cols = len(np.loadtxt(file, skiprows=8, max_rows=1)) - 2
     total_lines = sum(1 for line in open(file))
     with open(file) as f:
         for num, line in enumerate(f, 1):
             if num == total_lines - 2:
                 break
             if "iter" in line:
-                a = np.loadtxt(file, skiprows=num, max_rows=10)
+                # if row 8 column 4 is not "n/a" then read the data
+                if np.loadtxt(file, skiprows=num, max_rows=1)[3] != "n/a":
+                    a = np.loadtxt(file, skiprows=num, max_rows=10, usecols=sorted(set(range(total_cols))-{4}))
+                else:
+                    a = np.loadtxt(file, skiprows=num, max_rows=10, usecols=range(0, total_cols))
                 vol = np.append(vol, a)
-
+    if np.loadtxt(file, skiprows=num, max_rows=1)[3] != "n/a":
+        total_cols -= 1
+    ic(total_cols, len(vol))
     n_iter = len(vol) // total_cols
     vol = vol.reshape(n_iter, total_cols)
-    dis = vol[:, 5]
-    stress_iter = vol[:, 4] ** 0.5 * 1e-6
+    # dis = vol[:, 5]
+    # stress_iter = vol[:, 4] ** 0.5 * 1e-6
+    if total_cols == 5:
+        dis = []
+        stress_iter = []
+    else:
+        dis = vol[:, -2]
+        stress_iter = vol[:, -3] ** 0.5 * 1e-6
+        
+    BLF_ks = vol[:, 3]
+    ic(BLF_ks.shape)
+    compliance = vol[:, -1]
     vol = vol[:, 2]
-    ic(dis.shape, vol.shape)
-    return vol, dis, stress_iter
+    ic(compliance.shape, vol.shape)
+    # ic(dis.shape, vol.shape)
+    return vol, BLF_ks, compliance, dis, stress_iter
 
 
 def read_freq(file, n):
@@ -94,12 +111,14 @@ def read_data(dir_vtk, dir_freq, dir_stdout, dir_options):
     nnodes, m, n = read_size(dir_options, dir_vtk)
     omega = read_freq(dir_freq, 6)
     rho, stress, phi0, phi1, phi2, phi3, phi4, phi5 = read_vtk(dir_vtk, nnodes, m, n)
-    vol, dis, stress_iter = read_vol(dir_stdout)
-    return rho, vol, dis, stress_iter, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5
+    vol, BLF_ks, compliance, dis, stress_iter = read_vol(dir_stdout)
+    return rho, vol, BLF_ks, compliance, dis, stress_iter, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5
 
 
 def assmble_data(ncol, iter, iter2=None, iter3=None):
-    rho, vol, dis, stress_iter, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5 = (
+    rho, vol, BLF_ks, compliance, dis, stress_iter, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5 = (
+        [],
+        [],
         [],
         [],
         [],
@@ -125,13 +144,15 @@ def assmble_data(ncol, iter, iter2=None, iter3=None):
         exec(f"dir_options{i} = dir_result{i} + 'options.txt'")
         exec(f"dir_stdout{i} = dir_result{i} + 'stdout.log'")
         exec(
-            f"rho{i}, vol{i}, dis{i},stress_iter{i}, stress{i}, omega{i}, phi0_{i}, phi1_{i}, phi2_{i}, phi3_{i}, phi4_{i}, phi5_{i} = [],[], [], [], [], [], [], [], [], [], [], []"
+            f"rho{i}, vol{i}, BLF_ks{i}, compliance{i}, dis{i},stress_iter{i}, stress{i}, omega{i}, phi0_{i}, phi1_{i}, phi2_{i}, phi3_{i}, phi4_{i}, phi5_{i} = [],[], [], [], [], [], [], [], [], [], [], [], [], []"
         )
         exec(
-            f"rho{i}, vol{i}, dis{i},stress_iter{i}, stress{i}, omega{i}, phi0_{i}, phi1_{i}, phi2_{i},phi3_{i}, phi4_{i}, phi5_{i} = read_data(dir_vtk{i}, dir_freq{i}, dir_stdout{i}, dir_options{i})"
+            f"rho{i}, vol{i}, BLF_ks{i}, compliance{i}, dis{i}, stress_iter{i}, stress{i}, omega{i}, phi0_{i}, phi1_{i}, phi2_{i},phi3_{i}, phi4_{i}, phi5_{i} = read_data(dir_vtk{i}, dir_freq{i}, dir_stdout{i}, dir_options{i})"
         )
         exec(f"rho.append(rho{i})")
         exec(f"vol.append(vol{i})")
+        exec(f"BLF_ks.append(BLF_ks{i})")
+        exec(f"compliance.append(compliance{i})")
         exec(f"dis.append(dis{i})")
         exec(f"stress_iter.append(stress_iter{i})")
         exec(f"stress.append(stress{i})")
@@ -142,7 +163,7 @@ def assmble_data(ncol, iter, iter2=None, iter3=None):
         exec(f"phi3.append(phi3_{i})")
         exec(f"phi4.append(phi4_{i})")
         exec(f"phi5.append(phi5_{i})")
-    return rho, vol, dis, stress_iter, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5
+    return rho, vol, BLF_ks, compliance, dis, stress_iter, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5
 
 
 def plot_modeshape(
@@ -250,7 +271,7 @@ def plot_modeshape(
     
     # add a straight line at midspan
     # ax.plot([0, 8], [1, 1], color="black", linestyle="--", linewidth=0.25)
-
+    
     if zoom:
         ax.plot(X, Y, color="black", linewidth=0.1, alpha=0.75)
         ax.plot(X.T, Y.T, color="black", linewidth=0.1, alpha=0.75)
@@ -261,21 +282,59 @@ def plot_modeshape(
 def plot_1(nrow, rho, phi0, stress, flip_x=False, flip_y=False):
     fig, axs = plt.subplots(nrow, 1, figsize=(4, 2), constrained_layout=True)
     # plot_modeshape(axs, rho[0], levels=5)
-    
+    shift_scale = 0.03
     plot_modeshape(
         axs,
         rho[0],
-        phi0[0] * 0.01,
-        stress[0],
+        phi0[0] * shift_scale,
+        # stress[0],
         flip_x=1, 
         flip_y=flip_y, 
         # zoom=True,
-        levels=100,
+        levels=10,
     )
+    # add a point at the tip
+    # axs.scatter(7.5, 1.01039 , color="orange", s=0.2, zorder=10)
+    
+    # axs.scatter(7.5 -shift_scale*phi0[0][242, 120][0], 1.01039 - shift_scale*phi0[0][242, 120][1], color="orange", s=0.2, zorder=10)
 
+def plot_5(nrow, rho, phi0, stress, flip_x=False, flip_y=False):
+    fig, axs = plt.subplots(1, 7, figsize=(10, 2),constrained_layout=True)
+    
+    shift_scale = -0.02
+    plot_modeshape(
+        axs[0],
+        rho[0],
+        flip_x=1, 
+        flip_y=flip_y, 
+        levels=1,
+    )
+    axs[0].scatter(7.5, 1.01039 , color="orange", s=0.2, zorder=10)
+    
+    shift_scale = -0.02
+    for i in range(6):
+        phi = eval(f"phi{i}")
+        plot_modeshape(
+            axs[i+1],
+            rho[0],
+            phi[0] * shift_scale,
+            flip_x=1,
+            flip_y=flip_y, 
+            levels=1,
+        )
+        axs[1].scatter(7.5 -shift_scale*phi[0][242, 120][0], 1.01039 - shift_scale*phi[0][242, 120][1], color="orange", s=0.2, zorder=10)
+    
+    for ax in axs[:]:
+        ax.set_anchor("S")
 
-def plot_2(omega):
+        # draw a line at y=1.01039
+    # axs[0].plot([0, 8], [1.01039, 1.01039], color="black", linestyle="--", linewidth=0.25)
+
+def plot_2(omega, BLF_ks, vol, compliance, dis):
     fig, ax = plt.subplots()
+    ax2 = ax.twinx()
+    ax2.spines.right.set_position(("axes", 1.0))
+    
     # colors = ["k", "k", "b", "b", "r", "r"]
     colors = [
         "#1f77b4",
@@ -289,17 +348,29 @@ def plot_2(omega):
         "#bcbd22",
         "#17becf",
     ]
-    styles = ["-", "--", "-", "--", "-", "--"]
-    alpha = [1.0, 1.0, 0.6, 0.6, 0.2, 0.2]
-    marker = ["o", "o", "s", "s", "^", "^"]
-    n_iter = 400
-    for i in range(6):
+    styles = ["-", "--", "-.", ":", "-", "--", "-.", ":"]
+    alpha = [0.8, 0.5, 0.4, 0.3, 0.2, 0.1] 
+    # marker = ["o", "o", "s", "s", "^", "^"]
+    linewidth=[1.0, 0.5, 0.4, 0.3, 0.2, 0.1]
+    n_start = 0
+    n_iter = 1000
+    
+    # plot BLF_ks
+    (p1,) = ax.plot(BLF_ks[0][n_start:n_iter], label=r'$J_{ks}^{-1} [\lambda_i]$', color="k", alpha=0.8,linewidth=0.75, linestyle="--")
+    (p2,) = ax.plot(omega[0][n_start:n_iter, 0], label=f"$\lambda_{1}$",alpha=0.8, color="k", linewidth=0.75)
+        
+    (pc1,) = ax2.plot(vol[0][n_start:n_iter] / 0.3, color="b", linewidth=0.75, alpha=0.6, label=r'$g_V$',linestyle="--",zorder=0)
+    (pc2,) = ax2.plot(compliance[0][n_start:n_iter] / (4.3*7.4e-06), color="b", linewidth=0.75, alpha=0.6, label=r'$g_{c}$',linestyle="-",zorder=0)
+    
+    (p3,) = ax2.plot(dis[0][n_start:n_iter] + 1.0, color="r", linewidth=0.25, alpha=1.0, label=r'$g_{d}$',linestyle="-",zorder=10)
+  
+    for i in range(1, 6):
         ax.plot(
-            omega[0][0:n_iter, i],
+            omega[0][n_start:n_iter, i],
             label=f"$\lambda_{i+1}$",
-            color=colors[i],
-            # alpha=alpha[i],
-            # linestyle=styles[i],
+            color="k",
+            alpha=alpha[i],
+            linestyle=styles[i],
             linewidth=0.5,
             # marker=marker[i],
             # markevery=10,
@@ -307,24 +378,10 @@ def plot_2(omega):
             # markerfacecolor="none",
             # markeredgecolor=colors[i],
         )
-
-    handles, labels = ax.get_legend_handles_labels()
-    handles = [handles[i] for i in range(0, len(handles), 2)] + [
-        handles[i] for i in range(1, len(handles), 2)
-    ]
-    labels = [labels[i] for i in range(0, len(labels), 2)] + [
-        labels[i] for i in range(1, len(labels), 2)
-    ]
-    ax.legend(
-        handles,
-        labels,
-        title="Buckling Load Factors:",
-        ncol=2,
-        loc=[0.5, 0.05],
-        frameon=False,
-    )
-    ax.set_xlabel("Iteration")
-    ax.set_ylabel("Buckling Load Factor $\lambda$")
+    # log scale the x axis
+    ax.set(xscale="log", xlim=(18, 1000))
+    ax.set_xlim(30, 1020)
+    ax.set_xlabel("Iteration (log scale)")
     # ax.legend(loc="upper right")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -332,51 +389,52 @@ def plot_2(omega):
     ax.yaxis.set_ticks_position("left")
     ax.tick_params(direction="out")
     ax.tick_params(which="minor", direction="out")
-    ax.set_ylim(0, 13)
     
-    # add zoomed in inset
-    axins = ax.inset_axes([0.6, 0.7, 0.4, 0.3])
-    # change the line width of the inset connector lines
-
-    for i in range(6):
-        axins.plot(
-            omega[0][0:n_iter, i],
-            label=f"$\lambda_{i+1}$",
-            color=colors[i],
-            # alpha=alpha[i],
-            # linestyle=styles[i],
-            linewidth=0.5,
-            # marker=marker[i],
-            # markevery=10,
-            # markersize=3,
-            # markerfacecolor="none",
-            # markeredgecolor=colors[i],
-        )
-    axins.set_xlim(350, 400)
-    # axins.set_ylim(6.4, 7.0)
-    axins.set_ylim(6.5, 7.0)
-    axins.set_xticks([])
-    axins.set_yticks([])
-    rectpatch, connects = ax.indicate_inset_zoom(axins, edgecolor="black", linewidth=0.5)
-    connects[0].set_linewidth(0.5)
-    connects[1].set_linewidth(0.5)
-    connects[2].set_linewidth(0.5)
-    connects[3].set_linewidth(0.5)
-    connects[0].set_linestyle("--")
-    connects[1].set_linestyle("--")
-    connects[2].set_linestyle("--")
-    connects[3].set_linestyle("--")
-    # rectpatch.set_fill(False)
-    # rectpatch.set_linestyle("--")
-    rectpatch.set_linewidth(0.5)
-    rectpatch.set_edgecolor("black")
-    rectpatch.set_facecolor("none")
-    rectpatch.set_alpha(0.5)
+    ax.set_ylim(0, 19.95)
+    ax.set_ylabel("BLF ($\lambda_i$)", rotation=0, labelpad=0)
+    ax.yaxis.set_label_coords(0.0, 1.001)
     
-
+    ax2.set(ylim=(0.0, 1.05))
+    ax2.set_ylabel("Constraints ($\%$)", rotation=0, labelpad=0)
+    ax2.yaxis.set_label_coords(1.0, 1.05)
     
+    
+    ax2.yaxis.label.set_color(pc1.get_color())
+    ax.yaxis.label.set_color(p1.get_color())
+    ax2.yaxis.label.set_color(pc1.get_color())
+    ax.tick_params(axis="y", colors=p1.get_color())
+    ax2.tick_params(axis="y", colors=pc1.get_color())
 
+    ax.spines["top"].set_visible(False)
+    ax2.spines["top"].set_visible(False)
+    ax.xaxis.set_ticks_position("bottom")
+    ax.yaxis.set_ticks_position("left")
+    ax.spines["right"].set_visible(False)
+    ax2.yaxis.set_ticks_position("right")
 
+    ax.tick_params(direction="out")
+    ax2.tick_params(direction="out")
+    ax.tick_params(which="minor", direction="out")
+    ax2.tick_params(which="minor", direction="out")
+    ax.tick_params(which="minor", left=False)
+    
+    handles, labels = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    handles.extend(handles2)
+    labels.extend(labels2)
+    ax.legend(
+        handles,
+        labels,
+        # title="Buckling Load Factors:",
+        ncol=3,
+        # loc=[0.5, 0.05],
+        loc=[0.35, 0.05],
+        frameon=False,
+        fontsize=6,
+    )
+    
+    
+    
 def plot_3(omega, vol, dis, stress_iter):
     # fig, ax = plt.subplots(constrained_layout=True)
     # marker = ["o", "s", "^"]
@@ -680,17 +738,18 @@ if __name__ == "__main__":
     # dir_result2 = "final_results/mbbbeam/nx=500, vol=0.5, dis=0.3, mode=2, r0=1.0, K=simp, M=msimp/"
     # dir_result3 = "final_results/mbbbeam/nx=500, vol=0.5, dis=0.3, mode=2, s=20000000000000.0, r0=1.0, K=simp, M=msimp/"
 
-    # dir_result1 = "output/final_results/building/p, n=100, c=1.50, r=1.0/"
-    dir_result1 = "output/final_results/building/p, n=100, c=1.50, s=25.0, r=1.0/"
+    # dir_result1 = "output/final_results/building/p, n=240, v=0.30, c=4.30, r=6.0/"
+    dir_result1 = "output/final_results/building/displacement/0,1,d=0/"
+    # dir_result1 = "output/final_results/building/displacement/mode2,0,5,d=0/"
     
-    rho, _, _,_, stress, omega, phi0, phi1, phi2, phi3, phi4, phi5 = assmble_data(1, 420)
+    rho, vol, BLF_ks, compliance, dis, stress_iter,stress, omega, phi0, phi1, phi2, phi3, phi4, phi5 = assmble_data(1, 1000)
     
     with plt.style.context(["nature"]):
-        # plot_1(1, rho, phi0, stress)
+        # plot_1(1, rho, phi1, stress)
         # plt.savefig("output/final_results/building/building_stress_2.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
         
-        plot_2(omega)
-        plt.savefig("output/final_results/building/building_BLF_2.png", bbox_inches="tight", dpi=500, pad_inches=0.02)
+        plot_2(omega, BLF_ks, vol, compliance, dis)
+        plt.savefig("output/final_results/building/building_BLF_2.png", bbox_inches="tight", dpi=500, pad_inches=0.05)
         
         
     # dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
