@@ -223,14 +223,14 @@ def beam(r0_=2.1, l=1.0, frac=1/3, nx=100, prob="natural_frequency"):
         forces[nodes[n // 2 - i, m]] = [-P / (2 * offset), 0]
         forces[nodes[n // 2 + 1 + i, m]] = [-P / (2 * offset), 0]
     
-    # for i in range(offset):
-    #     bcs[nodes[n // 2 - i, 0]] = [1]
-    #     bcs[nodes[n // 2 + 1 + i, 0]] = [1]
-    #     bcs[nodes[n // 2 - i, m]] = [1]
-    #     bcs[nodes[n // 2 + 1 + i, m]] = [1]
-    for i in range(n + 1):
-        bcs[nodes[i, 0]] = [1]
-        bcs[nodes[i, m]] = [1]
+    for i in range(offset):
+        bcs[nodes[n // 2 - i, 0]] = [1]
+        bcs[nodes[n // 2 + 1 + i, 0]] = [1]
+        bcs[nodes[n // 2 - i, m]] = [1]
+        bcs[nodes[n // 2 + 1 + i, m]] = [1]
+    # for i in range(n + 1):
+    #     bcs[nodes[i, 0]] = [1]
+    #     bcs[nodes[i, m]] = [1]
 
     r0 = l / nx * r0_
     ic(r0)
@@ -824,9 +824,11 @@ def visualize(prefix, X, bcs, non_design_nodes=None, forces=None, index=None):
         m0_X = np.array([X[i, :] for i in non_design_nodes])
         ax.scatter(m0_X[:, 0], m0_X[:, 1], color="blue", s=markersize)
 
-    if index:
-        m0_X = np.array([X[index, :]])
-        ax.scatter(m0_X[:, 0], m0_X[:, 1], color="r", s=2*markersize)
+    if index.any():
+        for i in index:
+            ax.scatter(X[int(i), 0], X[int(i), 1], color="r", s=markersize)
+        # m0_X = np.array([X[index, :]])
+        # ax.scatter(m0_X[:, 0], m0_X[:, 1], color="r", s=2*markersize)
 
     fig.savefig(os.path.join(prefix, "domain.png"), dpi=500, bbox_inches="tight")
     return
