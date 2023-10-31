@@ -425,40 +425,44 @@ def deriv_approx2(
     C = B @ Q[:, :N_b]
     U, _ = np.linalg.qr(C)
 
-    # factor = 0.99
-    # P = A - factor * lam[0] * B
-    # Pfactor = scipy.sparse.linalg.factorized(P)
+    factor = 0.99
+    P = A - factor * lam[0] * B
+    Pfactor = scipy.sparse.linalg.factorized(P)
 
-    # def preconditioner(x):
-    #     y = Pfactor(x)
-    #     t = np.dot(U.T, y)
-    #     y = y - np.dot(U, t)
-    #     return y
+    def preconditioner(x):
+        y = Pfactor(x)
+        t = np.dot(U.T, y)
+        y = y - np.dot(U, t)
+        return y
 
-    # preop = scipy.sparse.linalg.LinearOperator((n, n), matvec=preconditioner)
+    preop = scipy.sparse.linalg.LinearOperator((n, n), matvec=preconditioner)
 
     Z = np.eye(np.shape(A)[0]) - U @ U.T
 
+    inintial_guess = np.zeros(n)
+    
     for j in range(np.max([0, N_a - 1]), N_b):
         Dq = D @ Q[:, j]
-        # bkr = -2.0 * eta[j] * Dq
+        bkr = -2.0 * Dq
 
-        # def matrix(x):
-        #     y = A.dot(x) - lam[j] * B.dot(x)
-        #     t = np.dot(U.T, y)
-        #     y = y - np.dot(U, t)
-        #     return y
+        def matrix(x):
+            y = A.dot(x) - lam[j] * B.dot(x)
+            t = np.dot(U.T, y)
+            y = y - np.dot(U, t)
+            return y
 
-        # matop = scipy.sparse.linalg.LinearOperator((n, n), matvec=matrix)
+        matop = scipy.sparse.linalg.LinearOperator((n, n), matvec=matrix)
 
-        # t = np.dot(U.T, bkr)
-        # bkr = bkr - np.dot(U, t)
-        # phi, _ = scipy.sparse.linalg.gmres(matop, bkr, tol=1e-10, atol=1e-15, M=preop)
+        t = np.dot(U.T, bkr)
+        bkr = bkr - np.dot(U, t)
+        phi, _ = scipy.sparse.linalg.gmres(matop, bkr, x0=inintial_guess, M=preop, tol=1e-10, atol=1e-15)
+        phi = phi * eta[j]
+        inintial_guess = phi - np.dot(U, np.dot(U.T, phi))
 
-        Ak = A - lam[j] * B
-        Abar = Z.T @ Ak @ Z
-        bbar = Z.T @ (-2.0 * eta[j] * Dq)
-        phi = Z @ np.linalg.solve(Abar, bbar)
+        # Ak = A - lam[j] * B
+        # Abar = Z.T @ Ak @ Z
+        # bbar = Z.T @ (-2.0 * eta[j] * Dq)
+        # phi = Z @ np.linalg.solve(Abar, bbar)
 
         hdot += Q[:, j].T @ (Adot - lam[j] * Bdot) @ phi
 
