@@ -1667,33 +1667,33 @@ class TopologyAnalysis:
         self.D_index_modify = self.D_index
 
         # check the difference between Q and Qcrit to recapture the N_a and N_b
-        norm = np.zeros(self.N)
+        self.norm = np.zeros(self.N)
         if tracking:
             if iter >= iter_crit:
                 for i in range(self.N):
-                    norm[i] = np.linalg.norm(Q[:, i] @ Qcrit) ** 2 / (
+                    self.norm[i] = np.linalg.norm(Q[:, i] @ Qcrit) ** 2 / (
                         np.linalg.norm(Qcrit) ** 2 * np.linalg.norm(Q[:, i]) ** 2
                     )
 
-                if norm[self.N_a] < 0.9:
-                    index = np.argmax(norm)
+                if self.norm[self.N_a] < 0.9:
+                    index = np.argmax(self.norm)
                     self.N_a = self.N_b = index
 
-                ic(norm)
+                ic(self.norm)
                 ic(self.N_a, self.N_b)
 
-        if len(self.D_index) != 1:
+        if len(self.D_index) != 1 and len(self.D_index) != 0:
             q_max = np.zeros(self.N_b - self.N_a + 1)
-            q_max_index = np.zeros(self.N_b - self.N_a + 1)
+            D_indx_modify = np.zeros(self.N_b - self.N_a + 1)
             for i in range(self.N_a, self.N_b + 1):
                 q = self.Q[self.D_index, i]
                 q_max[i - self.N_a] = np.max(np.abs(q))
-                q_max_index[i - self.N_a] = np.argmax(np.abs(q))
+                D_indx_modify[i - self.N_a] = self.D_index[np.argmax(np.abs(q))]
                 print(
                     "D_indx: %d, %d, %f,"
-                    % (i, q_max_index[i - self.N_a], q_max[i - self.N_a])
+                    % (i, D_indx_modify[i - self.N_a], q_max[i - self.N_a])
                 )
-            self.D_index_modify = q_max_index.astype(int)
+            self.D_index_modify = D_indx_modify.astype(int)
 
         if self.N_a == self.N_b:
             scale = 1e-6
@@ -1848,7 +1848,6 @@ class TopologyAnalysis:
     def eigenvector_displacement(self):
         sum_eta = np.sum(self.eta)
         eta = self.eta / sum_eta
-
         h = 0.0
         for i in range(len(eta)):
             q = self.Q[self.D_index_modify, i]
@@ -2767,10 +2766,11 @@ class TopOptProb:
             foi["area"] = area / np.sum(self.area_gradient)
             # if self.it_counter  can be devide by 10, and stress is not in the confs, then compute stress
             # if self.it_counter % 5 == 0 and "stress" not in self.confs:
-            stress_ks = self.analysis.eigenvector_stress(
-                self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
-            )
-            foi["stress_ks"] = stress_ks
+            # stress_ks = self.analysis.eigenvector_stress(
+            #     self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
+            # )
+            if self.tracking:
+                foi["stress_ks"] = self.analysis.N_a + self.analysis.norm[self.analysis.N_a]
 
         if "volume_lb" in self.confs:
             assert self.fixed_area_lb is not None
@@ -3451,7 +3451,7 @@ def main(args):
                 elif args.mode == 4:
                     for i in range(n):
                         indx = np.append(indx, i * m + m // 2)
-                        D_index = np.append(D_index, 2 * (i * m + m // 2) + 1)
+                        D_index = np.append(D_index, 2 * (i * m + m // 2))
 
     domain.visualize(args.prefix, X, bcs, non_design_nodes, forces, indx)
 
