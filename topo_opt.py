@@ -1687,8 +1687,8 @@ class TopologyAnalysis:
             D_indx_modify = np.zeros(self.N_b - self.N_a + 1)
             for i in range(self.N_a, self.N_b + 1):
                 q = self.Q[self.D_index, i]
-                q_max[i - self.N_a] = np.max(np.abs(q))
-                D_indx_modify[i - self.N_a] = self.D_index[np.argmax(np.abs(q))]
+                q_max[i - self.N_a] = np.max(q)
+                D_indx_modify[i - self.N_a] = self.D_index[np.argmax(q)]
                 print(
                     "D_indx: %d, %d, %f,"
                     % (i, D_indx_modify[i - self.N_a], q_max[i - self.N_a])
@@ -2676,6 +2676,7 @@ class TopOptProb:
         else:
             sigma = self.sigma_scale
         sigma = np.min([sigma, 1e3])
+        sigma = np.max([sigma, 1e-2])
         ic(sigma)
 
         if self.prob == "natural_frequency":
@@ -2688,7 +2689,7 @@ class TopOptProb:
             )
         elif self.prob == "buckling":
             if self.tracking:
-                if self.it_counter >= self.iter_crit_dis and self.iter_crit_dis != 0:
+                if self.it_counter == self.iter_crit_dis and self.iter_crit_dis != 0:
                     self.Qcrit = self.analysis.Q[:, self.analysis.N_a]
 
             BLF = self.analysis.solve_buckling(
@@ -3419,7 +3420,7 @@ def main(args):
                     for i in range(m):
                         indx = np.append(indx, i)
                         indx = np.append(indx, n * m - 1 - i)
-                        D_index = np.append(D_index, 2 * i + 1)
+                        # D_index = np.append(D_index, 2 * i + 1)
                         D_index = np.append(D_index, 2 * (n * m - 1 - i) + 1)
                 elif args.mode == 4:
                     for i in range(m):
@@ -3446,7 +3447,7 @@ def main(args):
                     for i in range(n):
                         indx = np.append(indx, i * m)
                         indx = np.append(indx, i * m + m - 1)
-                        D_index = np.append(D_index, 2 * (i * m))
+                        # D_index = np.append(D_index, 2 * (i * m))
                         D_index = np.append(D_index, 2 * (i * m + m - 1))
                 elif args.mode == 4:
                     for i in range(n):

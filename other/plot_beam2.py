@@ -684,11 +684,24 @@ def plot_4(ncol, rho, stress, phi0, phi1, phi2, dis=None):
 
 def plot_0():
     # w = np.arange(0, 1.1, 0.1)
+    fig, ax = plt.subplots(figsize=(4, 4), constrained_layout=True)
     lam = np.array([8.93, 9.14, 7.99, 7.97, 7.47, 7.06, 6.75, 6.90, 6.32, 3.21, 3.01])
     c = np.array([1.52e-5, 1.21e-5, 1.04e-5, 1.0e-5, 9.49e-6, 9.09e-6, 8.88e-6, 9.01e-6, 8.60e-6, 7.74e-6, 7.69e-6])
-    plt.plot(c, 1/ lam, "o-", color="b", markersize=3, linewidth=1.0)
-    plt.ylabel("$1 / \lambda$")
+    plt.plot(c, 1/ lam, "o-", color="k", markersize=3, linewidth=0.75)
+    plt.ylabel("$1 / BLF$")
     plt.xlabel("$c$")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    # plt.grid(True, linestyle="-", linewidth=0.5)
+    # open the minor ticks
+    # ax.tick_params(which="minor", direction="out")
+    # open the minor grid
+    # ax.minorticks_on()
+    # set the minor grid style
+    # ax.grid(which="both", linestyle=":", linewidth=0.2, alpha=0.5)
+    
+    
+    
     # plt.xlim(0, 2e-5)
     # plt.ylim(1/10, 1/2)
 
