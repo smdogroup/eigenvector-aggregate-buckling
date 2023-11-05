@@ -49,8 +49,8 @@ def parse_cmd_args():
 
     softmax = {
         "N_a": 0,  # lower bound of selected indices of eigenvalues
-        "N_b": 0,  # upper bound of selected indices of eigenvalues
-        "N": 6,  # number of eigenvalues
+        "N_b": 1,  # upper bound of selected indices of eigenvalues
+        "N": 12,  # number of eigenvalues
         "atype": 0,  # 1: 0-b based index, N_a=0, "exp"; 0: a-b based index. "tanh"
         "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     }

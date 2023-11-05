@@ -25,7 +25,7 @@
 
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 6.0 --vol-frac-ub 0.3 --compliance-ub-percent 5.0 --proj --min-compliance 7.4e-6 --delta-beta 0.1 --note delta-beta=0.01,new
 
-# srun python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub --nx 240 --r0 6.0 --vol-frac-ub 0.3 --c0 7.4e-6 --mu-ks0 0.08 --delta-p 0.01 --delta-beta 0.1 --weight 1.0 --maxit 1000
+# srun python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub --nx 240 --r0 6.0 --vol-frac-ub 0.3 --c0 7.4e-6 --mu-ks0 0.08 --delta-p 0.01 --delta-beta 0.1 --weight 0.2 --maxit 1000 --note new
 
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub --nx 240 --r0 3.0 --vol-frac-ub 0.3 --delta-p 0.01 --maxit 1000 --delta-beta 0.1 --proj --note delta-p=0.01,delta-beta=0.2
 
@@ -39,10 +39,10 @@
 # srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --compliance-ub-percent 4.3  --min-compliance 7.4e-6 --proj --delta-p 0.01 --delta-beta 0.1 --dis-ub 10.0 --tracking --iter-crit-dis 101 --maxit 1100 --note tracking,newnewnew --mode 3
 
 ##### no tracking
-# srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --compliance-ub-percent 4.3  --min-compliance 7.4e-6 --proj --delta-p 0.01 --delta-beta 0.1 --dis-ub 10.0 --note newnewnew --mode 3
+# srun python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --compliance-ub-percent 4.3  --min-compliance 7.4e-6 --proj --delta-p 0.01 --delta-beta 0.1 --dis-ub 10.0 --note new --mode 4
 
 ##### compliance-buckling no tracking
-srun python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --c0 7.4e-6 --mu-ks0 0.1 --delta-p 0.01 --delta-beta 0.1 --weight 0.2 --maxit 1000 --dis-ub 0.0 --mode 2
+# srun python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --c0 7.4e-6 --mu-ks0 0.1 --delta-p 0.01 --delta-beta 0.1 --weight 0.6 --maxit 1000 --dis-ub 3.0 --mode 4 --note new
 
 ##### compliance-buckling tracking
 # srun python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --c0 7.4e-6 --mu-ks0 0.1 --delta-p 0.01 --delta-beta 0.1 --weight 0.2 --maxit 1000 --dis-ub 10.0 --tracking --iter-crit-dis 101 --maxit 1100 --note tracking --mode 3
@@ -68,7 +68,7 @@ srun python3 topo_opt.py --domain building --objf compliance-buckling --confs vo
 # srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --dis-ub 6.0 --delta-p 0.01 --delta-beta 0.2 --proj --tracking --iter-crit-dis 101 --maxit 1100 --note tracking --mode 3
 
 ##### no tracking
-# srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --dis-ub 6.0 --delta-p 0.01 --delta-beta 0.2 --proj --mode 4
+srun python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.6 --dis-ub 10.0 --delta-p 0.01 --delta-beta 0.2 --proj --mode 3
 
 
 

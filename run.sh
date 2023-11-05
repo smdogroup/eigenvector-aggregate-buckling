@@ -40,9 +40,11 @@ fi
 
 # python3 topo_opt.py --optimizer pmma --domain beam --objf frequency --confs volume_ub displacement stress --nx 50 --maxit 200 --vol-frac-ub 0.5 --dis-ub 0.3 --stress-ub 1.00 --r0 2.1 --ks-rho 1e+6 --proj --kokkos --check-gradient
 
-# python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 100 --r0 2.0 --vol-frac-ub 0.3 --proj --maxit 500 --note P=1e-3,new_square
+# python3 topo_opt.py --domain square --objf compliance --confs volume_ub --nx 100 --r0 2.0 --vol-frac-ub 0.3 --proj --maxit 500 --note sys
 
-# python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 100 --r0 2.0 --vol-frac-ub 0.3 --proj --maxit 500 --compliance-ub-percent 3 --min-compliance 2.48e-5 --note P=1e-3,new_square
+# python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 100 --r0 2.0 --vol-frac-ub 0.3 --proj --maxit 500 --compliance-ub-percent 3 --min-compliance 1.8e-5 --note sys
+
+python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance displacement --nx 100 --r0 2.0 --vol-frac-ub 0.3 --proj --maxit 500 --dis-ub 10.0 --compliance-ub-percent 3 --min-compliance 1.8e-5 --note sys1
 
 # python3 topo_opt.py --domain square --objf frequency --confs volume_ub compliance --nx 300 --r0 3.0 --vol-frac-ub 0.3 --maxit 1000 --compliance-ub-percent 3.0 --min-compliance 1.1e-4 --proj --note P=2e-3,min-new2 --sigma-scale 2.0
 
@@ -65,7 +67,7 @@ fi
 
 # python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub --nx 360 --r0 5.0 --vol-frac-ub 0.45 --weight 0.2 --delta-p 0.1 --delta-beta 0.5 --maxit 1000
 
-python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --dis-ub 0.0 --delta-p 0.01 --delta-beta 0.2 --proj --maxit 1000 --mode 3
+# python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --dis-ub 0.0 --delta-p 0.01 --delta-beta 0.2 --proj --maxit 1000 --mode 3
 
 # python3 topo_opt.py --domain beam --objf compliance-buckling --confs volume_ub stress --nx 360 --r0 6.0 --vol-frac-ub 0.45 --weight 0.08 --stress-ub 10 --delta-p 0.01 --delta-beta 0.2 --maxit 1000 --restart-beta-p --note atype=0 
 
