@@ -2,7 +2,7 @@ from icecream import ic
 import matplotlib.pylab as plt
 import numpy as np
 import scienceplots
-
+from matplotlib import colors
 
 def read_size(options, vtk):
     nnodes, m, n = 0, 0, 0
@@ -20,6 +20,36 @@ def read_size(options, vtk):
     n = nnodes // m
     return nnodes, m, n
 
+
+# def read_vol(file):
+#     vol, dis = [], []
+#     # total_cols = len(np.loadtxt(file, skiprows=8, max_rows=1)) - 2
+#     total_cols = 5
+#     total_lines = sum(1 for line in open(file))
+#     with open(file) as f:
+#         for num, line in enumerate(f, 1):
+#             if num == total_lines - 2:
+#                 break
+#             if "iter" in line:
+#                 a = np.loadtxt(file, skiprows=num, max_rows=10, usecols=range(0, total_cols))
+#                 vol = np.append(vol, a)
+#                 b = np.loadtxt(
+#                         file, skiprows=num, max_rows=10, usecols=range(6, 7)
+#                     )
+#                 dis = np.append(dis, b)
+
+#     ic(total_cols, len(vol))
+#     n_iter = len(vol) // total_cols
+#     vol = vol.reshape(n_iter, total_cols)
+#     stress_iter = vol[:, 4] ** 0.5 * 1e-6
+        
+#     BLF_ks = vol[:, 3]
+#     ic(BLF_ks.shape)
+#     compliance = vol[:, -1]
+#     vol = vol[:, 2]
+#     ic(compliance.shape, vol.shape)
+#     # ic(dis.shape, vol.shape)
+#     return vol, BLF_ks, compliance, dis, stress_iter
 
 def read_vol(file):
     vol, dis = [], []
@@ -95,8 +125,8 @@ def read_vtk(file, nnodes, m, n):
                 phi5 = np.loadtxt(file, skiprows=num, max_rows=nnodes)
 
     rho = rho.reshape(n, m)
-    stress = stress.reshape(n - 1, m - 1)
-    stress = stress**0.5
+    # stress = stress.reshape(n - 1, m - 1)
+    # stress = stress**0.5
     phi0 = phi0.reshape(n, m, 3)
     phi1 = phi1.reshape(n, m, 3)
     phi2 = phi2.reshape(n, m, 3)
@@ -176,7 +206,7 @@ def plot_modeshape(
     flip_x=False,
     flip_y=False,
     zoom=False,
-    levels=50,
+    levels=20,
 ):
     Z = rho
     cmap = "Greys"
@@ -252,7 +282,7 @@ def plot_modeshape(
         levels=levels,
         alpha=alpha,
         antialiased=True,
-        cmap=cmap,
+        cmap=colors.ListedColormap(['lightgrey', 'grey', 'black']),
         vmin=vmin,
         vmax=vmax,
     )
@@ -286,7 +316,7 @@ def plot_1(nrow, rho, phi0, stress, flip_x=False, flip_y=False):
     plot_modeshape(
         axs,
         rho[0],
-        phi0[0] * shift_scale,
+        # -phi0[0] * shift_scale,
         # stress[0],
         flip_x=1, 
         flip_y=flip_y, 
@@ -330,24 +360,12 @@ def plot_5(nrow, rho, phi0, stress, flip_x=False, flip_y=False):
         # draw a line at y=1.01039
     # axs[0].plot([0, 8], [1.01039, 1.01039], color="black", linestyle="--", linewidth=0.25)
 
-def plot_2(omega, BLF_ks, vol, compliance, dis):
+    
+def plot_2_1(omega, BLF_ks, vol, compliance, dis):
     fig, ax = plt.subplots()
     ax2 = ax.twinx()
     ax2.spines.right.set_position(("axes", 1.0))
     
-    # colors = ["k", "k", "b", "b", "r", "r"]
-    colors = [
-        "#1f77b4",
-        "#ff7f0e",
-        "#2ca02c",
-        "#d62728",
-        "#9467bd",
-        "#8c564b",
-        "#e377c2",
-        "#7f7f7f",
-        "#bcbd22",
-        "#17becf",
-    ]
     styles = ["-", "--", "-.", ":", "-", "--", "-.", ":"]
     alpha = [0.8, 0.5, 0.4, 0.3, 0.2, 0.1] 
     # marker = ["o", "o", "s", "s", "^", "^"]
@@ -356,13 +374,14 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     n_iter = 1000
     
     # plot BLF_ks
-    (p1,) = ax.plot(BLF_ks[0][n_start:n_iter], label=r'$J_{ks}^{-1} [\lambda_i]$', color="k", alpha=0.8,linewidth=0.75, linestyle="--")
+    (p1,) = ax.plot(BLF_ks[0][n_start:n_iter], label=r'$J_{ks}^{-1} [\mu_i]$', color="k", alpha=0.8,linewidth=0.75, linestyle="--")
     (p2,) = ax.plot(omega[0][n_start:n_iter, 0], label=f"$\lambda_{1}$",alpha=0.8, color="k", linewidth=0.75)
         
-    (pc1,) = ax2.plot(vol[0][n_start:n_iter] / 0.3, color="b", linewidth=0.75, alpha=0.6, label=r'$g_V$',linestyle="--",zorder=0)
-    (pc2,) = ax2.plot(compliance[0][n_start:n_iter] / (4.3*7.4e-06), color="b", linewidth=0.75, alpha=0.6, label=r'$g_{c}$',linestyle="-",zorder=0)
+    (pc1,) = ax2.plot(compliance[0][n_start:n_iter] / 7.4e-06, color="b", linewidth=0.75, alpha=0.6, label=r'$g_{c}$',linestyle="-",zorder=0)
     
-    (p3,) = ax2.plot(dis[0][n_start:n_iter] + 1.0, color="r", linewidth=0.25, alpha=1.0, label=r'$g_{d}$',linestyle="-",zorder=10)
+    # (pc2,) = ax2.plot(vol[0][n_start:n_iter] / 0.3, color="b", linewidth=0.75, alpha=0.6, label=r'$g_V$',linestyle="--",zorder=0)
+    
+    # (p3,) = ax2.plot(dis[0][n_start:n_iter] + 1.0, color="r", linewidth=0.25, alpha=1.0, label=r'$g_{d}$',linestyle="-",zorder=10)
   
     for i in range(1, 6):
         ax.plot(
@@ -379,8 +398,8 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
             # markeredgecolor=colors[i],
         )
     # log scale the x axis
-    ax.set(xscale="log", xlim=(18, 1000))
-    ax.set_xlim(30, 1020)
+    ax.set(xscale="log", xlim=(20, 1000))
+    # ax.set(xlim=(10, 1000))
     ax.set_xlabel("Iteration (log scale)")
     # ax.legend(loc="upper right")
     ax.spines["top"].set_visible(False)
@@ -390,14 +409,13 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     ax.tick_params(direction="out")
     ax.tick_params(which="minor", direction="out")
     
-    ax.set_ylim(0, 19.95)
+    ax.set_ylim(0, 17.95)
     ax.set_ylabel("BLF ($\lambda_i$)", rotation=0, labelpad=0)
     ax.yaxis.set_label_coords(0.0, 1.001)
     
-    ax2.set(ylim=(0.0, 1.05))
-    ax2.set_ylabel("Constraints ($\%$)", rotation=0, labelpad=0)
-    ax2.yaxis.set_label_coords(1.0, 1.05)
-    
+    ax2.set(ylim=(0.0, 3.95))
+    ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
+    ax2.yaxis.set_label_coords(1.02, 1.051)
     
     ax2.yaxis.label.set_color(pc1.get_color())
     ax.yaxis.label.set_color(p1.get_color())
@@ -418,6 +436,9 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     ax2.tick_params(which="minor", direction="out")
     ax.tick_params(which="minor", left=False)
     
+    ax.margins(0.0)
+    ax2.margins(0.0)
+    
     handles, labels = ax.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
     handles.extend(handles2)
@@ -434,355 +455,170 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     )
     
     
+def plot_2(omega, BLF_ks, vol, compliance, dis):
+    fig, ax = plt.subplots(constrained_layout=True)
+    ax2 = ax.twinx()
+    ax2.spines.right.set_position(("axes", 1.0))
     
-def plot_3(omega, vol, dis, stress_iter):
-    # fig, ax = plt.subplots(constrained_layout=True)
-    # marker = ["o", "s", "^"]
-    # colors = ["k", "b","r"]
-
-    # n_iter = 300
-    # for i in range(3):
-    #     ax.plot(omega[i][3:n_iter, 0], label=f"$\omega_{i+1}$", color=colors[i])
-    # ax.set_xlabel("Iteration")
-    # ax.set_ylabel("Frequency (rad/s)")
-    # ax.spines["top"].set_visible(False)
-    # ax.spines["right"].set_visible(False)
-    # ax.xaxis.set_ticks_position("bottom")
-    # ax.yaxis.set_ticks_position("left")
-    # ax.tick_params(direction="out")
-    # ax.tick_params(which="minor", direction="out")
-
-    # # plot volume with right y axis
-    # ax2 = ax.twinx()
-    # for i in range(3):
-    #     ax2.plot(vol[i][:n_iter], label=f"$V_{i+1}$",  linestyle="--", color=colors[i])
-    # ax2.set_ylabel("Volume")
-    # ax2.spines["top"].set_visible(False)
-    # # ax2.spines["right"].set_visible(False)
-    # ax2.xaxis.set_ticks_position("bottom")
-    # ax2.yaxis.set_ticks_position("right")
-    # ax2.tick_params(direction="out")
-    # ax2.tick_params(which="minor", direction="out")
-    # ax2.set_ylim(0.0, 1)
-    # # change the right y axis to dashed line
-    # ax2.spines["right"].set_linestyle("--")
-    # # combine the legend in to two columns
-    # handles1, labels1 = ax.get_legend_handles_labels()
-    # handles2, labels2 = ax2.get_legend_handles_labels()
-    # ax2.legend(handles1 + handles2, labels1 + labels2, ncol=2, loc="lower right")
-    # # change the legend to two columns
-    # # ax2.legend(loc="upper right", ncol=2)
-
-    fig2, ax = plt.subplots(figsize=(4.0, 2.5), constrained_layout=True)
-    n_iter = 600
-    n_start = 10
-
-    # ax2 = ax.twinx()
     ax3 = ax.twinx()
-    ax4 = ax.twinx()
-    ax3.spines.right.set_position(("axes", 1.02))
-    ax4.spines.right.set_position(("axes", 1.21))
-    # ax4.spines.right.set_position(("axes", 1.37))
-
-    # (p2,) = ax2.plot(
-    #     vol[3][n_start:n_iter], color="k", linewidth=0.5, label="$V$ ($\%$) "
-    # )
-    # find if a > 1e-4
-    for i in range(len(stress_iter[0])):
-        if stress_iter[0][i] > 2:
-            stress_iter[0][i] = stress_iter[0][i-1] * 0.9
+    ax3.spines.right.set_position(("axes", 1.12))
     
-    for i in range(len(dis[0])):
-        if dis[0][i] < 0.3:
-            dis[0][i] = dis[0][i-1]
+    styles = ["-", "--", "-.", ":", "-", "--", "-.", ":"]
+    alpha = [0.8, 0.5, 0.4, 0.3, 0.2, 0.1] 
+    # marker = ["o", "o", "s", "s", "^", "^"]
+    linewidth=[1.0, 0.5, 0.4, 0.3, 0.2, 0.1]
+    n_start = 0
+    n_iter = 1000
     
-    (p3,) = ax3.plot(dis[0][n_start:n_iter], color="k", linewidth=0.5, label="$h$")
-    (p4,) = ax4.plot(
-        stress_iter[0][n_start:n_iter],
-        color="b",
-        linewidth=0.5,
-        label="$\sigma_{vM}$",
-    )
-
-    # add a straight line at y=0.4 for ax2
-    # p5 = ax2.axhline(
-    #     xmin=0.04,
-    #     xmax=0.96,
-    #     y=0.4,
-    #     color="k",
-    #     linestyle="--",
-    #     linewidth=0.5,
-    #     label="$V_{\mathrm{constraint}}$",
-    # )
-    p6 = ax3.axhline(
-        xmin=0.04,
-        xmax=0.96,
-        y=0.5,
-        color="k",
-        linestyle="--",
-        linewidth=1,
-        alpha=0.25,
-        label="$h_{\mathrm{constraint}}$",
-    )
-    p7 = ax4.axhline(
-        xmin=0.04,
-        xmax=0.96,
-        y=1.67332,
-        color="b",
-        linestyle="--",
-        linewidth=1,
-        alpha=0.25,
-        label="$\sigma_{\mathrm{constraint}}$",
-    )
-
-    a = (np.abs(omega[0][n_start:n_iter, 0] - omega[0][n_start:n_iter, 1])) / (
-        omega[0][n_start:n_iter, 0]
-    )
+    # plot BLF_ks
+    (p1,) = ax.plot(BLF_ks[0][n_start:n_iter], label=r'$J_{ks}^{-1} [\mu_i]$', color="k", alpha=0.8,linewidth=0.75, linestyle="--")
+    (p2,) = ax.plot(omega[0][n_start:n_iter, 0], label=f"$\lambda_{1}$",alpha=0.8, color="k", linewidth=0.75)
+        
+    (pc1,) = ax2.plot(compliance[0][n_start:n_iter] / 7.4e-06, color="b", linewidth=0.75, alpha=0.6, label=r'$g_{c}$',linestyle="-",zorder=0)
     
-    # # find if a > 1e-4
-    # for i in range(len(a)):
-    #     if a[i] > 1e-4:
-    #         a[i] = a[i-1]
+    # (pc2,) = ax2.plot(vol[0][n_start:n_iter] / 0.3, color="b", linewidth=0.75, alpha=0.6, label=r'$g_V$',linestyle="--",zorder=0)
     
-    (p1,) = ax.plot(
-        a,
-        color="r",
-        linewidth=0.25,
-        label="$\ \\| \omega_{2} - \\omega_{1} \| / \omega_{1}$",
-    )
-
-    ax.set(yscale="log", ylim=(1e-5, 0.9e4), xlabel="Iteration")
-    ax.set_ylabel(
-        "Relative Difference $\ \\| \omega_{2} - \\omega_{1} \| / \omega_{1}$ ($\%$)"
-    )
-    # ax2.set(ylim=(0.16, 0.99), ylabel="Volume Fraction ($\%$)")
-    ax3.set(ylim=(0.3, 0.8), ylabel="Displacement $h \ (\mathrm{m}^2)$")
-    ax4.set(ylim=(0.0, 1.8), ylabel="von Mises Stress $\sigma_{vM} \ (\mathrm{MPa})$")
+    (pcc1,) = ax3.plot(dis[0][n_start:n_iter] , color="r", linewidth=0.25, alpha=1.0, label=r'$g_{d}$',linestyle="-",zorder=10)
+  
+    for i in range(1, 6):
+        ax.plot(
+            omega[0][n_start:n_iter, i],
+            label=f"$\lambda_{i+1}$",
+            color="k",
+            alpha=alpha[i],
+            linestyle=styles[i],
+            linewidth=0.5,
+            # marker=marker[i],
+            # markevery=10,
+            # markersize=3,
+            # markerfacecolor="none",
+            # markeredgecolor=colors[i],
+        )
+    # log scale the x axis
+    ax.set(xscale="log", xlim=(30, 1000))
+    ax.set_xlabel("Iteration (log scale)")
     
-    handles, labels = [], []
-    handles.append(p4)
-    labels.append(p4.get_label())
-    handles.append(p7)
-    labels.append(p7.get_label())
-    handles.append(p3)
-    labels.append(p3.get_label())
-    handles.append(p6)
-    labels.append(p6.get_label())
-    handles.append(p1)
-    labels.append(p1.get_label())
+    # ax.set(xlim=(10, 1000))
+    # ax.set_xlabel("Iteration")
     
-    # handles = [handles[i] for i in range(0, len(handles), 2)] + [
-    #     handles[i] for i in range(1, len(handles), 2)
-    # ]
-    # labels = [labels[i] for i in range(0, len(labels), 2)] + [
-    #     labels[i] for i in range(1, len(labels), 2)
-    # ]
-    ax.legend(
-        handles,
-        labels,
-        # title="Frequencies:",
-        ncol=1,
-        loc=[0.52, 0.47],
-        frameon=False,
-    )
-
+    
+    # ax.legend(loc="upper right")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.xaxis.set_ticks_position("bottom")
+    ax.yaxis.set_ticks_position("left")
+    ax.tick_params(direction="out")
+    ax.tick_params(which="minor", direction="out")
+    
+    ax.set_ylim(0, 17.95)
+    ax.set_ylabel("BLF ($\lambda_i$)", rotation=0, labelpad=0)
+    ax.yaxis.set_label_coords(0.0, 1.001)
+    
+    ax2.set(ylim=(0.0, 3.95))
+    ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
+    ax2.yaxis.set_label_coords(1.02, 1.051)
+    
+    # ax3.set(ylim=(-1.0, 0.195))  # d=0
+    # ax3.set(ylim=(0.0, 6.695))    # d=6.0
+    ax3.set(ylim=(-90.0, 10))    # d=7.0
+    ax3.set_ylabel("$h$", rotation=0, labelpad=0)
+    ax3.yaxis.set_label_coords(1.12, 1.045)
+    
+    ax2.yaxis.label.set_color(pc1.get_color())
     ax.yaxis.label.set_color(p1.get_color())
-    # ax2.yaxis.label.set_color(p2.get_color())
-    ax3.yaxis.label.set_color(p3.get_color())
-    ax4.yaxis.label.set_color(p4.get_color())
-
+    ax2.yaxis.label.set_color(pc1.get_color())
     ax.tick_params(axis="y", colors=p1.get_color())
-    # ax2.tick_params(axis="y", colors=p2.get_color())
-    ax3.tick_params(axis="y", colors=p3.get_color())
-    ax4.tick_params(axis="y", colors=p4.get_color())
+    ax2.tick_params(axis="y", colors=pc1.get_color())
+    ax3.tick_params(axis="y", colors=pcc1.get_color())
 
     ax.spines["top"].set_visible(False)
-    # ax2.spines["top"].set_visible(False)
+    ax2.spines["top"].set_visible(False)
     ax3.spines["top"].set_visible(False)
-    ax4.spines["top"].set_visible(False)
     ax.xaxis.set_ticks_position("bottom")
     ax.yaxis.set_ticks_position("left")
     ax.spines["right"].set_visible(False)
-    # ax2.yaxis.set_ticks_position("right")
+    ax2.yaxis.set_ticks_position("right")
     ax3.yaxis.set_ticks_position("right")
-    ax4.yaxis.set_ticks_position("right")
 
     ax.tick_params(direction="out")
-    # ax2.tick_params(direction="out")
+    ax2.tick_params(direction="out")
     ax3.tick_params(direction="out")
-    ax4.tick_params(direction="out")
     ax.tick_params(which="minor", direction="out")
-    # ax2.tick_params(which="minor", direction="out")
+    ax2.tick_params(which="minor", direction="out")
     ax3.tick_params(which="minor", direction="out")
-    ax4.tick_params(which="minor", direction="out")
-    # ax3.tick_params(which="minor", direction="out")
-    # turn off the minor ticks for ax3
     ax.tick_params(which="minor", left=False)
     
-    
-    fig2.savefig(
-        "final_results/mbbbeam/mbbbeam_freq_stress.pdf",
-        bbox_inches="tight",
-        pad_inches=0.0,
+    handles, labels = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    handles3, labels3 = ax3.get_legend_handles_labels()
+    handles.extend(handles2)
+    labels.extend(labels2)
+    handles.extend(handles3)
+    labels.extend(labels3)
+    ax.legend(
+        handles,
+        labels,
+        # title="Buckling Load Factors:",
+        ncol=3,
+        # loc=[0.5, 0.05],
+        loc=[0.35, 0.05],
+        frameon=False,
+        fontsize=6,
     )
 
 
-def plot_4(ncol, rho, stress, phi0, phi1, phi2, dis=None):
-    nrow = 1
-    fig, axs = plt.subplots(nrow, ncol, figsize=(7, 2.5), constrained_layout=True)
-    labels_1 = ["(a)", "(b)", "(c)"]
-    labels_2 = ["(d)", "(e)", "(f)"]
-    labels_3 = ["$\omega_{opt\_b} = 169.73$ rad/s", "$\omega_{opt\_b} = 163.57$ rad/s", "$\omega_{opt\_b} = 154.67$ rad/s"]
-    labels_4 = ["$\omega_{opt\_a} = 169.76$ rad/s", "$\omega_{opt\_a} = 163.65$ rad/s", "$\omega_{opt\_a} = 151.84$ rad/s"]
-
-    # # where is the max location for phi0[0]
-    # max_loc = np.argmax(phi0[0][:, :, 1])
-    # ic(np.unravel_index(max_loc, phi0[0][:, :, 1].shape))
-    # ic(np.unravel_index(159, phi0[0][:, :, 1].shape))
-    # ic(np.max(phi0[0][:, :, 1]))
-    # ic(phi0[0].shape, max_loc)
-
-    for i in range(nrow):
-        for j in range(ncol):
-            if i == 0:
-                # if j == 2:
-                #     flip_x = False
-                #     flip_y = True
-                # else:
-                #     flip_x = False
-                #     flip_y = False
-                
-                flip_x = False
-                flip_y = False
-                # plot_modeshape(axs[j], rho[j], levels=25)
-                
-                # print the middle point of phi0
-                print(phi1[j][50, 400, 1])
-
-                plot_modeshape(
-                    axs[j],
-                    rho[j],
-                    phi0[j],
-                    stress[j],
-                    flip_x=flip_x, 
-                    flip_y=flip_y, 
-                    # zoom=True,
-                    levels=100,
-                )
-
-                # axs[j].text(
-                #     0.5,
-                #     -0.05,
-                #     labels_1[j],
-                #     transform=axs[j].transAxes,
-                #     va="top",
-                #     ha="center",
-                #     fontweight="bold",
-                # )
-                for ax in axs[:]:
-                    ax.set_anchor("N")
-
-                # if j != 0:
-                #     # add a red point at bottom middle of the domain
-                #     axs[i, j].scatter(4, 0.05, color="red", s=8)
-            # elif i == 1:
-            #     plot_modeshape(axs[j], rho[j], phi0[j], flip_x=flip_x, flip_y=flip_y, levels=25)
-
-            # if j == 1 or j == 2:
-            #     plot_modeshape(axs[i, j], rho[0], phi0[0], alpha=0.2)
-            # elif i == 2:
-            #     plot_modeshape(axs[i, j], rho[j], phi1[j], flip_x=flip_x, flip_y=flip_y)
-            # elif i == 2:
-            #     plot_modeshape(axs[i, j], rho[j], phi2[j], flip_x=flip_x, flip_y=flip_y)
-            # elif i == 2:
-            #     plot_modeshape(
-            #         axs[j],
-            #         rho[j],
-            #         phi0[j],
-            #         stress[j],
-            #         flip_x=flip_x,
-            #         flip_y=flip_y,
-            #         zoom=False,
-            #         levels=100,
-            #     )
-            # elif i == 3:
-            #     plot_modeshape(
-            #         axs[j],
-            #         rho[j],
-            #         phi0[j],
-            #         stress[j],
-            #         flip_x=flip_x,
-            #         flip_y=flip_y,
-            #         zoom=True,
-            #         levels=50,
-            #     )
-
+def plot_0():
+    # w = np.arange(0, 1.1, 0.1)
+    fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
+    lam = np.array([12.29, 13.21, 12.92, 13.16, 12.13, 12.24, 11.28, 10.02, 8.72, 6.81, 1.52])
+    c = np.array([1.86e-5, 1.32e-5, 1.22e-5, 1.14e-5, 1.14e-5, 1.06e-5, 1.01e-5, 9.77e-6, 9.40e-6, 8.23e-6, 7.39e-6])
+    plt.plot(c, 1/ lam, "o-", color="k", markersize=3, linewidth=0.75)
+    plt.ylabel("$1 / BLF$")
+    plt.xlabel("$c$")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    
 
 if __name__ == "__main__":
-    # dir_result1 = "final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
-    # dir_result2 = "final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
-    # dir_result3 = "final_results/mbbbeam/nx=800, vol=0.5, r0=2.11, K=simp, M=linear/"
-    # rho, vol, _,_,_, omega, _, _, _, _, _, _ = assmble_data(3, 300, 300, 300)
-    # with plt.style.context(["nature"]):
-    # plot_1(1, rho)
-    # plt.savefig("final_results/mbbbeam/mbbbeam_mesh.pdf", bbox_inches="tight")
-    # plt.savefig("final_results/mbbbeam/mbbbeam_mesh.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
-
-    # plot_2(omega, vol)
-    # plt.savefig("final_results/mbbbeam/mbbbeam_freq.pdf", bbox_inches="tight", pad_inches=0.0)
-
-    # plot_3(omega, vol)
-    # plt.savefig("final_results/mbbbeam/mbbbeam_freq_2.pdf", bbox_inches="tight", pad_inches=0.0)
-
-    # dir_result1 = "final_results/mbbbeam/nx=500, vol=0.5, r0=1.0, K=simp, M=msimp/"
-    # dir_result2 = "final_results/mbbbeam/nx=500, vol=0.5, dis=0.3, mode=2, r0=1.0, K=simp, M=msimp/"
-    # dir_result3 = "final_results/mbbbeam/nx=500, vol=0.5, dis=0.3, mode=2, s=20000000000000.0, r0=1.0, K=simp, M=msimp/"
-
-    # dir_result1 = "output/final_results/building/p, n=240, v=0.30, c=4.30, r=6.0/"
-    dir_result1 = "output/final_results/building/displacement/0,1,d=0/"
+    dir_result1 = "output/final_results/building/p, n=240, v=0.30, c=4.30, r=6.0/"
+    # dir_result1 = "output/final_results/building/displacement/frequency/0,1,d=5/"
     # dir_result1 = "output/final_results/building/displacement/mode2,0,5,d=0/"
+    # dir_result1 = "output/final_results/building/compliance-buckling/0.2/"
+    # dir_result1 = "output/final_results/building/displacement/frequency_compliance/mode1/0,1,w=0.2,d=0.0/"
+    # dir_result1 = "output/final_results/building/displacement/frequency_compliance/mode1/0,0,w=0.6,d=0.0/"
+    # dir_result1 = "output/final_results/building/displacement/frequency_compliance/mode3/0,0,w=0.2,d=7.0/"
     
     rho, vol, BLF_ks, compliance, dis, stress_iter,stress, omega, phi0, phi1, phi2, phi3, phi4, phi5 = assmble_data(1, 1000)
     
     with plt.style.context(["nature"]):
         # plot_1(1, rho, phi1, stress)
-        # plt.savefig("output/final_results/building/building_stress_2.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
+        # plot_0()
+        # plt.savefig("output/final_results/building/compliance-buckling/building_pf.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
         
-        plot_2(omega, BLF_ks, vol, compliance, dis)
-        plt.savefig("output/final_results/building/building_BLF_2.png", bbox_inches="tight", dpi=500, pad_inches=0.05)
+        plot_2_1(omega, BLF_ks, vol, compliance, dis)
+        plt.savefig("output/final_results/building/building_his.png", bbox_inches="tight", dpi=500, pad_inches=0.05)
+        
+        ###############################
+        
+        # plot_1(1, rho, phi0, stress)
+        # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode1/00_02_0_1.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
+        
+        # plot_2(omega, BLF_ks, vol, compliance, dis)
+        # plt.savefig("output/final_results/building/displacement/building_0_1_0.png", bbox_inches="tight", dpi=500, pad_inches=0.05)
+        
+        # plot_2_1(omega, BLF_ks, vol, compliance, dis)
+        # plt.savefig("output/final_results/building/displacement/building_base_0_2.png", bbox_inches="tight", dpi=500, pad_inches=0.05)
+        
+        # plot_1(1, rho, phi0, stress)
+        # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode1/00_06_0_1.png", bbox_inches="tight", dpi=500, pad_inches=0.05)
+           
+        # plot_2(omega, BLF_ks, vol, compliance, dis)
+        # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode1/his_00_02_0.png", bbox_inches="tight", dpi=500, pad_inches=0.05)
+        
+        # plot_1(1, rho, phi0, stress)
+        # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode3/00_02_7_7.png", bbox_inches="tight", dpi=500, pad_inches=0.0)
+        
+        # plot_2(omega, BLF_ks, vol, compliance, dis)
+        # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode3/his_00_02_7.png", bbox_inches="tight", dpi=500, pad_inches=0.05)
         
         
-    # dir_result1 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
-    # dir_result2 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.4, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
-    # dir_result3 = "../output/final_results/mbbbeam/nx=800, vol=0.5, dis=0.3, mode=2, s=2800000000000.0, r0=2.1, K=simp, M=linear/"
-    # _, vol, dis,stress_iter, _, omega, _, _, _, _, _, _ = assmble_data(3, 500)
-    # with plt.style.context(["nature"]):
-    #     plot_3(omega, vol, dis, stress_iter)
-
-    # dir_result1 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"
-    # dir_result2 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"
-    # dir_result3 = "final_results/mbbbeam/nx=800, vol=0.5, dis=0.5, mode=2, r0=2.1, K=simp, M=linear/"
-    # rho, vol, dis, stress_iter, _, omega, _, _, _ = assmble_data(3, 400, 400, 400)
-    # with plt.style.context(["nature"]):
-    #     plot_3(omega, vol, dis, stress_iter)
-    #     plt.savefig(
-    #         "final_results/mbbbeam/mbbbeam_history.pdf",
-    #         bbox_inches="tight",
-    #         pad_inches=0.0,
-    #     )
-
-    # plt.show()
-
-    # (p1,) = ax.plot(
-    #     omega[2][n_start:n_iter, 0],
-    #     color="b",
-    #     linewidth=0.5,
-    #     label="$\omega_1$"
-    # )
-    # (p2,) = ax.plot(
-    #     omega[2][n_start:n_iter, 1],
-    #     color="b",
-    #     linewidth=0.5,
-    #     label="$\omega_2$",
-    #     linestyle="--",
-    # )
