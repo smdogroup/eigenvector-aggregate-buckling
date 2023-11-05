@@ -144,7 +144,7 @@ def lbracket(r0_=2.1, l=8.0, lfrac=0.4, nx=96, m0_block_frac=0.0):
     return conn, X, r0, bcs, forces, non_design_nodes
 
 
-def beam(r0_=2.1, l=1.0, frac=1/3, nx=100, prob="natural_frequency"):
+def beam(r0_=2.1, l=1.0, frac=1 / 3, nx=100, prob="natural_frequency"):
     """
     _____________|_____________
     |                         |
@@ -583,47 +583,53 @@ def square(r0_, l=1.0, nx=30, m0_block_frac=0.0):
     # Constrain all boundaries
     bcs = {}
 
-    offset = int(nx * 0.1)
+    offset = int(nx * 0.025)
 
-    # for i in range(offset):
-    #     bcs[nodes[0, i]] = [1]
-    #     bcs[nodes[0, m - i]] = [1]
-    #     bcs[nodes[n, i]] = [1]
-    #     bcs[nodes[n, m - i]] = [1]
+    for i in range(offset):
+        bcs[nodes[0, m // 2 - i]] = [0]  # fix the bottom middle
+        bcs[nodes[0, m // 2 + i]] = [0]  # fix the bottom middle
+        bcs[nodes[n, m // 2 - i]] = [0]  # fix the top middle
+        bcs[nodes[n, m // 2 + i]] = [0]  # fix the top middle
 
-    # for j in range(offset):
-    #     bcs[nodes[j, 0]] = [0]
-    #     bcs[nodes[j, m]] = [0]
-    #     bcs[nodes[n - j, 0]] = [0]
-    #     bcs[nodes[n - j, m]] = [0]
+    for j in range(offset):
+        bcs[nodes[n // 2 - j, 0]] = [1]  # fix the left middle
+        bcs[nodes[n // 2 + j, 0]] = [1]  # fix the left middle
+        bcs[nodes[n // 2 - j, m]] = [1]  # fix the right middle
+        bcs[nodes[n // 2 + j, m]] = [1]  # fix the right middle
 
     # fix the bottom left corner
-    bcs[nodes[0, 0]] = [0, 1]
+    # bcs[nodes[0, 0]] = [0, 1]
     # fix the bottom right corner
     # bcs[nodes[0, m]] = [0, 1]
-    bcs[nodes[0, m]] = [1]
+    # bcs[nodes[0, m]] = [1]
     # # fix the top left corner
     # bcs[nodes[n, 0]] = [0, 1]
-    bcs[nodes[n, 0]] = [0]
+    # bcs[nodes[n, 0]] = [0]
     # # fix the top right corner
     # bcs[nodes[n, m]] = [0, 1]
 
-    P = 2e-3
-    forces = {}
-    # apply force for the four sides uniformly
-    for i in range(nodes.shape[1]):
-        # forces[nodes[0, i]] = [0, P / nodes.shape[1]]
-        forces[nodes[n, i]] = [0, -P / nodes.shape[1]]
-        # forces[nodes[i, 0]] = [P / nodes.shape[1], 0]
-        forces[nodes[i, m]] = [-P / nodes.shape[1], 0]
+    # bcs[nodes[0, m // 2]] = [0]  # fix the bottom middle
+    # bcs[nodes[n, m // 2]] = [0]  # fix the top middle
+    # bcs[nodes[n // 2, 0]] = [1]  # fix the left middle
+    # bcs[nodes[n // 2, m]] = [1]  # fix the right middle
 
-    # forces[nodes[n, 0]] = [P, -P]
-    # forces[nodes[n, m]] = [-P, -P]
-        
-    
-    # pn = n // 10
-    # for j in range(pn):
-    #     forces[nodes[j, -1]] = [0, -P / pn]
+    P = 1e-3
+    forces = {}
+    f = P / (2 * offset)
+    for i in range(offset):
+        forces[nodes[0, m // 2 - i]] = [0, f]  # force the bottom middle up
+        forces[nodes[0, m // 2 + i]] = [0, f]  # force the bottom middle up
+        forces[nodes[n, m // 2 - i]] = [0, -f]  # force the top middle down
+        forces[nodes[n, m // 2 + i]] = [0, -f]  # force the top middle down
+        forces[nodes[n // 2 - i, 0]] = [f, 0]  # force the left middle right
+        forces[nodes[n // 2 + i, 0]] = [f, 0]  # force the left middle right
+        forces[nodes[n // 2 - i, m]] = [-f, 0]  # force the right middle left
+        forces[nodes[n // 2 + i, m]] = [-f, 0]  # force the right middle left
+
+    # forces[nodes[0, m // 2]] = [0, P]   # force the bottom middle up
+    # forces[nodes[n, m // 2]] = [0, -P]  # force the top middle down
+    # forces[nodes[n // 2, 0]] = [P, 0]   # force the left middle right
+    # forces[nodes[n // 2, m]] = [-P, 0]  # force the right middle left
 
     r0 = l / nx * r0_
 
@@ -747,7 +753,7 @@ def square(r0_, l=1.0, nx=30, m0_block_frac=0.0):
 #     #     forces[nodes[n, i]] = [0, -P / nodes.shape[1]]
 #     #     forces[nodes[i, 0]] = [P / nodes.shape[1], 0]
 #     #     forces[nodes[i, m]] = [-P / nodes.shape[1], 0]
-    
+
 #     # apply force at the center in x, y direction
 #     forces[nodes[n//2, m//2]] = [P, P]
 #     forces[nodes[n//2, m//2]] = [-P, -P]
@@ -812,7 +818,7 @@ def visualize(prefix, X, bcs, non_design_nodes=None, forces=None, index=None):
     if forces:
         for i, v in forces.items():
             ax.scatter(X[i, 0], X[i, 1], color="orange", s=markersize)
-            
+
     if bcs:
         for i, v in bcs.items():
             if len(v) == 2:

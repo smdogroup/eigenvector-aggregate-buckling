@@ -3431,11 +3431,25 @@ def main(args):
             if args.domain == "square":
                 if args.mode == 1:
                     # node_loc=(0.75*n, 0.75*m), x direction
-                    indx = int((0.1 * n * (m + 1) + 0.1 * m))
-                    D_index = [2 * indx, 2 * indx + 1]
+                    # indx = int((0.1 * n * (m + 1) + 0.1 * m))
+                    # node_loc=(0.5*n, 0.5*m)
+                    indx = np.append(indx, int((0.5 * n * (m + 1) + 0.5 * m)) - 1)
+                    D_index = np.append(D_index, 2 * indx)
+                    D_index = np.append(D_index, 2 * indx + 1)
                 elif args.mode == 2:
                     indx = int((0.67 * n * (m + 1) + 0.67 * m))
                     D_index = [2 * indx, 2 * indx + 1]
+                elif args.mode == 3:
+                    for i in range(n):
+                        indx = np.append(indx, i * m)
+                        indx = int((0.67 * n * (m + 1) + 0.67 * m))
+                        D_index = [2 * indx, 2 * indx + 1]
+                elif args.mode == 4:
+                    for i in range(n):
+                        indx = np.append(indx, i * m)
+                        indx = np.append(indx, i * m + m - 1)
+                        # D_index = np.append(D_index, 2 * (i * m))
+                        # D_index = np.append(D_index, 2 * (i * m))
             if args.domain == "building":
                 if args.mode == 1:
                     indx = np.append(indx, int((n * m - m * 0.5)))
