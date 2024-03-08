@@ -1,6 +1,7 @@
 import os
 from shutil import rmtree
 from time import perf_counter_ns
+from datetime import datetime
 
 import numpy as np
 
@@ -189,7 +190,7 @@ def create_folder(args):
     if args.confs != []:
         v = f"{args.vol_frac_ub:.2f}"
         args.prefix = args.prefix + ", v=" + v
-    
+
     if "displacement" in args.confs:
         if args.mode != 1:
             args.prefix = args.prefix + ", mode=" + str(args.mode)
@@ -197,16 +198,13 @@ def create_folder(args):
     if "displacement" in args.confs or "stress" in args.confs:
         N_a = f"{args.N_a}"
         args.prefix = args.prefix + ", Na=" + N_a
-        
+
         N_b = f"{args.N_b}"
         args.prefix = args.prefix + ", Nb=" + N_b
-    
+
     r = f"{args.r0}"
     args.prefix = args.prefix + ", r=" + r
-        
-    if args.note != "":
-        args.prefix = args.prefix + ", " + args.note
-    
+
     if "compliance-buckling" in args.objf:
         w = f"{args.weight:.2f}"
         args.prefix = args.prefix + ", w=" + w
@@ -227,11 +225,10 @@ def create_folder(args):
     if "stress" in args.confs:
         s = f"{args.stress_ub}"
         args.prefix = args.prefix + ", s=" + s
-    
+
     if "displacement" in args.confs:
         d = f"{args.dis_ub:.2f}"
         args.prefix = args.prefix + ", d=" + d
-
 
     # if args.proj:
     #     beta0 = f"{args.beta0}"
@@ -269,8 +266,18 @@ def create_folder(args):
     #         o + ", n=" + n + ", d=" + d + ", s=" + s + args.note,
     #     )
 
-    if os.path.isdir(args.prefix):
-        rmtree(args.prefix)
+    # if os.path.isdir(args.prefix):
+    #     rmtree(args.prefix)
+    if not os.path.isdir(args.prefix):
+        os.mkdir(args.prefix)
+
+    if args.note != "":
+        args.prefix = os.path.join(args.prefix, args.note)
+        args.prefix = args.prefix + ", " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        args.prefix = os.path.join(
+            args.prefix, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
     os.mkdir(args.prefix)
 
     return args
