@@ -14,9 +14,9 @@ fi
 
 
 ###################### building ######################
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 6.0 --vol-frac-ub 0.3 --compliance-ub-percent 4.3 --min-compliance 7.955e-6
+python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance --nx 240 --r0 6.0 --vol-frac-ub 0.3 --compliance-ub-percent 4.0 --min-compliance 7.955e-6
 
-# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --compliance-ub-percent 4.3 --min-compliance 7.955e-6 --proj --delta-p 0.01 --delta-beta 0.1 --dis-ub 0.0 --mode 1 --maxit 1000
+# python3 topo_opt.py --domain building --objf frequency --confs volume_ub compliance displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --compliance-ub-percent 4.0 --min-compliance 7.955e-6 --proj --delta-p 0.01 --delta-beta 0.1 --dis-ub 0.0 --mode 1 --maxit 1000
 
 # python3 topo_opt.py --domain building --objf compliance-buckling --confs volume_ub displacement --nx 240 --r0 6.0 --vol-frac-ub 0.3 --c0 7.4e-6 --mu-ks0 0.1 --delta-p 0.01 --delta-beta 0.1 --weight 0.3 --maxit 1000 --dis-ub 4.0
 

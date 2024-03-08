@@ -11,10 +11,12 @@ B. Li, and G. Kennedy. Topology Optimization for Buckling using an Eigenvector A
 - `topo_opt.py` is the main file for the topology optimization for the beam, column, and square plate.
 - `settings.py` contains the default parameters and input arguments for the topology optimization.
 - `domain.py` contains the beam, column, and square plate domain definitions.
-- `output` folder used to save the output figures and log files.
-- `other` folder contains the code for generating the figures in the paper, helper functions, 
 - `jobs.sbatch` is the SLURM script used to run the code on Georgia Tech's PACE cluster.
 - `run.sh` is the bash script used to run the code.
+- `output` folder used to save the output figures and log files.
+- `src` folder contains the source code rewritten using the Kokkos library for the parallel computation. The code is written in C++ and can be compiled using the CMakeLists.txt file.
+- `other` folder contains the code for generating the figures in the paper, helper functions, 
+
 
 ## Usage
 The code is written in Python 3. To run the code, you need to install the following packages:

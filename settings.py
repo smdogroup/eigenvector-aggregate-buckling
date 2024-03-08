@@ -79,7 +79,7 @@ def parse_cmd_args():
     }
 
     check = {
-        "kokkos": True,
+        "kokkos": False,
         "check_gradient": False,
         "check_kokkos": False,
         "note": "",
