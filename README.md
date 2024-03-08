@@ -1,7 +1,7 @@
 # Eigenvector Aggregate in Buckling Topology Optimization
 
 ## Description
-Eigenvector aggregate is a method to approximate the eigenvector derivatives of the eigenvalue problem used in topology optimization. The method is described in the following paper:
+Eigenvector aggregate is a method to impose eigenvector constraints used in topology optimization. The method is described in the following paper:
 ```
 B. Li, and G. Kennedy. Topology Optimization for Buckling using an Eigenvector Aggregate. Computer Methods in Applied Mechanics and Engineering, 2024 (Submitted).
 ```
@@ -14,7 +14,7 @@ B. Li, and G. Kennedy. Topology Optimization for Buckling using an Eigenvector A
 - `jobs.sbatch` is the SLURM script used to run the code on Georgia Tech's PACE cluster.
 - `run.sh` is the bash script used to run the code.
 - `output` folder used to save the output figures and log files.
-- `src` folder contains the source code rewritten using the Kokkos library for the parallel computation. The code is written in C++ and can be compiled using the CMakeLists.txt file.
+- `src` folder contains the source code rewritten using the Kokkos library for parallel computation. The code is written in C++ and can be compiled using the CMakeLists.txt file.
 - `other` folder contains the code for generating the figures in the paper, helper functions, 
 
 
