@@ -20,7 +20,8 @@ import kokkos as kokkos
 import other.utils as utils
 from other.utils import time_this, timer_set_log_path
 import settings as settings
-from test_lobpcg import lobpcg4
+
+# from other.test_lobpcg import lobpcg4
 
 # numpy.set_printoptions(threshold=sys.maxsize)
 
@@ -495,6 +496,7 @@ class TopologyAnalysis:
         ptype_M="ramp",
         rho0_K=1e-3,
         rho0_M=1e-7,
+        rho0_G=0.0,
         p=3.0,
         q=5.0,
         density=1.0,
@@ -510,6 +512,7 @@ class TopologyAnalysis:
 
         self.rho0_K = rho0_K
         self.rho0_M = rho0_M
+        self.rho0_G = rho0_G
 
         self.fltr = fltr
         self.conn = np.array(conn)
@@ -941,9 +944,7 @@ class TopologyAnalysis:
                     dfdrhoE += np.einsum("n,ni,ni -> n", detJ, eu, ev)
 
         if self.ptype_M == "msimp":
-            dnonlin = (
-                6.0 * self.simp_c1 * rhoE**5.0 + 7.0 * self.simp_c2 * rhoE**6.0
-            )
+            dnonlin = 6.0 * self.simp_c1 * rhoE**5.0 + 7.0 * self.simp_c2 * rhoE**6.0
             cond = (rhoE > 0.1).astype(int)
             dfdrhoE[:] *= self.density * (cond + dnonlin * (1 - cond))
         elif self.ptype_M == "ramp":
@@ -978,10 +979,10 @@ class TopologyAnalysis:
 
             # Compute the element stiffnesses
             if self.ptype_K == "simp":
-                C = np.outer(rhoE**self.p + self.rho0_K, self.C0)
+                C = np.outer(rhoE**self.p + self.rho0_G, self.C0)
             else:  # ramp
                 C = np.outer(
-                    rhoE / (1.0 + (self.q + 1) * (1.0 - rhoE)) + self.rho0_K, self.C0
+                    rhoE / (1.0 + (self.q + 1) * (1.0 - rhoE)) + self.rho0_G, self.C0
                 )
 
             C = C.reshape((self.nelems, 3, 3))
@@ -1052,7 +1053,7 @@ class TopologyAnalysis:
                 self.Te,
                 self.conn,
                 self.C0,
-                self.rho0_K,
+                self.rho0_G,
                 self.ptype_K,
                 self.p,
                 self.q,
@@ -1097,11 +1098,11 @@ class TopologyAnalysis:
 
             # Compute the element stiffnesses
             if self.ptype_K == "simp":
-                C = np.outer(rhoE_python**self.p + self.rho0_K, self.C0)
+                C = np.outer(rhoE_python**self.p + self.rho0_G, self.C0)
             else:  # ramp
                 C = np.outer(
                     rhoE_python / (1.0 + (self.q + 1) * (1.0 - rhoE_python))
-                    + self.rho0_K,
+                    + self.rho0_G,
                     self.C0,
                 )
 
@@ -1174,7 +1175,7 @@ class TopologyAnalysis:
                 psi,
                 phi,
                 self.C0,
-                self.rho0_K,
+                self.rho0_G,
                 self.ptype_K,
                 self.p,
                 self.q,
@@ -1602,6 +1603,9 @@ class TopologyAnalysis:
         G = self.assemble_stress_stiffness(self.rho, u)
         Gr = self.reduce_matrix(G)
 
+        # self.store_EG(Gr, Kr, ks_rho, self.N_a, self.N_b)
+        # exit()
+
         # Find the eigenvalues closest to zero. This uses a shift and
         # invert strategy around sigma = 0, which means that the largest
         # magnitude values are closest to zero.
@@ -1617,10 +1621,27 @@ class TopologyAnalysis:
                 pass
             else:
                 # Method 0: this is the fast and most accurate way to solve the eigenvalue problem
-                mu, Qr = sparse.linalg.eigsh(
-                    Gr, M=Kr, k=self.N, sigma=sigma, which="SM"
-                )
-
+                try:
+                    mu, Qr = sparse.linalg.eigsh(
+                        Gr,
+                        M=Kr,
+                        k=self.N,
+                        sigma=sigma,
+                        which="SM",
+                        maxiter=1000,
+                        tol=1e-15,
+                    )
+                except sparse.linalg.ArpackNoConvergence:
+                    print("ArpackNoConvergence 1")
+                    mu, Qr = sparse.linalg.eigsh(
+                        Gr,
+                        M=Kr,
+                        k=self.N,
+                        sigma=sigma,
+                        which="SM",
+                        maxiter=1000,
+                        tol=1e-8,
+                    )
                 # X = np.eye(Kr.shape[0], self.N)
                 # M = sparse.diags(1.0 / np.diag(Kr.todense()))
                 # mu_lobpcg, Qr_lobpcg = sparse.linalg.lobpcg(Gr, X, B=Kr,  M=M, largest=False, tol=1e-8, maxiter=1000)
@@ -1666,21 +1687,22 @@ class TopologyAnalysis:
 
         self.D_index_modify = self.D_index
 
-        # check the difference between Q and Qcrit to recapture the N_a and N_b
-        self.norm = np.zeros(self.N)
+        # check the difference between the first 4 eigenvalues and find the index of the closest pair
+        norm = np.zeros(6)
+        index = 0
+        min_diff = 1e10
         if tracking:
-            if iter >= iter_crit:
-                for i in range(self.N):
-                    self.norm[i] = np.linalg.norm(Q[:, i] @ Qcrit) ** 2 / (
-                        np.linalg.norm(Qcrit) ** 2 * np.linalg.norm(Q[:, i]) ** 2
-                    )
+            for i in range(4):
+                for j in range(i + 1, 4):
+                    norm[index] = np.abs(self.lam[i] - self.lam[j])
+                    if norm[index] < min_diff:
+                        min_diff = norm[index]
+                        self.N_a = i
+                        self.N_b = j
+                    index += 1
 
-                if self.norm[self.N_a] < 0.9:
-                    index = np.argmax(self.norm)
-                    self.N_a = self.N_b = index
-
-                ic(self.norm)
-                ic(self.N_a, self.N_b)
+            ic(norm)
+            ic(self.N_a, self.N_b)
 
         if len(self.D_index) != 1 and len(self.D_index) != 0:
             q_max = np.zeros(self.N_b - self.N_a + 1)
@@ -1744,10 +1766,27 @@ class TopologyAnalysis:
             return
         print("Storing E and G matrices")
         n = 100
+        N_a = 10
+        N_b = 20
+        # mu = eigvalsh(Gr.todense(), Kr.todense(), eigvals=(0, n))
+        mu, _ = sparse.linalg.eigsh(
+            Gr,
+            M=Kr,
+            k=n,
+            sigma=10.0,
+            which="SM",
+            maxiter=1000,
+            tol=1e-15,
+        )
+        BLF = -1.0 / mu
+        # ks_rho = 1000 * BLF[0]
+        ks_rho = 1000.0
+        ic(ks_rho)
 
-        mu = eigvalsh(Gr.todense(), Kr.todense(), eigvals=(0, n))
-        lam_a, lam_b = mu[N_a], mu[N_b]
-        eta = self.softmax_ab(self.fun, ks_rho, mu, lam_a, lam_b)
+        lam_a = BLF[N_a] - np.min(np.abs(BLF)) * 0.001
+        lam_b = BLF[N_b] + np.min(np.abs(BLF)) * 0.001
+
+        eta = self.softmax_ab(self.fun, ks_rho, BLF, lam_a, lam_b)
         eta_sum = np.sum(eta)
 
         ic(mu[:20])
@@ -1759,12 +1798,12 @@ class TopologyAnalysis:
         for i in range(n):
             for j in range(n):
                 E[i, j] = self.Eij_ab(
-                    self.fun, ks_rho, eta_sum, mu[i], mu[j], lam_a, lam_b
+                    self.fun, ks_rho, eta_sum, BLF[i], BLF[j], lam_a, lam_b
                 )
                 G[i, j] = self.Gij_ab(
-                    self.fun, ks_rho, eta_sum, mu[i], mu[j], lam_a, lam_b
+                    self.fun, ks_rho, eta_sum, BLF[i], BLF[j], lam_a, lam_b
                 )
-
+        np.save("data/mu.npy", mu)
         np.save("data/E.npy", E)
         np.save("data/G.npy", G)
 
@@ -1849,6 +1888,7 @@ class TopologyAnalysis:
         sum_eta = np.sum(self.eta)
         eta = self.eta / sum_eta
         h = 0.0
+        # for i in range(np.max([0, self.N_a - 1]), np.min([self.N_b + 2, self.N])):
         for i in range(len(eta)):
             q = self.Q[self.D_index_modify, i]
             h += eta[i] * np.dot(q, q)
@@ -1869,7 +1909,10 @@ class TopologyAnalysis:
     def preciseG(self, rho, trace, lam_min, lam1, lam2):
         with mp.workdps(80):
             if lam1 == lam2:
-                val = -rho * lam1 * mp.exp(-rho * (lam1 - lam_min)) / trace
+                val = (
+                    -rho * lam1 * mp.exp(-rho * (lam1 - lam_min)) / trace
+                    + mp.exp(-rho * (lam1 - lam_min)) / trace
+                )
             else:
                 val = (
                     (
@@ -1908,7 +1951,9 @@ class TopologyAnalysis:
             eta2 = a2 - b2
 
             if lam1 == lam2:
-                val = -rho * lam1 * eta1 * (a1 + b1) / mp.mpf(trace)
+                val = -rho * lam1 * eta1 * (a1 + b1) / mp.mpf(trace) + eta1 / mp.mpf(
+                    trace
+                )
             else:
                 val = (
                     (lam1 * eta1 - lam2 * eta2)
@@ -2431,10 +2476,9 @@ class TopologyAnalysis:
             # Solve the augmented system of equations for vk
             t = np.dot(Ur.T, bkr)
             bkr = bkr - np.dot(Ur, t)
-            # atol=1e-15, tol=1e-10
             time_start = time.time()
             phir, state = linalg.gmres(
-                matop, bkr, M=preop, atol=1e-8, tol=1e-8, maxiter=100
+                matop, bkr, M=preop, atol=1e-8, tol=1e-8, maxiter=100 # atol=1e-15, tol=1e-10 
             )
             time_end = time.time()
             print(
@@ -2444,8 +2488,9 @@ class TopologyAnalysis:
             phi = self.full_vector(phir)
             dh += dA(Q[:, k], phi) - lam[k] * dB(Q[:, k], phi)
 
-            qDq = np.dot(Q[:, k], Dq)
-            dh -= eta[k] * qDq * dB(Q[:, k], Q[:, k])
+            # qDq = np.dot(Q[:, k], Dq)
+            # dh -= eta[k] * qDq * dB(Q[:, k], Q[:, k])
+            dh -= eta[k] * h * dB(Q[:, k], Q[:, k])
 
         return dh
 
@@ -2522,6 +2567,8 @@ class TopOptProb:
         iter_crit_dis=0,
         restart_beta_p=True,
         iter_crit_stress=0,
+        iter_crit_w=0,
+        iter_crit_d=0,
         delta_beta=0.1,
         delta_p=0.01,
         tracking=False,
@@ -2554,6 +2601,8 @@ class TopOptProb:
         self.iter_crit = iter_crit
         self.iter_crit_dis = iter_crit_dis
         self.iter_crit_stress = iter_crit_stress
+        self.iter_crit_w = iter_crit_w
+        self.iter_crit_d = iter_crit_d
         self.restart_beta_p = restart_beta_p
         self.delta_beta = delta_beta
         self.delta_p = delta_p
@@ -2771,7 +2820,7 @@ class TopOptProb:
             #     self.xfull, self.ks_rho_stress, cell_sols=vtk_cell_sols
             # )
             if self.tracking:
-                foi["stress_ks"] = self.analysis.N_a + self.analysis.norm[self.analysis.N_a]
+                foi["stress_ks"] = self.analysis.N_a + self.analysis.N_b * 0.1
 
         if "volume_lb" in self.confs:
             assert self.fixed_area_lb is not None
@@ -2930,6 +2979,18 @@ class TopOptProb:
                 self.analysis.p = 3.0
                 self.analysis.fltr.beta = 1e-6
 
+        if self.iter_crit_w != 0:
+            if self.it_counter % self.iter_crit_w == 0 and self.it_counter != 0:
+                self.weight -= 0.1
+                self.weight = min(self.weight, 1.0)
+                self.weight = max(self.weight, 0.0)
+
+        if self.iter_crit_d != 0:
+            if self.it_counter % self.iter_crit_d == 0 and self.it_counter != 0:
+                self.fixed_dis_ub -= 1.0
+                self.fixed_dis_ub = max(self.fixed_dis_ub, 0.0)
+
+        ic(self.weight, self.fixed_dis_ub)
         ic(self.analysis.fltr.beta, self.analysis.p)
 
         self.it_counter += 1
@@ -3433,23 +3494,36 @@ def main(args):
                     # node_loc=(0.75*n, 0.75*m), x direction
                     # indx = int((0.1 * n * (m + 1) + 0.1 * m))
                     # node_loc=(0.5*n, 0.5*m)
-                    indx = np.append(indx, int((0.5 * n * (m + 1) + 0.5 * m)) - 1)
+                    indx = np.append(indx, int((0.34 * n * (m + 1) + 0.34 * m)) - 1)
                     D_index = np.append(D_index, 2 * indx)
                     D_index = np.append(D_index, 2 * indx + 1)
                 elif args.mode == 2:
-                    indx = int((0.67 * n * (m + 1) + 0.67 * m))
-                    D_index = [2 * indx, 2 * indx + 1]
+                    indx = np.append(indx, int((0.5 * n * (m + 1) + 0.5 * m)) - 1)
+                    D_index = np.append(D_index, 2 * indx)
+                    D_index = np.append(D_index, 2 * indx + 1)
                 elif args.mode == 3:
-                    for i in range(n):
-                        indx = np.append(indx, i * m)
-                        indx = int((0.67 * n * (m + 1) + 0.67 * m))
-                        D_index = [2 * indx, 2 * indx + 1]
+                    # node_loc=(0.5*n, 0.5*m)
+                    indx = np.append(indx, int((0.5 * n * (m + 1))) - 1)
+                    D_index = np.append(D_index, 2 * indx)
+                    D_index = np.append(D_index, 2 * indx + 1)
                 elif args.mode == 4:
-                    for i in range(n):
-                        indx = np.append(indx, i * m)
-                        indx = np.append(indx, i * m + m - 1)
-                        # D_index = np.append(D_index, 2 * (i * m))
-                        # D_index = np.append(D_index, 2 * (i * m))
+                    # for i in range(n):
+                    # indx = np.append(indx, int((0.5 * n * (m + 1))) - 1)
+                    indx = np.append(indx, int((0.25 * n * (m + 1) + 0.25 * m)) - 1)
+                    D_index = np.append(D_index, 2 * indx)
+                    D_index = np.append(D_index, 2 * indx + 1)
+                elif args.mode == 5:
+                    # for i in range(n):
+                    indx = np.append(indx, int((0.5 * n * (m + 1))) - 1)
+                    indx = np.append(indx, int((0.25 * n * (m + 1) + 0.25 * m)) - 1)
+                    D_index = np.append(D_index, 2 * indx)
+                    D_index = np.append(D_index, 2 * indx + 1)
+                elif args.mode == 6:
+                    # for i in range(n):
+                    indx = np.append(indx, int((0.5 * n * (m + 1))) - 1)
+                    indx = np.append(indx, int((0.25 * n * (m + 1) + 0.25 * m)) - 1)
+                    D_index = np.append(D_index, 2 * indx)
+                    D_index = np.append(D_index, 2 * indx + 1)
             if args.domain == "building":
                 if args.mode == 1:
                     indx = np.append(indx, int((n * m - m * 0.5)))
@@ -3494,6 +3568,7 @@ def main(args):
         ptype_M=args.ptype_M,
         rho0_K=args.rho0_K,
         rho0_M=args.rho0_M,
+        rho0_G=args.rho0_G,
         p=args.p,
         q=args.q,
         epsilon=args.stress_relax,
@@ -3543,6 +3618,8 @@ def main(args):
         iter_crit=args.iter_crit,
         iter_crit_dis=args.iter_crit_dis,
         iter_crit_stress=args.iter_crit_stress,
+        iter_crit_w=args.iter_crit_w,
+        iter_crit_d=args.iter_crit_d,
         restart_beta_p=args.restart_beta_p,
         delta_beta=args.delta_beta,
         delta_p=args.delta_p,
