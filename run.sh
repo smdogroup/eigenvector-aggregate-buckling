@@ -4,7 +4,7 @@ if [ ! -d output ]; then
   mkdir output
 fi
 
-# alias python3=python3.11
+alias python3=python3.11
 
 
 ###################### beam ######################
