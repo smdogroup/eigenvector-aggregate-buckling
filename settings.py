@@ -1,9 +1,5 @@
 import argparse
 
-"""
-Adjust: N_a, N_b, lam_a, lam_b, and np.max([0, N_a - 1]) for accuracy
-"""
-
 
 def parse_cmd_args():
     problem = {
@@ -25,11 +21,11 @@ def parse_cmd_args():
         "c0": 1e-5,  # initial value of the compliance
         "mu_ks0": 0.1,  # initial value of the KS_BLF
     }
-    
+
     constraint_bounds = {
         "omega_lb": None,
         "BLF_lb": None,
-        "stress_ub": None, # stess^2
+        "stress_ub": None,  # stess^2
         "compliance_ub_percent": None,
         "vol_frac_ub": None,
         "vol_frac_lb": None,
@@ -38,19 +34,21 @@ def parse_cmd_args():
         "iter_crit_stress": 0,  # iteration to start stress constraint
         "tracking": False,  # track the eigenvector, only for N_a=N_b, iter_crit_dis!=0
         "restart_beta_p": False,  # restart beta and p when apply displacement and stress
+        "iter_crit_w": 0,  # iterationa to change weight
+        "iter_crit_d": 0,  # iteration to change displacement constraint
     }
 
     ks_rho = {
         "ks_rho_buckling": 3000.0,
         "ks_rho_natural_freq": 1000.0,
         "ks_rho_stress": 10.0,
-        "ks_rho_freq": 160.0, # from ferrari2021 paper
+        "ks_rho_freq": 160.0,  # from ferrari2021 paper
     }
 
     softmax = {
         "N_a": 0,  # lower bound of selected indices of eigenvalues
         "N_b": 1,  # upper bound of selected indices of eigenvalues
-        "N": 12,  # number of eigenvalues
+        "N": 6,  # number of eigenvalues
         "atype": 0,  # 1: 0-b based index, N_a=0, "exp"; 0: a-b based index. "tanh"
         "fun": "tanh",  # ["exp", "sech", "tanh", "erf", "erfc", "sigmoid", "ncdf"]:
     }
@@ -65,6 +63,7 @@ def parse_cmd_args():
         "q": 5.0,  # RAMP penalization parameter
         "rho0_K": 1e-3,  # rho offset to prevent singular K
         "rho0_M": 1e-7,  # rho offset to prevent singular M
+        "rho0_G": 1e-3,  # rho offset to prevent singular G
         "proj": True,  # projector for filter
         "beta0": 1e-6,  # projector parameter at the beginning
         "iter_crit": 0,  # iteration to start projector
