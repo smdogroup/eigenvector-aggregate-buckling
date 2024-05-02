@@ -1,5 +1,5 @@
 from icecream import ic
-from matplotlib import cm, colors, patches
+from matplotlib import cm, colors, patches, pyplot
 from matplotlib.collections import PolyCollection
 import matplotlib.pylab as plt
 import matplotlib.pyplot as plt
@@ -10,7 +10,15 @@ import numpy as np
 from paretoset import paretoset
 import scienceplots
 from scipy.optimize import curve_fit
-from matplotlib import pyplot
+
+
+plt.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.family": "sans-serif",
+        "font.sans-serif": "Helvetica",
+    }
+)
 
 
 def read_size(options, vtk):
@@ -533,14 +541,14 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
     )
     (p2,) = ax.plot(
         omega[0][n_start:n_iter, 0],
-        label=f"$BLF_{1}$",
+        label=f"$\lambda_{1}$",
         alpha=0.8,
         color="k",
         linewidth=0.75,
     )
 
     (pc1,) = ax2.plot(
-        compliance[0][n_start:n_iter] / (7.4e-06*4.3/4),
+        compliance[0][n_start:n_iter] / (7.4e-06 * 4.3 / 4),
         color="b",
         linewidth=0.75,
         alpha=0.6,
@@ -556,7 +564,7 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
     for i in range(1, 6):
         ax.plot(
             omega[0][n_start:n_iter, i],
-            label=f"$BLF_{i+1}$",
+            label=f"$\lambda_{i+1}$",
             color="k",
             alpha=alpha[i],
             linestyle=styles[i],
@@ -580,12 +588,12 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
     ax.tick_params(which="minor", direction="out")
 
     ax.set_ylim(0, 17.95)
-    ax.set_ylabel("BLF ($BLF_i$)", rotation=0, labelpad=0)
+    ax.set_ylabel("$BLF$", rotation=0, labelpad=0)
     ax.yaxis.set_label_coords(0.0, 1.001)
 
     ax2.set(ylim=(0.0, 3.95))
     ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
-    ax2.yaxis.set_label_coords(1.02, 1.051)
+    ax2.yaxis.set_label_coords(1.01, 1.051)
 
     ax2.yaxis.label.set_color(pc1.get_color())
     ax.yaxis.label.set_color(p1.get_color())
@@ -651,7 +659,7 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     )
     (p2,) = ax.plot(
         omega[0][n_start:n_iter, 0],
-        label=f"$BLF_{1}$",
+        label=f"$\lambda_{1}$",
         alpha=0.8,
         color="k",
         linewidth=0.75,
@@ -682,7 +690,7 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     for i in range(1, 6):
         ax.plot(
             omega[0][n_start:n_iter, i],
-            label=f"$BLF_{i+1}$",
+            label=f"$\lambda_{i+1}$",
             color="k",
             alpha=alpha[i],
             linestyle=styles[i],
@@ -709,12 +717,12 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     ax.tick_params(which="minor", direction="out")
 
     ax.set_ylim(2, 8.95)
-    ax.set_ylabel("BLF ($BLF_i$)", rotation=0, labelpad=0)
+    ax.set_ylabel("$BLF$", rotation=0, labelpad=0)
     ax.yaxis.set_label_coords(0.0, 1.001)
 
     ax2.set(ylim=(0.0, 5.95))
     ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
-    ax2.yaxis.set_label_coords(1.02, 1.051)
+    ax2.yaxis.set_label_coords(1.01, 1.051)
 
     # ax3.set(ylim=(-1.0, 0.195))  # d=0
     # ax3.set(ylim=(0.0, 6.695))    # d=6.0
@@ -768,7 +776,7 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
 def plot_6(omega, BLF_ks, vol, compliance, dis):
     fig, ax = plt.subplots()
 
-    nn = 5
+    nn = 4
     styles = ["-", "--", "-.", ":", "-", "--", "-.", ":"]
     alpha = [0.8, 0.5, 0.4, 0.3, 0.2, 0.1]
     marker = ["o", "s", "^", "D", "v", "P"]
@@ -793,7 +801,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
         ax.scatter(
             np.arange(n_iter - n_start)[::n],
             rd[i, ::n],
-            label=f"$(BLF_{i+1}, BLF_{i+2})$",
+            label=f"$(\lambda_{i+1}, \lambda_{i+2})$",
             color=colors[i],
             # alpha=alpha[i],
             linewidths=0,
@@ -808,7 +816,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
         color="k",
         linewidth=0.2,
         linestyle="-",
-        label=r"$\text{tracking path:} \ \min(BLF_i, BLF_{i+1})_1$",
+        label=r"$\text{tracking path:} \ \min(\lambda_i, \lambda_{i+1})_1$",
         alpha=0.5,
     )
 
@@ -822,7 +830,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
     ax.tick_params(which="minor", direction="out")
 
     ax.set_ylim(0, 1)
-    ax.set_ylabel("Relative Difference($BLF_i, BLF_{i+1}$)", labelpad=0)
+    ax.set_ylabel("Relative Difference($\lambda_i, \lambda_{i+1}$)", labelpad=0)
     # ax.yaxis.set_label_coords(0.0, 1.001)
     ax.set(yscale="log", ylim=(1e-12, 0.2))
 
@@ -840,8 +848,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
             reorder(labels1, 2),
             title="Relative Difference:",
             ncol=2,
-            # loc=[0.5, 0.05],
-            loc=[0.3, 0.5],
+            loc=[0.45, 0.48],
             frameon=False,
             fontsize=6,
         )
@@ -850,7 +857,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
     plt.legend(
         handles[nn:],
         labels[nn:],
-        loc=[0.3, 0.4],
+        loc=[0.45, 0.4],
         frameon=False,
         fontsize=6,
     )
@@ -859,7 +866,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
 if __name__ == "__main__":
     # dir_result1 = "output/final_results/square/v=0.25,w=0.4/"
     dir_result1 = (
-        "output/final_results/square/v=0.25,w=0.4,d=6.5/"  # vtk/it_960.vtk for d=4.5
+        "output/final_results/square/v=0.25,w=0.4,d=4.5/"  # vtk/it_960.vtk for d=4.5
     )
 
     (
@@ -925,7 +932,7 @@ if __name__ == "__main__":
 
         plot_6(omega, BLF_ks, vol, compliance, dis)
         plt.savefig(
-            "output/final_results/square/dot1.png",
+            "output/final_results/square/dot2.png",
             bbox_inches="tight",
             dpi=1000,
             pad_inches=0.0,

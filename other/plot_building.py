@@ -7,9 +7,18 @@ import matplotlib.ticker as ticker
 from mpl_toolkits.mplot3d import Axes3D, axes3d
 import mpl_toolkits.mplot3d.art3d as art3d
 import numpy as np
+import pandas as pd
 from paretoset import paretoset
 import scienceplots
 from scipy.optimize import curve_fit
+
+plt.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.family": "sans-serif",
+        "font.sans-serif": "Helvetica",
+    }
+)
 
 
 def read_size(options, vtk):
@@ -31,78 +40,28 @@ def read_size(options, vtk):
 
 def read_vol(file):
     vol, dis = [], []
-    # total_cols = len(np.loadtxt(file, skiprows=8, max_rows=1)) - 2
-    total_cols = 5
-    total_lines = sum(1 for line in open(file))
-    with open(file) as f:
-        for num, line in enumerate(f, 1):
-            if num == total_lines - 2:
-                break
-            if "iter" in line:
-                a = np.loadtxt(
-                    file, skiprows=num, max_rows=10, usecols=range(0, total_cols)
-                )
-                vol = np.append(vol, a)
-                b = np.loadtxt(file, skiprows=num, max_rows=10, usecols=range(6, 7))
-                dis = np.append(dis, b)
+    # use pandas to read the file
+    df = pd.read_csv(file, sep=r"\s+", skiprows=8, header=None)
+    df = df.drop(df[df.iloc[:, 0].str.contains("iter")].index)
+    df.reset_index(drop=True, inplace=True)
+    vol = df.iloc[:, 2].values
+    BLF_ks = df.iloc[:, 3].values
+    stress_iter = []
+    
+    ## case 1
+    # dis = df.iloc[:, 5].values
+    # compliance = df.iloc[:, -3].values
 
-    ic(total_cols, len(vol))
-    n_iter = len(vol) // total_cols
-    vol = vol.reshape(n_iter, total_cols)
-    stress_iter = vol[:, 4] ** 0.5 * 1e-6
+    ## case 2
+    dis = df.iloc[:, 6].values
+    compliance = df.iloc[:, 4].values
 
-    BLF_ks = vol[:, 3]
-    ic(BLF_ks.shape)
-    compliance = vol[:, -1]
-    vol = vol[:, 2]
-    ic(compliance.shape, vol.shape)
-    # ic(dis.shape, vol.shape)
+    # convert to numpy array with float
+    vol = vol.astype(float)
+    BLF_ks = BLF_ks.astype(float)
+    compliance = compliance.astype(float)
+    dis = dis.astype(float)
     return vol, BLF_ks, compliance, dis, stress_iter
-
-
-# def read_vol(file):
-#     vol, dis = [], []
-#     total_cols = len(np.loadtxt(file, skiprows=8, max_rows=1)) - 2
-#     total_lines = sum(1 for line in open(file))
-#     with open(file) as f:
-#         for num, line in enumerate(f, 1):
-#             if num == total_lines - 2:
-#                 break
-#             if "iter" in line:
-#                 # if row 8 column 4 is not "n/a" then read the data
-#                 if np.loadtxt(file, skiprows=num, max_rows=1)[3] != "n/a":
-#                     a = np.loadtxt(
-#                         file,
-#                         skiprows=num,
-#                         max_rows=10,
-#                         usecols=sorted(set(range(total_cols)) - {4}),
-#                     )
-#                 else:
-#                     a = np.loadtxt(
-#                         file, skiprows=num, max_rows=10, usecols=range(0, total_cols)
-#                     )
-#                 vol = np.append(vol, a)
-#     if np.loadtxt(file, skiprows=num, max_rows=1)[3] != "n/a":
-#         total_cols -= 1
-#     ic(total_cols, len(vol))
-#     n_iter = len(vol) // total_cols
-#     vol = vol.reshape(n_iter, total_cols)
-#     # dis = vol[:, 5]
-#     # stress_iter = vol[:, 4] ** 0.5 * 1e-6
-#     if total_cols == 5:
-#         dis = []
-#         stress_iter = []
-#     else:
-#         dis = vol[:, -2]
-#         stress_iter = vol[:, -3] ** 0.5 * 1e-6
-
-#     BLF_ks = vol[:, 3]
-#     ic(BLF_ks.shape)
-#     compliance = vol[:, -1]
-#     vol = vol[:, 2]
-#     ic(compliance.shape, vol.shape)
-#     # ic(dis.shape, vol.shape)
-#     return vol, BLF_ks, compliance, dis, stress_iter
 
 
 def read_freq(file, n):
@@ -378,7 +337,7 @@ def plot_1(nrow, rho, phi0, stress, flip_x=False, flip_y=False):
     plot_modeshape(
         axs,
         rho[0],
-        phi0[0] * shift_scale,
+        # phi0[0] * shift_scale,
         # stress[0],
         flip_x=1,
         flip_y=flip_y,
@@ -453,7 +412,7 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
     )
     (p2,) = ax.plot(
         omega[0][n_start:n_iter, 0],
-        label=f"$BLF_{1}$",
+        label=r"$\lambda_{1}$",
         alpha=0.8,
         color="k",
         linewidth=0.75,
@@ -476,7 +435,7 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
     for i in range(1, 6):
         ax.plot(
             omega[0][n_start:n_iter, i],
-            label=f"$BLF_{i+1}$",
+            label=r"$\lambda_{" + str(i + 1) + "}$",
             color="k",
             alpha=alpha[i],
             linestyle=styles[i],
@@ -500,14 +459,14 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
     ax.tick_params(which="minor", direction="out")
 
     ax.set_ylim(0, 17.95)
-    ax.set_ylabel("$BLF_i$", rotation=0, labelpad=0)
+    ax.set_ylabel(r"$BLF$", rotation=0, labelpad=0)
     ax.yaxis.set_label_coords(0.0, 1.001)
 
     ax2.set(ylim=(0.0, 3.9))
     y2int = np.arange(0.0, 3.9, 1.0)
     ax2.set_yticks(y2int)
     ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
-    ax2.yaxis.set_label_coords(1.02, 1.051)
+    ax2.yaxis.set_label_coords(1.01, 1.051)
 
     ax2.yaxis.label.set_color(pc1.get_color())
     ax.yaxis.label.set_color(p1.get_color())
@@ -541,7 +500,7 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
         # title="Buckling Load Factors:",
         ncol=3,
         # loc=[0.5, 0.05],
-        loc=[0.3, 0.05],
+        loc=[0.325, 0.05],
         frameon=False,
         fontsize=6,
     )
@@ -573,7 +532,7 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     )
     (p2,) = ax.plot(
         omega[0][n_start:n_iter, 0],
-        label=f"$BLF_{1}$",
+        label=r"$\lambda_{1}$",
         alpha=0.8,
         color="k",
         linewidth=0.75,
@@ -604,7 +563,7 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     for i in range(1, 6):
         ax.plot(
             omega[0][n_start:n_iter, i],
-            label=f"$BLF_{i+1}$",
+            label=r"$\lambda_{" + str(i + 1) + "}$",
             color="k",
             alpha=alpha[i],
             linestyle=styles[i],
@@ -631,14 +590,14 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     ax.tick_params(which="minor", direction="out")
 
     ax.set_ylim(0, 17.95)
-    ax.set_ylabel("$BLF_i$", rotation=0, labelpad=0)
+    ax.set_ylabel(r"$BLF$", rotation=0, labelpad=0)
     ax.yaxis.set_label_coords(0.0, 1.001)
 
     ax2.set(ylim=(0.0, 3.9))
     y2int = np.arange(0.0, 3.9, 1.0)
     ax2.set_yticks(y2int)
     ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
-    ax2.yaxis.set_label_coords(1.02, 1.051)
+    ax2.yaxis.set_label_coords(1.01, 1.051)
 
     ticks = ax3.get_yticks()
     ticks = np.array([0.0, 7.0])
@@ -686,7 +645,7 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
         # title="Buckling Load Factors:",
         ncol=3,
         # loc=[0.5, 0.05],
-        loc=[0.3, 0.05],
+        loc=[0.325, 0.05],
         frameon=False,
         fontsize=6,
     )
@@ -714,7 +673,7 @@ def plot_0():
         ]
     )
     plt.plot(c, 1 / lam, "o-", color="k", markersize=3, linewidth=0.75)
-    plt.ylabel("$1 / BLF(\lambda_1)$")
+    plt.ylabel(r"$1 / \lambda_1$")
     plt.xlabel("$c$")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -902,7 +861,7 @@ def plot_3():
         ylim=(np.min(y), np.max(y)),
         zlim=(1.05 * np.min(z), 1.02 * np.max(z)),
         xlabel=r"$h$",
-        ylabel=r"$1 / BLF_1$",
+        ylabel=r"$1 / \lambda_1$",
         zlabel="compliance",
     )
 
@@ -1005,7 +964,7 @@ def plot_3():
         ylim=(np.min(y), np.max(y)),
         zlim=(1.05 * np.min(z), 1.02 * np.max(z)),
         xlabel=r"$h$",
-        ylabel=r"$1 / BLF_1$",
+        ylabel=r"$1 / \lambda_1$",
         zlabel="compliance",
     )
 
@@ -1047,7 +1006,7 @@ def plot_3():
     # ax.view_init(azim=0, elev=0)
 
     # scale the x axis to make it longer
-    ax.set_box_aspect((2, 1, 1))
+    ax.set_box_aspect((4, 1, 1))
     plt.savefig(
         "output/final_results/building/displacement/frequency_compliance/building_pf2.png",
         bbox_inches="tight",
@@ -1081,7 +1040,7 @@ def plot_3():
         j += 1
 
     ax.set(
-        xlabel=r"$1 / BLF_1$",
+        xlabel=r"$1 / \lambda_1$",
         ylabel="compliance",
     )
 
@@ -1123,7 +1082,7 @@ def plot_3():
     ax.set(
         xlim=(0.335, 0.346),
         ylim=(0.76e-5, 0.81e-5),
-        # xlabel=r"$1 / BLF_1$",
+        # xlabel=r"$1 / \lambda_1$",
         # ylabel="compliance",
     )
 
@@ -1158,7 +1117,7 @@ def plot_8():
         data = data[data[:, 3] != delete[i]]
 
     x = data[:, 3]  # displacement
-    y = 1 / data[:, 1]  # 1 / BLF
+    y = 1 / data[:, 1]  # 1 / \lambda
     z = data[:, 2]  # compliance
 
     def polygon_under_graph(xx, yy, d):
@@ -1264,7 +1223,7 @@ def plot_8():
         # ylim=(1.2*np.min(y), np.max(y)),
         # zlim=(0.9 * np.min(z), 1.02 * np.max(z)),
         xlabel=r"$h$",
-        ylabel=r"$1 / BLF_1$",
+        ylabel=r"$1 / \lambda_1$",
         zlabel="compliance",
     )
 
@@ -1340,7 +1299,7 @@ def plot_8():
         j += 1
 
     ax.set(
-        xlabel=r"$1 / BLF_1$",
+        xlabel=r"$1 / \lambda_1$",
         ylabel="compliance",
     )
 
@@ -1388,12 +1347,12 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
     # )
     (p1,) = ax.plot(
         omega[0][n_start:n_iter, 0],
-        label=f"$BLF_{1}$",
+        label=r"$\lambda_{1}$",
         alpha=0.8,
         color="k",
         linewidth=0.75,
     )
-
+    ic(compliance[0][n_start:n_start +10] / 7.4e-06)
     (pc1,) = ax2.plot(
         compliance[0][n_start:n_iter] / 7.4e-06,
         color="b",
@@ -1419,7 +1378,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
     # for i in range(1, 6):
     #     ax.plot(
     #         omega[0][n_start:n_iter, i],
-    #         label=f"$BLF_{i+1}$",
+    #         label=r"$\lambda_{" + str(i + 1) + "}$",
     #         color="k",
     #         alpha=alpha[i],
     #         linestyle=styles[i],
@@ -1456,7 +1415,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
     for i in range(0, len(labels)):
         labels[i] = (
             "iter: "
-            + str(int(labels[i]))
+            + labels[i]
             + "\n"
             + r"$w=$"
             + f"{np.max([0.9-0.1 * i, 0.0]):.1f}"
@@ -1464,23 +1423,23 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
 
     ax.set_xticklabels(labels)
 
-    ax.set_ylim(8, 17.95)
-    # ax.set_ylim(7, 17.95)
-    ax.set_ylabel("$BLF_i$", rotation=0, labelpad=0)
+    # ax.set_ylim(8, 17.95) # for 7
+    ax.set_ylim(7, 17.95) # for 4
+    ax.set_ylabel(r"$BLF$", rotation=0, labelpad=0)
     ax.yaxis.set_label_coords(0.0, 1.001)
 
-    ax2.set(ylim=(1.18, 1.795))
-    # ax2.set(ylim=(1.15, 1.795))
-    ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
+    # ax2.set(ylim=(1.18, 1.795))  # for 7
+    ax2.set(ylim=(1.15, 1.795))    # for 4
+    ax2.set_ylabel(r"$c / c_{opt}$", rotation=0, labelpad=0)
     ax2.yaxis.set_label_coords(1.01, 1.032)
 
     # for ax3, add ytick for y=4.0
 
     ticks = ax3.get_yticks()
-    ticks = np.append(ticks, [7.0])
+    ticks = np.append(ticks, [4])
     ax3.set_yticks(ticks)
-    ax3.set(ylim=(0.0, 59.95))
-    # ax3.set(ylim=(0.0, 39.95))
+    # ax3.set(ylim=(0.0, 59.95))  # for 7
+    ax3.set(ylim=(0.0, 39.95))  # for 4
     ax3.set_ylabel("$h$", rotation=0, labelpad=0)
     ax3.yaxis.set_label_coords(1.05, 1.03)
     # add horizontal grid lines only for y=4.0
@@ -1532,6 +1491,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
 if __name__ == "__main__":
     # dir_result1 = "output/final_results/building/p, n=240, v=0.30, c=4.30, r=6.0/"
     # dir_result1 = "output/final_results/building/displacement/frequency/0,1,d=0/"
+    # dir_result1 = "output/final_results/building/displacement/frequency/0,1,d=10/"
     # dir_result1 = "output/final_results/building/displacement/mode2,0,5,d=0/"
     # dir_result1 = "output/final_results/building/compliance-buckling/0.2/"
     # dir_result1 = "output/final_results/building/displacement/frequency_compliance/mode1/0,0,w=0.2,d=0.0/"
@@ -1542,6 +1502,8 @@ if __name__ == "__main__":
     # )
 
     # dir_result1 = "output/final_results/building/displacement/frequency_compliance/pfc2/w=0.8,d=7,1000/"
+    # dir_result1 = "output/final_results/building/displacement/frequency_compliance/pfc2/w=0.8,d=4,1000/"
+    # dir_result1 = "output/final_results/building/kappa/K=1e-12,G=1e-12/"
 
     (
         rho,
@@ -1567,19 +1529,19 @@ if __name__ == "__main__":
 
         # plot_2_1(omega, BLF_ks, vol, compliance, dis)
         # plt.savefig(
-        #     "output/final_results/building/building_his.png",
+        #     "output/final_results/building/column_a11.png",
         #     bbox_inches="tight",
         #     dpi=1000,
         #     pad_inches=0.05,
         # )
 
         # plot_2(omega, BLF_ks, vol, compliance, dis)
-        # plot_1(1, rho, phi1, stress)
+        # # plot_1(1, rho, phi1, stress)
         # plt.savefig(
-        #     "output/final_results/building/building_43.png",
+        #     "output/final_results/building/column_a13.png",
         #     bbox_inches="tight",
-        #     dpi=500,
-        #     pad_inches=0.0,
+        #     dpi=1000,
+        #     pad_inches=0.05,
         # )
 
         ###############################
@@ -1602,8 +1564,8 @@ if __name__ == "__main__":
         # plot_1(1, rho, phi0, stress)
         # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode3/00_02_7_7.png", bbox_inches="tight", dpi=1000, pad_inches=0.0)
 
-        # plot_2(omega, BLF_ks, vol, compliance, dis)
-        # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode3/his_00_02_7.png", bbox_inches="tight", dpi=1000, pad_inches=0.05)
+        plot_2(omega, BLF_ks, vol, compliance, dis)
+        plt.savefig("output/final_results/building/displacement/frequency_compliance/mode3/his_00_0_2_7.png", bbox_inches="tight", dpi=1000, pad_inches=0.05)
 
         # plot_3()
 
@@ -1615,11 +1577,11 @@ if __name__ == "__main__":
         #     pad_inches=0.02,
         # )
 
-        plot_8()
+        # plot_8()
 
         # plot_6(omega, BLF_ks, vol, compliance, dis)
         # plt.savefig(
-        #     "output/final_results/building/displacement/frequency_compliance/pfc2/0.8-7-1000.png",
+        #     "output/final_results/building/displacement/frequency_compliance/pfc2/0.8-4-1000.png",
         #     bbox_inches="tight",
         #     dpi=1000,
         #     pad_inches=0.05,
@@ -1629,6 +1591,6 @@ if __name__ == "__main__":
         # plt.savefig(
         #     "output/final_results/building/displacement/frequency_compliance/pfc2/0.8,7,1000.png",
         #     bbox_inches="tight",
-        #     dpi=500,
+        #     dpi=1000,
         #     pad_inches=0.0,
         # )

@@ -13,3 +13,8 @@ build
 *darwin*
 data
 *.so
+*.txt
+*.csv
+*.json
+.gitignore
+*.pdf
