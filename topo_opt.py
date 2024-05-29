@@ -16,7 +16,6 @@ from scipy.linalg import cholesky, eigh, eigvalsh, qr, solve
 from scipy.sparse import coo_matrix, linalg
 
 import domain as domain
-import kokkos as kokkos
 import other.utils as utils
 from other.utils import time_this, timer_set_log_path
 import settings as settings
@@ -677,6 +676,8 @@ class TopologyAnalysis:
                 Ke_python = Ke_python.flatten()
 
         if self.kokkos or self.check_kokkos:
+            import kokkos as kokkos
+
             Ke_kokkos = kokkos.assemble_stiffness_matrix(
                 rho,
                 self.detJ,
@@ -781,6 +782,8 @@ class TopologyAnalysis:
             dKdrho_python *= 0.25
 
         if self.kokkos or self.check_kokkos:
+            import kokkos as kokkos
+
             dKdrho_kokkos = kokkos.stiffness_matrix_derivative(
                 rho,
                 self.detJ,
@@ -1045,6 +1048,8 @@ class TopologyAnalysis:
                 Ge_python = Ge_python.flatten()
 
         if self.kokkos or self.check_kokkos:
+            import kokkos as kokkos
+
             Ge_kokkos = kokkos.assemble_stress_stiffness(
                 rho,
                 u,
@@ -1165,6 +1170,8 @@ class TopologyAnalysis:
             np.add.at(dfdu_python, 2 * self.conn + 1, dfdue[:, 1::2])
 
         if self.kokkos or self.check_kokkos:
+            import kokkos as kokkos
+
             rhoE_kokkos, dfdu_kokkos, dfdC_kokkos = kokkos.stress_stiffness_derivative(
                 rho,
                 u,
@@ -1423,6 +1430,8 @@ class TopologyAnalysis:
                         _populate_Be(self.nelems, 0.0, 0.0, xe, ye, self.Be00)
 
                 if self.kokkos or self.check_kokkos:
+                    import kokkos as kokkos
+
                     detJ_kokkos, Be_kokkos, Te_kokkos = kokkos.populate_Be_Te(
                         xi, eta, xe, ye
                     )
@@ -1567,6 +1576,8 @@ class TopologyAnalysis:
                         _populate_Be(self.nelems, 0.0, 0.0, xe, ye, self.Be00)
 
                 if self.kokkos or self.check_kokkos:
+                    import kokkos as kokkos
+
                     detJ_kokkos, Be_kokkos, Te_kokkos = kokkos.populate_Be_Te(
                         xi, eta, xe, ye
                     )
@@ -1894,6 +1905,27 @@ class TopologyAnalysis:
             h += eta[i] * np.dot(q, q)
         return h
 
+    def eigenvector_displacement_magnitude(self):
+        sum_eta = np.sum(self.eta)
+        eta = self.eta / sum_eta
+
+        h = np.zeros(self.Q.shape[0] // 2)
+        for i in range(len(eta)):
+            h += eta[i] * (self.Q[0::2, i] ** 2 + self.Q[1::2, i] ** 2)
+
+        return h
+
+    def KSmax(self, q, ks_rho):
+        c = np.max(q)
+        eta = np.exp(ks_rho * (q - c))
+        ks_max = c + np.log(np.sum(eta)) / ks_rho
+        return ks_max
+
+    def eigenvector_displacement_max(self, ks_rho_dis_max=1.0):
+        h = self.eigenvector_displacement_magnitude()
+        ks_max = self.KSmax(h, ks_rho_dis_max)
+        return ks_max
+
     def precise(self, rho, trace, lam_min, lam1, lam2):
         with mp.workdps(80):
             if lam1 == lam2:
@@ -1975,6 +2007,52 @@ class TopologyAnalysis:
 
         # Compute the h values
         h = self.eigenvector_displacement()
+
+        # Set the value of the derivative
+        dhdrho = self.kernel(
+            self.ks_rho,
+            self.eta,
+            self.lam,
+            self.Q,
+            h,
+            self.A,
+            self.B,
+            self.dA,
+            self.dB,
+            D,
+            self.reduced,
+            self.fun,
+            self.N_a,
+            self.N_b,
+            self.lam_a,
+            self.lam_b,
+        )
+
+        return self.fltr.applyGradient(dhdrho, x)
+
+    @time_this
+    def eigenvector_displacement_max_deriv(self, x, ks_rho_dis_max=1.0):
+        """
+        Approximately compute the forward derivative
+        """
+
+        # Compute the h values
+        h_magnitude = self.eigenvector_displacement_magnitude()
+
+        # Compute the eta-h values
+        eta_h = np.exp(ks_rho_dis_max * (h_magnitude - np.max(h_magnitude)))
+        eta_h = eta_h / np.sum(eta_h)
+
+        # compute the eta_h * h
+        h = np.dot(h_magnitude, eta_h)
+
+        # eta_h * Dq
+        def D(q):
+            eta_Dq = np.zeros(len(q))
+            for i in range(len(eta_h)):
+                eta_Dq[2 * i] = eta_h[i] * q[2 * i]
+                eta_Dq[2 * i + 1] = eta_h[i] * q[2 * i + 1]
+            return eta_Dq
 
         # Set the value of the derivative
         dhdrho = self.kernel(
@@ -2163,9 +2241,9 @@ class TopologyAnalysis:
         eta_stress = np.exp(ks_rho_stress * (stress - max_stress))
         eta_stress = eta_stress / np.sum(eta_stress)
 
-        if self.check_gradient:
-            ic(stress)
-            ic(eta_stress)
+        # if self.check_gradient:
+        #     ic(stress)
+        #     ic(eta_stress)
 
         def D(q):
             return self.get_stress_product(self.rho, eta_stress, q, allowable=allowable)
@@ -2478,8 +2556,8 @@ class TopologyAnalysis:
             bkr = bkr - np.dot(Ur, t)
             time_start = time.time()
             phir, state = linalg.gmres(
-                matop, bkr, M=preop, atol=1e-8, tol=1e-8, maxiter=100 # atol=1e-15, tol=1e-10 
-            )
+                matop, bkr, M=preop, atol=1e-8, tol=1e-8, maxiter=100
+            )  # atol=1e-15, tol=1e-10
             time_end = time.time()
             print(
                 "GMRES %d/%d, state %d, time %f"
@@ -2536,10 +2614,12 @@ class TopOptProb:
         vol_frac_ub=None,
         vol_frac_lb=None,
         dis_ub=None,
+        dis_ub_frac=None,
         ks_rho_natural_freq=100,
         ks_rho_buckling=10000,
         ks_rho_stress=10,
         ks_rho_freq=100,
+        ks_rho_dis_max=1.0,
         m0=10.0,
         draw_history=True,
         draw_every=1,
@@ -2624,11 +2704,13 @@ class TopOptProb:
             self.fixed_area_lb = vol_frac_lb * np.sum(self.area_gradient)
 
         self.fixed_dis_ub = dis_ub
+        self.fixed_dis_ub_frac = dis_ub_frac
 
         self.ks_rho_natural_freq = ks_rho_natural_freq
         self.ks_rho_buckling = ks_rho_buckling
         self.ks_rho_stress = ks_rho_stress
         self.ks_rho_freq = ks_rho_freq
+        self.ks_rho_dis_max = ks_rho_dis_max
 
         self.ndv = np.sum(self.design_nodes)
         if dv_mapping is not None:
@@ -2863,6 +2945,15 @@ class TopOptProb:
                 con.append(self.fixed_dis_ub - displacement)
             foi["displacement"] = displacement
 
+        if "displacement_frac" in self.confs:
+            assert self.fixed_dis_ub_frac is not None
+            displacement = self.analysis.eigenvector_displacement()
+            displacement_max = self.analysis.eigenvector_displacement_max(
+                self.ks_rho_dis_max
+            )
+            con.append(self.fixed_dis_ub_frac * displacement_max - displacement)
+            foi["dis_frac"] = displacement / displacement_max
+
         if "compliance" in self.confs:
             assert self.compliance_ub is not None
             compliance = self.analysis.compliance(self.xfull)
@@ -3052,7 +3143,9 @@ class TopOptProb:
 
         elif self.objf == "compliance-buckling":
             d_compliance = self.analysis.compliance_gradient(self.xfull)
-            d_buckling = self.analysis.ks_buckling_derivative(self.xfull)
+            d_buckling = self.analysis.ks_buckling_derivative(
+                self.xfull, self.ks_rho_freq
+            )
             d_compliance_buckling = (
                 self.weight * d_compliance / self.c0
                 + (1 - self.weight) * d_buckling / self.mu_ks0
@@ -3176,6 +3269,18 @@ class TopOptProb:
                     A[index][:] = -self.analysis.eigenvector_displacement_deriv(
                         self.xfull
                     )[self.design_nodes]
+            index += 1
+
+        if "displacement_frac" in self.confs:
+            dis_deriv = self.analysis.eigenvector_displacement_deriv(self.xfull)
+            dis_max_deriv = self.analysis.eigenvector_displacement_max_deriv(
+                self.xfull, self.ks_rho_dis_max
+            )
+            grad = self.fixed_dis_ub_frac * dis_max_deriv - dis_deriv
+            if self.dv_mapping is not None:
+                A[index][:] = self.dv_mapping.T.dot(grad)
+            else:
+                A[index][:] = grad[self.design_nodes]
             index += 1
 
         if "compliance" in self.confs:
@@ -3323,6 +3428,7 @@ def gradient_check(topo, problem):
     dG = topo.stress_stiffness_derivative(topo.rho, u, q1, q2, Kfact) @ px
     dis_grad = topo.eigenvector_displacement_deriv(x) @ px
     stress_grad = topo.eigenvector_stress_derivative(x, ks_rho_stress) @ px
+    dis_max_grad = topo.eigenvector_displacement_max_deriv(x) @ px
 
     # s = topo.get_stress_values(rho, topo.eta, topo.Q)
     # eta_stress = np.exp(ks_rho_stress * (s - np.max(s)))
@@ -3339,6 +3445,7 @@ def gradient_check(topo, problem):
 
     dis1 = topo.eigenvector_displacement()
     stress1 = topo.eigenvector_stress(x + dh * px, ks_rho_stress)
+    dis_max1 = topo.eigenvector_displacement_max()
     # s1 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     init(x - dh * px)
@@ -3350,22 +3457,30 @@ def gradient_check(topo, problem):
 
     dis2 = topo.eigenvector_displacement()
     stress2 = topo.eigenvector_stress(x - dh * px, ks_rho_stress)
+    dis_max2 = topo.eigenvector_displacement_max()
     # s2 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     dis_grad_cf = (dis1 - dis2) / (2 * dh)
     stress_grad_cf = (stress1 - stress2) / (2 * dh)
     omega_grad_cf = (omega1 - omega2) / (2 * dh)
+    dis_max_grad_cf = (dis_max1 - dis_max2) / (2 * dh)
     # s_grad_cf = (s1 - s2) / (2 * dh)
     ic(dis_grad_cf)
     ic(dis_grad)
+    ic(dis_max_grad_cf)
+    ic(dis_max_grad)
     error_d_dis_cf = np.abs(dis_grad_cf - dis_grad) / np.abs(dis_grad_cf)
     error_d_stress_cf = np.abs(stress_grad_cf - stress_grad) / np.abs(stress_grad_cf)
     error_d_omega_cf = np.abs(omega_grad_cf - d_omega) / np.abs(omega_grad_cf)
+    error_d_dis_max_cf = np.abs(dis_max_grad_cf - dis_max_grad) / np.abs(
+        dis_max_grad_cf
+    )
     # error_s_cf = np.abs(s_grad_cf - ds) / np.abs(s_grad_cf)
 
     ic(error_d_dis_cf)
     ic(error_d_stress_cf)
     ic(error_d_omega_cf)
+    ic(error_d_dis_max_cf)
     # ic(error_s_cf)
 
     # dh = 1e-15
@@ -3545,6 +3660,8 @@ def main(args):
     domain.visualize(args.prefix, X, bcs, non_design_nodes, forces, indx)
 
     if args.kokkos:
+        import kokkos as kokkos
+
         kokkos.initialize()
 
     # Create the filter
@@ -3590,6 +3707,7 @@ def main(args):
         ks_rho_buckling=args.ks_rho_buckling,
         ks_rho_stress=args.ks_rho_stress,
         ks_rho_freq=args.ks_rho_freq,
+        ks_rho_dis_max=args.ks_rho_dis_max,
         m0=args.m0,
         draw_every=5,
         prefix=args.prefix,
@@ -3613,6 +3731,7 @@ def main(args):
         c0=args.c0,
         mu_ks0=args.mu_ks0,
         dis_ub=args.dis_ub,
+        dis_ub_frac=args.dis_ub_frac,
         check_gradient=args.check_gradient,
         domain=args.domain,
         iter_crit=args.iter_crit,
@@ -3655,12 +3774,12 @@ def main(args):
         from mpi4py import MPI
 
         paroptprob = ParOptProb(MPI.COMM_SELF, topo)
-
+        dh = [1e-5]
         if args.check_gradient:
-            for i in range(1):
+            for i in range(len(dh)):
                 # Note: the accuracy highly depends on the value N_a and N_b
                 gradient_check(analysis, args.problem)
-                paroptprob.checkGradients(1e-6)
+                paroptprob.checkGradients(dh[i])
             exit(0)
 
         if args.optimizer == "pmma":
