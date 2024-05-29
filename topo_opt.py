@@ -2952,6 +2952,7 @@ class TopOptProb:
                 self.ks_rho_dis_max
             )
             con.append(self.fixed_dis_ub_frac * displacement_max - displacement)
+            ic(displacement, displacement_max)
             foi["dis_frac"] = displacement / displacement_max
 
         if "compliance" in self.confs:
@@ -3109,26 +3110,28 @@ class TopOptProb:
             if self.prob == "natural_frequency":
                 if self.dv_mapping is not None:
                     g[:] = -self.frequency_scale * self.dv_mapping.T.dot(
-                        self.analysis.ks_omega_derivative(self.xfull)
+                        self.analysis.ks_omega_derivative(self.xfull, self.ks_rho_freq)
                     )
                 else:
                     g[:] = (
                         -self.frequency_scale
-                        * self.analysis.ks_omega_derivative(self.xfull)[
-                            self.design_nodes
-                        ]
+                        * self.analysis.ks_omega_derivative(
+                            self.xfull, self.ks_rho_freq
+                        )[self.design_nodes]
                     )
             elif self.prob == "buckling":
                 if self.dv_mapping is not None:
                     g[:] = self.frequency_scale * self.dv_mapping.T.dot(
-                        self.analysis.ks_buckling_derivative(self.xfull)
+                        self.analysis.ks_buckling_derivative(
+                            self.xfull, self.ks_rho_freq
+                        )
                     )
                 else:
                     g[:] = (
                         self.frequency_scale
-                        * self.analysis.ks_buckling_derivative(self.xfull)[
-                            self.design_nodes
-                        ]
+                        * self.analysis.ks_buckling_derivative(
+                            self.xfull, self.ks_rho_freq
+                        )[self.design_nodes]
                     )
         elif self.objf == "compliance":
             if self.dv_mapping is not None:
@@ -3582,7 +3585,7 @@ def main(args):
     indx = np.array([])
     ic(args.domain, args.objf, args.confs, m, n)
     for conf in args.confs:
-        if conf == "displacement":
+        if conf == "displacement" or conf == "displacement_frac":
             if args.domain == "beam":
                 if args.mode == 1:
                     # node_loc=(n, m * 0.5), y direction
