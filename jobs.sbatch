@@ -69,10 +69,9 @@
 
 # srun python3 topo_opt.py --kokkos --domain beam --objf frequency --confs volume_ub --nx 360 --r0 5.0 --vol-frac-ub 0.45 --delta-p 0.01 --maxit 1000 --delta-beta 0.2 --proj --note delta-p=0.01,delta-beta=0.2
 
-# srun python3 topo_opt.py --kokkos --domain beam --objf compliance-buckling --confs volume_ub stress --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --stress-ub 200 --delta-p 0.01 --delta-beta 0.2 --proj --iter-crit-stress 200 --iter-crit 200 --maxit 1000 --note add=200
+# srun python3 topo_opt.py --kokkos --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --dis-ub 0.0 --delta-p 0.01 --delta-beta 0.2 --proj --mode 1
 
-# srun python3 topo_opt.py --kokkos --domain beam --objf compliance-buckling --confs volume_ub displacement --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --dis-ub 0.0 --delta-p 0.01 --delta-beta 0.2 --proj --mode 1 --note N=6
-
+srun python3 topo_opt.py --kokkos --domain beam --objf compliance-buckling --confs volume_ub displacement_frac --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --weight 0.2 --delta-p 0.01 --delta-beta 0.2 --proj --mode 1 --dis-ub-frac 0.0
 
 ##### compliance-buckling weight0
 # srun python3 topo_opt.py --kokkos --domain beam --objf compliance-buckling --confs volume_ub --nx 360 --r0 5.0 --vol-frac-ub 0.45 --c0 7.7e-6 --mu-ks0 0.115 --delta-p 0.01 --delta-beta 0.2 --weight 1.0 --proj --maxit 4000 --iter-crit-w 300 --note wit=300
