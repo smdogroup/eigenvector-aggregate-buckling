@@ -44,7 +44,7 @@ def parse_cmd_args():
         "ks_rho_natural_freq": 1000.0,
         "ks_rho_stress": 10.0,
         "ks_rho_freq": 160.0,  # from ferrari2021 paper
-        "ks_rho_dis_max": 1.0,
+        "ks_rho_dis_max": 160.0,
     }
 
     softmax = {
