@@ -202,133 +202,153 @@ b2 = [6.1755, 6.4332, 6.7080, 6.7080, 7.1471, 7.2465]
 a3 = [6.7219, 6.7219, 6.7359, 6.9385, 7.4864, 7.5317]
 b3 = [6.8318, 6.8318, 6.8538, 6.9195, 7.2011, 7.2367]
 
-rpd = np.mean(
-    [
-        np.abs(np.subtract(a1, b1)) / np.add(a1, b1) * 100,
-        np.abs(np.subtract(a2, b2)) / np.add(a2, b2) * 100,
-        np.abs(np.subtract(a3, b3)) / np.add(a3, b3) * 100,
+# rpd = np.mean(
+#     [
+#         np.abs(np.subtract(a1, b1)) / np.add(a1, b1) * 100,
+#         np.abs(np.subtract(a2, b2)) / np.add(a2, b2) * 100,
+#         np.abs(np.subtract(a3, b3)) / np.add(a3, b3) * 100,
+#     ]
+# )
+# ic(rpd)
+
+# f11, d11, slope1 = read_data("s-a-12-0006.txt", 40, b1[0])
+# f12, d12, _ = read_data("s-a-12-001.txt", 40, b1[0])
+# f13, d13, _ = read_data("s-a-12-002.txt", 35, b1[0])
+
+# f21, d21, slope2 = read_data("s-b-12-0001.txt", 50, b2[2])
+# f22, d22, _ = read_data("s-b-12-0005.txt", 50, b2[2])
+# f23, d23, _ = read_data("s-b-12-001.txt", 50, b2[2])
+
+# f31, d31, slope3 = read_data("s-c-12-0002.txt", 45, b3[0])
+# f32, d32, _ = read_data("s-c-12-0005.txt", 40, b3[0])
+# f33, d33, _ = read_data("s-c-12-001.txt", 40, b3[0])
+
+# c1 = ["b", "b", "gray", "gray", "b", "b"]
+# c2 = ["gray", "gray", "b", "b", "gray", "gray"]
+# c3 = ["b", "b", "gray", "gray", "gray", "gray"]
+
+# alpha1 = [0.5, 0.5, 0.5, 0.5, 0.25, 0.25]
+# alpha2 = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+# alpha3 = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+
+# with plt.style.context(["nature"]):
+#     fig, ax = plt.subplots(
+#         2,
+#         3,
+#         figsize=(7.0, 3.6),
+#         gridspec_kw={"height_ratios": [1, 2.3]},
+#         tight_layout=True,
+#         sharey="row",
+#     )
+
+#     for i in range(3):
+#         a = [a1, a2, a3][i]
+#         b = [b1, b2, b3][i]
+#         c = [c1, c2, c3][i]
+#         alpha = [alpha1, alpha2, alpha3][i]
+#         twinx = [False, False, True][i]
+
+#         plot_rpd(a, b, c, alpha, ax[0, i], twinx)
+
+#         f1 = [f11, f21, f31][i]
+#         d1 = [d11, d21, d31][i]
+#         slope = [slope1, slope2, slope3][i]
+#         f2 = [f12, f22, f32][i]
+#         d2 = [d12, d22, d32][i]
+#         f3 = [f13, f23, f33][i]
+#         d3 = [d13, d23, d33][i]
+#         offset = [0.07, 0.12, 0.07][i]
+#         n = [[0.6, 1.0, 2.0], [0.1, 0.5, 1.0], [0.2, 0.5, 1.0]][i]
+#         nm1 = [
+#             r"$\% (\phi_1 + \phi_2)$",
+#             r"$\% (\phi_3 + \phi_4)$",
+#             r"$\% (\phi_1 + \phi_2)$",
+#         ][i]
+#         nm2 = [
+#             r"$\lambda/\lambda_{cr}$",
+#             r"$\lambda/\lambda_{3}$",
+#             r"$\lambda/\lambda_{cr}$",
+#         ][i]
+#         plot_loadpath(
+#             f1, d1, n[0], f2, d2, n[1], f3, d3, n[2], slope, offset, nm1, nm2, ax[1, i]
+#         )
+
+#     plt.subplots_adjust(wspace=0.4)
+#     plt.savefig("square.png", dpi=1000, bbox_inches="tight", pad_inches=0.0)
+
+
+def read_xlsx():
+    import pandas as pd
+
+    # read excel file beam.xlsx
+    df = pd.read_excel("../abaqus.xlsx", sheet_name="Sheet3")
+
+    # convert to numpy array
+    data = df.to_numpy()[:]
+
+    # odd columns are force, even columns are displacement
+    disp = np.abs(data[:, 0::2])
+    force = data[:, 1::2]
+
+    slopes = []
+    for i in range(force.shape[1]):
+        slopes.append(np.max(np.abs(np.diff(force[:15, i]) / np.diff(disp[:15, i]))))
+
+    return force, disp, slopes
+
+
+def plot_loaddis(force, disp, slope, ax):
+
+    c = ["k", "b", "r", "m", "c", "y"]
+    mkz = 2.0
+    lw = 0.75
+    mk = ["o", "s", "^", "v", "D", "P"]
+    ds = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
+    end = [40, 50, 40]
+    text = [
+        r"$0.5\% (\phi_1 + \phi_2)$",
+        r"$0.5\% (\phi_3 + \phi_4)$",
+        r"$0.5\% (\phi_1 + \phi_2)$",
     ]
-)
-ic(rpd)
 
-f11, d11, slope1 = read_data("s-a-12-0006.txt", 40, b1[0])
-f12, d12, _ = read_data("s-a-12-001.txt", 40, b1[0])
-f13, d13, _ = read_data("s-a-12-002.txt", 35, b1[0])
-
-f21, d21, slope2 = read_data("s-b-12-0001.txt", 50, b2[2])
-f22, d22, _ = read_data("s-b-12-0005.txt", 50, b2[2])
-f23, d23, _ = read_data("s-b-12-001.txt", 50, b2[2])
-
-f31, d31, slope3 = read_data("s-c-12-0002.txt", 45, b3[0])
-f32, d32, _ = read_data("s-c-12-0005.txt", 40, b3[0])
-f33, d33, _ = read_data("s-c-12-001.txt", 40, b3[0])
-
-c1 = ["b", "b", "gray", "gray", "b", "b"]
-c2 = ["gray", "gray", "b", "b", "gray", "gray"]
-c3 = ["b", "b", "gray", "gray", "gray", "gray"]
-
-alpha1 = [0.5, 0.5, 0.5, 0.5, 0.25, 0.25]
-alpha2 = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
-alpha3 = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
-
-with plt.style.context(["nature"]):
-    fig, ax = plt.subplots(
-        2,
-        3,
-        figsize=(7.0, 3.6),
-        gridspec_kw={"height_ratios": [1, 2.3]},
-        tight_layout=True,
-        sharey="row",
-    )
-
-    for i in range(3):
-        a = [a1, a2, a3][i]
-        b = [b1, b2, b3][i]
-        c = [c1, c2, c3][i]
-        alpha = [alpha1, alpha2, alpha3][i]
-        twinx = [False, False, True][i]
-
-        plot_rpd(a, b, c, alpha, ax[0, i], twinx)
-
-        f1 = [f11, f21, f31][i]
-        d1 = [d11, d21, d31][i]
-        slope = [slope1, slope2, slope3][i]
-        f2 = [f12, f22, f32][i]
-        d2 = [d12, d22, d32][i]
-        f3 = [f13, f23, f33][i]
-        d3 = [d13, d23, d33][i]
-        offset = [0.07, 0.12, 0.07][i]
-        n = [[0.6, 1.0, 2.0], [0.1, 0.5, 1.0], [0.2, 0.5, 1.0]][i]
-        nm1 = [
-            r"$\% (\phi_1 + \phi_2)$",
-            r"$\% (\phi_3 + \phi_4)$",
-            r"$\% (\phi_1 + \phi_2)$",
-        ][i]
-        nm2 = [
-            r"$\lambda/\lambda_{cr}$",
-            r"$\lambda/\lambda_{3}$",
-            r"$\lambda/\lambda_{cr}$",
-        ][i]
-        plot_loadpath(
-            f1, d1, n[0], f2, d2, n[1], f3, d3, n[2], slope, offset, nm1, nm2, ax[1, i]
+    for i in range(force.shape[1]):
+        ax.plot(
+            disp[:end[i], i],
+            force[:end[i], i],
+            marker=mk[i],
+            label=text[i] +f" for design \\textbf{{{ds[i]}}}",
+            color=c[i],
+            markersize=mkz,
+            linewidth=lw,
+            zorder=10,
         )
 
-    plt.subplots_adjust(wspace=0.4)
-    plt.savefig("square.png", dpi=1000, bbox_inches="tight", pad_inches=0.0)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(direction="out")
+    ax.tick_params(which="minor", direction="out")
+    ax.tick_params(which="minor", left=False)
+
+    ax.legend(
+        frameon=False,
+        fontsize=6,
+        title=r"Load Path with Initial Imperfection",
+        title_fontsize="7",
+        # bbox_to_anchor=(0.995, 0.15),
+        loc="upper right",
+        # ncol=3,
+        columnspacing=1.0,
+    )
+
+    ax.set_xlabel(r"Vertical Displacement $d_y$ for the Top-Middle Node", fontsize=8)
+    ax.set_ylabel(r"$\lambda$", fontsize=8)
+    ax.tick_params(axis="both", labelsize=8)
+
+    return
 
 
-# f1, d1, slope = read_data("s-a-001.txt", 40, b1[0])
-# f2, d2, _ = read_data("s-a-002.txt", 40, b1[0])
-# f3, d3, _ = read_data("s-a-003.txt", 40, b1[0])
-# with plt.style.context(["nature"]):
-#     ax = plot_loadpath(f1, d1, 1.0, f2, d2, 2.0, f3, d3, 3.0, slope, r"$\% \phi_1$")
-#     ax.text(
-#         y / slope,
-#         y + 0.05,
-#         "Fundamental Path",
-#         fontsize=4,
-#         rotation=np.arctan(slope) * 180 / np.pi,
-#         transform_rotates_text=True,
-#         rotation_mode="anchor",
-#     )
-#     ax.set_ylabel("$P / P_{cr}$", rotation=0)
-#     ax.yaxis.set_label_coords(0.02, 1.0)
-#     plt.savefig("loadpath_a.png", dpi=1000, bbox_inches="tight", pad_inches=0.05)
-
-
-# f1, d1, slope = read_data("s-b-0001.txt", 50, b2[2])
-# f2, d2, _ = read_data("s-b-0005.txt", 50, b2[2])
-# f3, d3, _ = read_data("s-b-001.txt", 50, b2[2])
-# with plt.style.context(["nature"]):
-#     ax = plot_loadpath(f1, d1, 0.1, f2, d2, 0.5, f3, d3, 1.0, slope, r"$\% \phi_1$")
-#     ax.text(
-#         y / slope,
-#         y + 0.1,
-#         "Fundamental Path",
-#         fontsize=4,
-#         rotation=np.arctan(slope) * 180 / np.pi,
-#         transform_rotates_text=True,
-#         rotation_mode="anchor",
-#     )
-#     ax.set_ylabel("$P / P_{3}$", rotation=0)
-#     ax.yaxis.set_label_coords(0.02, 1.0)
-#     plt.savefig("loadpath_b.png", dpi=1000, bbox_inches="tight", pad_inches=0.05)
-
-
-# f1, d1, slope = read_data("s-c-0002.txt", 45, b3[0])
-# f2, d2, _ = read_data("s-c-0005.txt", 40, b3[0])
-# f3, d3, _ = read_data("s-c-001.txt", 40, b3[0])
-# with plt.style.context(["nature"]):
-#     ax = plot_loadpath(f1, d1, 0.2, f2, d2, 0.5, f3, d3, 1.0, slope, r"$\% \phi_1$")
-#     ax.text(
-#         y / slope,
-#         y + 0.05,
-#         "Fundamental Path",
-#         fontsize=4,
-#         rotation=np.arctan(slope) * 180 / np.pi,
-#         transform_rotates_text=True,
-#         rotation_mode="anchor",
-#     )
-#     ax.set_ylabel("$P / P_{cr}$", rotation=0)
-#     ax.yaxis.set_label_coords(0.02, 1.0)
-#     plt.savefig("loadpath_c.png", dpi=1000, bbox_inches="tight", pad_inches=0.05)
+with plt.style.context(["nature"]):
+    fig, ax = plt.subplots(1, 1, figsize=(7.0, 3.6), tight_layout=True)
+    force, disp, slope = read_xlsx()
+    plot_loaddis(force, disp, slope, ax)
+    plt.savefig("square.png", dpi=1000, bbox_inches="tight", pad_inches=0.05)

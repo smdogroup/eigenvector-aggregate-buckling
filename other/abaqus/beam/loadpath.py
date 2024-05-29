@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scienceplots
 
-
 plt.rcParams.update(
     {
         "text.usetex": True,
@@ -203,45 +202,116 @@ rpd = np.mean(
 )
 ic(rpd)
 
-f11, d11, slope1 = read_data("loadpath-a-0001.txt", 100, b1[0])
-f12, d12, _ = read_data("loadpath-a-0005.txt", 35, b1[0])
-f13, d13, _ = read_data("loadpath-a-001.txt", 55, b1[0])
+# f11, d11, slope1 = read_data("loadpath-a-0001.txt", 100, b1[0])
+# f12, d12, _ = read_data("loadpath-a-0005.txt", 35, b1[0])
+# f13, d13, _ = read_data("loadpath-a-001.txt", 55, b1[0])
 
-f21, d21, slope2 = read_data("b-b-00002.txt", 100, b2[0])
-f22, d22, _ = read_data("b-b-0001.txt", 40, b2[0])
-f23, d23, _ = read_data("b-b-0002.txt", 40, b2[0])
+# f21, d21, slope2 = read_data("b-b-00002.txt", 100, b2[0])
+# f22, d22, _ = read_data("b-b-0001.txt", 40, b2[0])
+# f23, d23, _ = read_data("b-b-0002.txt", 40, b2[0])
 
-f31, d31, slope3 = read_data("loadpath-c-0002.txt", 90, b3[0])
-f32, d32, _ = read_data("loadpath-c-0005.txt", 100, b3[0])
-f33, d33, _ = read_data("loadpath-c-001.txt", 32, b3[0])
+# f31, d31, slope3 = read_data("loadpath-c-0002.txt", 90, b3[0])
+# f32, d32, _ = read_data("loadpath-c-0005.txt", 100, b3[0])
+# f33, d33, _ = read_data("loadpath-c-001.txt", 32, b3[0])
 
-with plt.style.context(["nature"]):
-    fig, ax = plt.subplots(
-        2,
-        3,
-        figsize=(7.0, 3.6),
-        gridspec_kw={"height_ratios": [1, 2.3]},
-        tight_layout=True,
-        sharey="row",
+# with plt.style.context(["nature"]):
+#     fig, ax = plt.subplots(
+#         2,
+#         3,
+#         figsize=(7.0, 3.6),
+#         gridspec_kw={"height_ratios": [1, 2.3]},
+#         tight_layout=True,
+#         sharey="row",
+#     )
+
+#     for i in range(3):
+#         a = [a1, a2, a3][i]
+#         b = [b1, b2, b3][i]
+#         twinx = [False, False, True][i]
+
+#         plot_rpd(a, b, ax[0, i], twinx)
+
+#         f1 = [f11, f21, f31][i]
+#         d1 = [d11, d21, d31][i]
+#         slope = [slope1, slope2, slope3][i]
+#         f2 = [f12, f22, f32][i]
+#         d2 = [d12, d22, d32][i]
+#         f3 = [f13, f23, f33][i]
+#         d3 = [d13, d23, d33][i]
+#         offset = [0.06, 0.06, 0.07][i]
+#         n = [[0.1, 0.5, 1.0], [0.02, 0.1, 0.2], [0.2, 0.5, 1.0]][i]
+#         plot_loadpath(f1, d1, n[0], f2, d2, n[1], f3, d3, n[2], slope, offset, ax[1, i])
+
+#     plt.subplots_adjust(wspace=0.4)
+#     plt.savefig("beam.png", dpi=1000, bbox_inches="tight", pad_inches=0.0)
+
+
+def read_xlsx():
+    import pandas as pd
+
+    # read excel file beam.xlsx
+    df = pd.read_excel("../abaqus.xlsx", sheet_name="Sheet1")
+
+    # convert to numpy array
+    data = df.to_numpy()
+
+    # odd columns are force, even columns are displacement
+    disp = data[:, 0::2]
+    force = data[:, 1::2]
+
+    slopes = []
+    for i in range(force.shape[1]):
+        slopes.append(np.max(np.abs(np.diff(force[:15, i]) / np.diff(disp[:15, i]))))
+
+    return force, disp, slopes
+
+
+def plot_loaddis(force, disp, slope, ax):
+
+    c = ["k", "b", "r", "m", "c", "y"]
+    mkz = 2.0
+    lw = 0.75
+    mk = ["o", "s", "^", "v", "D", "P"]
+    ds = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
+
+    for i in range(force.shape[1]):
+        ax.plot(
+            disp[:, i],
+            force[:, i],
+            marker=mk[i],
+            label=f"design \\textbf{{{ds[i]}}}",
+            color=c[i],
+            markersize=mkz,
+            linewidth=lw,
+            zorder=10,
+        )
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(direction="out")
+    ax.tick_params(which="minor", direction="out")
+    ax.tick_params(which="minor", left=False)
+
+    ax.legend(
+        frameon=False,
+        fontsize=6,
+        title=r"Load Path with Initial Imperfection $0.1\% \phi_1$",
+        title_fontsize="7",
+        # bbox_to_anchor=(0.995, 0.15),
+        loc="upper right",
+        ncol=3,
+        columnspacing=1.0,
     )
 
-    for i in range(3):
-        a = [a1, a2, a3][i]
-        b = [b1, b2, b3][i]
-        twinx = [False, False, True][i]
+    ax.set_xlabel(r"Vertical Displacement $d_y$ for the Top-Middle Node", fontsize=8)
+    ax.set_ylabel(r"$\lambda$", fontsize=8)
+    ax.tick_params(axis="both", labelsize=8)
 
-        plot_rpd(a, b, ax[0, i], twinx)
+    return
 
-        f1 = [f11, f21, f31][i]
-        d1 = [d11, d21, d31][i]
-        slope = [slope1, slope2, slope3][i]
-        f2 = [f12, f22, f32][i]
-        d2 = [d12, d22, d32][i]
-        f3 = [f13, f23, f33][i]
-        d3 = [d13, d23, d33][i]
-        offset = [0.06, 0.06, 0.07][i]
-        n = [[0.1, 0.5, 1.0], [0.02, 0.1, 0.2], [0.2, 0.5, 1.0]][i]
-        plot_loadpath(f1, d1, n[0], f2, d2, n[1], f3, d3, n[2], slope, offset, ax[1, i])
 
-    plt.subplots_adjust(wspace=0.4)
-    plt.savefig("beam.png", dpi=1000, bbox_inches="tight", pad_inches=0.0)
+with plt.style.context(["nature"]):
+    fig, ax = plt.subplots(1, 1, figsize=(7.0, 3.6), tight_layout=True)
+    force, disp, slope = read_xlsx()
+    plot_loaddis(force, disp, slope, ax)
+    plt.savefig("beam.png", dpi=1000, bbox_inches="tight", pad_inches=0.05)
