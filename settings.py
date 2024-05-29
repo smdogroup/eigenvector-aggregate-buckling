@@ -30,6 +30,7 @@ def parse_cmd_args():
         "vol_frac_ub": None,
         "vol_frac_lb": None,
         "dis_ub": None,
+        "dis_ub_frac": None,
         "iter_crit_dis": 0,  # iteration to start displacement constraint
         "iter_crit_stress": 0,  # iteration to start stress constraint
         "tracking": False,  # track the eigenvector, only for N_a=N_b, iter_crit_dis!=0
@@ -43,6 +44,7 @@ def parse_cmd_args():
         "ks_rho_natural_freq": 1000.0,
         "ks_rho_stress": 10.0,
         "ks_rho_freq": 160.0,  # from ferrari2021 paper
+        "ks_rho_dis_max": 1.0,
     }
 
     softmax = {
@@ -79,7 +81,7 @@ def parse_cmd_args():
     }
 
     check = {
-        "kokkos": True,
+        "kokkos": False,
         "check_gradient": False,
         "check_kokkos": False,
         "note": "",
