@@ -13,3 +13,11 @@ build
 *darwin*
 data
 *.so
+*.txt
+*.csv
+*.json
+*.pdf
+_deps
+CMakeFiles
+*.xlsx
+out

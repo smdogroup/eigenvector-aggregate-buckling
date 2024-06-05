@@ -229,6 +229,19 @@ def create_folder(args):
     if "displacement" in args.confs:
         d = f"{args.dis_ub:.2f}"
         args.prefix = args.prefix + ", d=" + d
+    
+    if args.dis_ub_frac is not None:
+        frac = f"{args.dis_ub_frac:.3f}"
+        args.prefix = args.prefix + ", frac=" + frac
+    
+    if args.note != "":
+        args.prefix = args.prefix + ", " + args.note
+
+    if not os.path.isdir(args.prefix):
+        os.mkdir(args.prefix)
+    else:
+        rmtree(args.prefix)
+        os.mkdir(args.prefix)
 
     # if args.proj:
     #     beta0 = f"{args.beta0}"
@@ -268,17 +281,18 @@ def create_folder(args):
 
     # if os.path.isdir(args.prefix):
     #     rmtree(args.prefix)
-    if not os.path.isdir(args.prefix):
-        os.mkdir(args.prefix)
+    
+    # if not os.path.isdir(args.prefix):
+    #     os.mkdir(args.prefix)
 
-    if args.note != "":
-        args.prefix = os.path.join(args.prefix, args.note)
-        args.prefix = args.prefix + ", " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        args.prefix = os.path.join(
-            args.prefix, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
-    os.mkdir(args.prefix)
+    # if args.note != "":
+    #     args.prefix = os.path.join(args.prefix, args.note)
+    #     args.prefix = args.prefix + ", " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # else:
+    #     args.prefix = os.path.join(
+    #         args.prefix, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    #     )
+    # os.mkdir(args.prefix)
 
     return args
 
