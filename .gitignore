@@ -1,0 +1,23 @@
+*.out
+*.mma
+*.tr
+*.log
+__pycache__
+.vscode
+.DS_Store
+*.png
+*.html
+.vscode
+build
+# *test*
+*darwin*
+data
+*.so
+*.txt
+*.csv
+*.json
+*.pdf
+_deps
+CMakeFiles
+*.xlsx
+out
