@@ -47,14 +47,14 @@ def read_vol(file):
     vol = df.iloc[:, 2].values
     BLF_ks = df.iloc[:, 3].values
     stress_iter = []
-    
+
     ## case 1
-    # dis = df.iloc[:, 5].values
-    # compliance = df.iloc[:, -3].values
+    dis = df.iloc[:, 5].values
+    compliance = df.iloc[:, -3].values
 
     ## case 2
-    dis = df.iloc[:, 6].values
-    compliance = df.iloc[:, 4].values
+    # dis = df.iloc[:, 6].values
+    # compliance = df.iloc[:, 4].values
 
     # convert to numpy array with float
     vol = vol.astype(float)
@@ -241,49 +241,6 @@ def plot_modeshape(
     if alpha is None:
         alpha = 1.0
 
-    if stress is not None:
-        # compute true value of stress
-        Z = stress
-
-        phi = phi[1:, 1:, :]
-        # normalize stress
-        ic(np.min(Z), np.max(Z))
-        # Z_max = 24.098528321399222
-        # Z = Z / Z_max
-        # # Z_min = 0.0
-        # # Z = (Z - Z.min()) / (Z_max - Z.min())
-        # # make the min and max closer
-        # a = 0.04
-        # Z = Z**a
-
-        # # vmin = 0.1**a
-        # # vmax = 0.8**a
-        # vmin = 0.72
-        # # vmax = 0.7
-        # cmap = "coolwarm"
-
-        Z_max = 4.086441349443697
-        # Z_min = 6.634634423461437e-05
-        # Z = (Z - Z_min) / (Z_max - Z_min)
-        # Z = (Z - Z.min()) / (Z_max - Z.min())
-        # a = 0.8
-        vmin = 0.0
-        vmax = 4.086441349443697
-
-        # Z = Z**a
-        # Z = Z / Z_max
-        # Z_min = 0.0
-        # Z = (Z - Z.min()) / (Z_max - Z.min())
-        # make the min and max closer
-        # a = 0.15
-        # Z = Z**a
-
-        # vmin = 0.1**a
-        # vmax = 0.8**a
-        # vmin = 0.5
-        # vmax = 0.7
-        cmap = "coolwarm"
-
     X, Y = np.meshgrid(np.linspace(0, 1, Z.shape[1]), np.linspace(0, 2, Z.shape[0]))
     X = X + phi[:, :, 0]
     Y = Y + phi[:, :, 1]
@@ -337,7 +294,7 @@ def plot_1(nrow, rho, phi0, stress, flip_x=False, flip_y=False):
     plot_modeshape(
         axs,
         rho[0],
-        # phi0[0] * shift_scale,
+        phi0[0] * shift_scale,
         # stress[0],
         flip_x=1,
         flip_y=flip_y,
@@ -390,7 +347,7 @@ def plot_5(nrow, rho, phi0, stress, flip_x=False, flip_y=False):
 
 
 def plot_2_1(omega, BLF_ks, vol, compliance, dis):
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(3.0, 2.0))
     ax2 = ax.twinx()
     ax2.spines.right.set_position(("axes", 1.0))
 
@@ -428,10 +385,6 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
         zorder=0,
     )
 
-    # (pc2,) = ax2.plot(vol[0][n_start:n_iter] / 0.3, color="b", linewidth=0.75, alpha=0.6, label=r'$g_V$',linestyle="--",zorder=0)
-
-    # (p3,) = ax2.plot(dis[0][n_start:n_iter] + 1.0, color="r", linewidth=0.25, alpha=1.0, label=r'$g_{d}$',linestyle="-",zorder=10)
-
     for i in range(1, 6):
         ax.plot(
             omega[0][n_start:n_iter, i],
@@ -440,16 +393,11 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
             alpha=alpha[i],
             linestyle=styles[i],
             linewidth=0.5,
-            # marker=marker[i],
-            # markevery=10,
-            # markersize=3,
-            # markerfacecolor="none",
-            # markeredgecolor=colors[i],
         )
     # log scale the x axis
     ax.set(xscale="log", xlim=(20, 1000))
     # ax.set(xlim=(10, 1000))
-    ax.set_xlabel("Iteration (log-scale)")
+    # ax.set_xlabel("Iteration (log-scale)")
     # ax.legend(loc="upper right")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -466,7 +414,7 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
     y2int = np.arange(0.0, 3.9, 1.0)
     ax2.set_yticks(y2int)
     ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
-    ax2.yaxis.set_label_coords(1.01, 1.051)
+    ax2.yaxis.set_label_coords(1.01, 1.06)
 
     ax2.yaxis.label.set_color(pc1.get_color())
     ax.yaxis.label.set_color(p1.get_color())
@@ -500,19 +448,19 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
         # title="Buckling Load Factors:",
         ncol=3,
         # loc=[0.5, 0.05],
-        loc=[0.325, 0.05],
+        loc=[0.3, 0.05],
         frameon=False,
         fontsize=6,
     )
 
 
 def plot_2(omega, BLF_ks, vol, compliance, dis):
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(3.0, 2.0))
     ax2 = ax.twinx()
     ax2.spines.right.set_position(("axes", 1.0))
 
     ax3 = ax.twinx()
-    ax3.spines.right.set_position(("axes", 1.08))
+    ax3.spines.right.set_position(("axes", 1.1))
 
     styles = ["-", "--", "-.", ":", "-", "--", "-.", ":"]
     alpha = [0.8, 0.5, 0.4, 0.3, 0.2, 0.1]
@@ -568,15 +516,11 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
             alpha=alpha[i],
             linestyle=styles[i],
             linewidth=0.5,
-            # marker=marker[i],
-            # markevery=10,
-            # markersize=3,
-            # markerfacecolor="none",
-            # markeredgecolor=colors[i],
         )
     # log scale the x axis
     ax.set(xscale="log", xlim=(30, 1000))
-    ax.set_xlabel("Iteration (log-scale)")
+    ax.set_xlabel("Iteration (log-scale)", fontsize=6)
+    ax.xaxis.set_label_coords(0.5, -0.12)
 
     # ax.set(xlim=(10, 1000))
     # ax.set_xlabel("Iteration")
@@ -597,16 +541,16 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
     y2int = np.arange(0.0, 3.9, 1.0)
     ax2.set_yticks(y2int)
     ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
-    ax2.yaxis.set_label_coords(1.01, 1.051)
+    ax2.yaxis.set_label_coords(1.01, 1.06)
 
     ticks = ax3.get_yticks()
-    ticks = np.array([0.0, 7.0])
+    ticks = np.array([0.0, 10.0])
     ax3.set_yticks(ticks)
     # ax3.set(ylim=(-1.0, 0.195))  # d=0
     # ax3.set(ylim=(0.0, 6.695))    # d=6.0
-    ax3.set(ylim=(-60.0, 15))  # d=7.0
+    ax3.set(ylim=(-60.0, 15))  # d=7.0, d=10.0
     ax3.set_ylabel("$h$", rotation=0, labelpad=0)
-    ax3.yaxis.set_label_coords(1.08, 1.045)
+    ax3.yaxis.set_label_coords(1.1, 1.058)
 
     ax.yaxis.label.set_color(p1.get_color())
     ax2.yaxis.label.set_color(pc1.get_color())
@@ -645,7 +589,145 @@ def plot_2(omega, BLF_ks, vol, compliance, dis):
         # title="Buckling Load Factors:",
         ncol=3,
         # loc=[0.5, 0.05],
-        loc=[0.325, 0.05],
+        loc=[0.3, 0.05],
+        frameon=False,
+        fontsize=6,
+    )
+
+
+def plot_2_frac(omega, BLF_ks, vol, compliance, dis):
+    fig, ax = plt.subplots(figsize=(3.0, 2.0))
+    ax2 = ax.twinx()
+    ax2.spines.right.set_position(("axes", 1.0))
+
+    ax3 = ax.twinx()
+    ax3.spines.right.set_position(("axes", 1.1))
+
+    styles = ["-", "--", "-.", ":", "-", "--", "-.", ":"]
+    alpha = [0.8, 0.5, 0.4, 0.3, 0.2, 0.1]
+    # marker = ["o", "o", "s", "s", "^", "^"]
+    linewidth = [1.0, 0.5, 0.4, 0.3, 0.2, 0.1]
+    n_start = 0
+    n_iter = 1000
+
+    # plot BLF_ks
+    (p1,) = ax.plot(
+        BLF_ks[0][n_start:n_iter],
+        label=r"$J_{ks}^{-1} [\lambda_{i}]$",
+        color="k",
+        alpha=0.8,
+        linewidth=0.75,
+        linestyle="--",
+    )
+    (p2,) = ax.plot(
+        omega[0][n_start:n_iter, 0],
+        label=r"$\lambda_{1}$",
+        alpha=0.8,
+        color="k",
+        linewidth=0.75,
+    )
+
+    (pc1,) = ax2.plot(
+        compliance[0][n_start:n_iter] / 7.4e-06,
+        color="b",
+        linewidth=0.75,
+        alpha=0.6,
+        label=r"$g_{c}$",
+        linestyle="-",
+        zorder=0,
+    )
+
+    (pcc1,) = ax3.plot(
+        dis[0][n_start:n_iter],
+        color="r",
+        linewidth=0.25,
+        alpha=1.0,
+        label=r"$g_{d}$",
+        linestyle="-",
+        zorder=10,
+    )
+
+    for i in range(1, 6):
+        ax.plot(
+            omega[0][n_start:n_iter, i],
+            label=r"$\lambda_{" + str(i + 1) + "}$",
+            color="k",
+            alpha=alpha[i],
+            linestyle=styles[i],
+            linewidth=0.5,
+        )
+    # log scale the x axis
+    ax.set(xscale="log", xlim=(30, 1000))
+    ax.set_xlabel("Iteration (log-scale)")
+
+    # ax.set(xlim=(10, 1000))
+    # ax.set_xlabel("Iteration")
+
+    # ax.legend(loc="upper right")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.xaxis.set_ticks_position("bottom")
+    ax.yaxis.set_ticks_position("left")
+    ax.tick_params(direction="out")
+    ax.tick_params(which="minor", direction="out")
+
+    ax.set_ylim(0, 17.95)
+    ax.set_ylabel(r"$BLF$", rotation=0, labelpad=0)
+    ax.yaxis.set_label_coords(0.0, 1.001)
+
+    ax2.set(ylim=(0.0, 3.9))
+    y2int = np.arange(0.0, 3.9, 1.0)
+    ax2.set_yticks(y2int)
+    ax2.set_ylabel("$c / c_{opt}$", rotation=0, labelpad=0)
+    ax2.yaxis.set_label_coords(1.01, 1.06)
+
+    ticks = ax3.get_yticks()
+    ticks = np.array([0.0, 0.7])  # 0.1, 0.2, 0.3, 0.4, 0.5, 0.6,
+    ax3.set_yticks(ticks)
+    # ax3.set(ylim=(-1.0, 0.195))  # d=0
+    # ax3.set(ylim=(0.0, 6.695))    # d=6.0
+    ax3.set(ylim=(-0.0, 0.8))  # d=7.0
+    ax3.set_ylabel("$h / h_{KS}$", rotation=0, labelpad=0)
+    ax3.yaxis.set_label_coords(1.13, 1.06)
+
+    ax.yaxis.label.set_color(p1.get_color())
+    ax2.yaxis.label.set_color(pc1.get_color())
+    ax3.yaxis.label.set_color(pcc1.get_color())
+    ax.tick_params(axis="y", colors=p1.get_color())
+    ax2.tick_params(axis="y", colors=pc1.get_color())
+    ax3.tick_params(axis="y", colors=pcc1.get_color())
+
+    ax.spines["top"].set_visible(False)
+    ax2.spines["top"].set_visible(False)
+    ax3.spines["top"].set_visible(False)
+    ax.xaxis.set_ticks_position("bottom")
+    ax.yaxis.set_ticks_position("left")
+    ax.spines["right"].set_visible(False)
+    ax2.yaxis.set_ticks_position("right")
+    ax3.yaxis.set_ticks_position("right")
+
+    ax.tick_params(direction="out")
+    ax2.tick_params(direction="out")
+    ax3.tick_params(direction="out")
+    ax.tick_params(which="minor", direction="out")
+    ax2.tick_params(which="minor", direction="out")
+    ax3.tick_params(which="minor", direction="out")
+    ax.tick_params(which="minor", left=False)
+
+    handles, labels = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    handles3, labels3 = ax3.get_legend_handles_labels()
+    handles.extend(handles2)
+    labels.extend(labels2)
+    handles.extend(handles3)
+    labels.extend(labels3)
+    ax.legend(
+        handles,
+        labels,
+        # title="Buckling Load Factors:",
+        ncol=3,
+        # loc=[0.5, 0.05],
+        loc=[0.3, 0.05],
         frameon=False,
         fontsize=6,
     )
@@ -1226,6 +1308,9 @@ def plot_8():
         ylabel=r"$1 / \lambda_1$",
         zlabel="compliance",
     )
+    ax.set_xlabel(r"$h$", fontsize=6)
+    ax.set_ylabel(r"$1 / \lambda_1$", fontsize=6)
+    ax.set_zlabel("compliance", fontsize=6)
 
     # ax.set_axis_off()
     # turn off the axis planes
@@ -1258,6 +1343,15 @@ def plot_8():
     # turn off the y and z axis ticks
     ax.yaxis.set_ticks([])
     ax.zaxis.set_ticks([])
+
+    # ax.tick_params(axis="x", labelsize=5)
+    # ax.tick_params(axis="y", labelsize=5)
+    # ax.tick_params(axis="z", labelsize=5)
+
+    # # increase the font size of the x, y, z values
+    # ax.xaxis.set_tick_params(labelsize=6)
+    # ax.yaxis.set_tick_params(labelsize=6)
+    # ax.zaxis.set_tick_params(labelsize=6)
 
     # change the angle of the view
     # ax.view_init(azim=45, elev=0)
@@ -1352,7 +1446,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
         color="k",
         linewidth=0.75,
     )
-    ic(compliance[0][n_start:n_start +10] / 7.4e-06)
+    ic(compliance[0][n_start : n_start + 10] / 7.4e-06)
     (pc1,) = ax2.plot(
         compliance[0][n_start:n_iter] / 7.4e-06,
         color="b",
@@ -1414,22 +1508,18 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
     labels = [item.get_text() for item in ax.get_xticklabels()]
     for i in range(0, len(labels)):
         labels[i] = (
-            "iter: "
-            + labels[i]
-            + "\n"
-            + r"$w=$"
-            + f"{np.max([0.9-0.1 * i, 0.0]):.1f}"
+            "iter: " + labels[i] + "\n" + r"$w=$" + f"{np.max([0.9-0.1 * i, 0.0]):.1f}"
         )
 
     ax.set_xticklabels(labels)
 
     # ax.set_ylim(8, 17.95) # for 7
-    ax.set_ylim(7, 17.95) # for 4
+    ax.set_ylim(7, 17.95)  # for 4
     ax.set_ylabel(r"$BLF$", rotation=0, labelpad=0)
     ax.yaxis.set_label_coords(0.0, 1.001)
 
     # ax2.set(ylim=(1.18, 1.795))  # for 7
-    ax2.set(ylim=(1.15, 1.795))    # for 4
+    ax2.set(ylim=(1.15, 1.795))  # for 4
     ax2.set_ylabel(r"$c / c_{opt}$", rotation=0, labelpad=0)
     ax2.yaxis.set_label_coords(1.01, 1.032)
 
@@ -1492,11 +1582,12 @@ if __name__ == "__main__":
     # dir_result1 = "output/final_results/building/p, n=240, v=0.30, c=4.30, r=6.0/"
     # dir_result1 = "output/final_results/building/displacement/frequency/0,1,d=0/"
     # dir_result1 = "output/final_results/building/displacement/frequency/0,1,d=10/"
+    dir_result1 = "output/final_results/building/displacement/frequency/0,1,frac=0.7/"
     # dir_result1 = "output/final_results/building/displacement/mode2,0,5,d=0/"
     # dir_result1 = "output/final_results/building/compliance-buckling/0.2/"
     # dir_result1 = "output/final_results/building/displacement/frequency_compliance/mode1/0,0,w=0.2,d=0.0/"
     # dir_result1 = "output/final_results/building/displacement/frequency_compliance/mode1/0,0,w=0.6,d=0.0/"
-    dir_result1 = "output/final_results/building/displacement/frequency_compliance/mode3/0,0,w=0.2,d=7.0/"
+    # dir_result1 = "output/final_results/building/displacement/frequency_compliance/mode3/0,0,w=0.2,d=7.0/"
     # dir_result1 = (
     #     "output/final_results/building/displacement/frequency_compliance/pfc/d=7,w=0.6/"
     # )
@@ -1538,9 +1629,18 @@ if __name__ == "__main__":
         # plot_2(omega, BLF_ks, vol, compliance, dis)
         # # plot_1(1, rho, phi1, stress)
         # plt.savefig(
-        #     "output/final_results/building/column_a13.png",
+        #     "output/final_results/building/column_a12.png",
         #     bbox_inches="tight",
         #     dpi=1000,
+        #     pad_inches=0.05,
+        # )
+
+        # plot_2_frac(omega, BLF_ks, vol, compliance, dis)
+        # # plot_1(1, rho, phi1, stress)
+        # plt.savefig(
+        #     "output/final_results/building/column_a14.png",
+        #     bbox_inches="tight",
+        #     dpi=500,
         #     pad_inches=0.05,
         # )
 
@@ -1564,8 +1664,8 @@ if __name__ == "__main__":
         # plot_1(1, rho, phi0, stress)
         # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode3/00_02_7_7.png", bbox_inches="tight", dpi=1000, pad_inches=0.0)
 
-        plot_2(omega, BLF_ks, vol, compliance, dis)
-        plt.savefig("output/final_results/building/displacement/frequency_compliance/mode3/his_00_0_2_7.png", bbox_inches="tight", dpi=1000, pad_inches=0.05)
+        # plot_2(omega, BLF_ks, vol, compliance, dis)
+        # plt.savefig("output/final_results/building/displacement/frequency_compliance/mode3/his_00_0_2_7.png", bbox_inches="tight", dpi=1000, pad_inches=0.05)
 
         # plot_3()
 
@@ -1577,7 +1677,7 @@ if __name__ == "__main__":
         #     pad_inches=0.02,
         # )
 
-        # plot_8()
+        plot_8()
 
         # plot_6(omega, BLF_ks, vol, compliance, dis)
         # plt.savefig(
@@ -1594,3 +1694,8 @@ if __name__ == "__main__":
         #     dpi=1000,
         #     pad_inches=0.0,
         # )
+
+
+# 1. change g_w to J_w
+# 2. change h=0
+# 3. cjamge design a to h

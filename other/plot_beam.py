@@ -309,8 +309,24 @@ def plot_modeshape(
     # add a straight line at midspan
     # ax.plot([0.5, 3], [1, 1], color="black", linestyle="--", linewidth=0.25)
 
-    # add dot at the top mid edge
-    ax.scatter(1.5, 0.96 + phi[98, 199, 1], color="orange", s=10, zorder=10)
+    # add dot at the top mid edge\
+    if phi is not None:
+        ax.scatter(
+            1.5 + phi[120 - 1, 180 - 1, 0],
+            1.0 + phi[120 - 1, 180 - 1, 1],
+            color="orange",
+            s=15,
+            zorder=10,
+            clip_on=False,
+        )
+        ax.scatter(
+            1.5 + phi[0, 180 - 1, 0],
+            0.0 + phi[0, 180 - 1, 1],
+            color="orange",
+            s=15,
+            zorder=10,
+            clip_on=False,
+        )
 
     if zoom:
         ax.plot(X, Y, color="black", linewidth=0.1, alpha=0.75)
@@ -319,7 +335,25 @@ def plot_modeshape(
         ax.set_xlim(2.5, 5.5)
 
 
-def plot_1(nrow, rho, phi0, phi1):
+def plot_1(rho, phi0):
+    fig, axs = plt.subplots(constrained_layout=True)
+    plot_modeshape(
+        axs,
+        rho[0],
+        levels=50,
+        phi=phi0[0] * 0.1,
+    )
+
+    # # where is the max location for phi0[0]
+    # phi0[0] = np.abs(phi0[0])
+    # max_loc = np.argmax(phi0[0][:, :, 1])
+    # ic(np.unravel_index(max_loc, phi0[0][:, :, 1].shape))
+    # ic(np.unravel_index(159, phi0[0][:, :, 1].shape))
+    # ic(np.max(phi0[0][:, :, 1]))
+    # ic(phi0[0].shape, max_loc)
+
+
+def plot_1_1(nrow, rho, phi0, phi1):
     fig, axs = plt.subplots(1, nrow, constrained_layout=True, figsize=(8, 4))
     plot_modeshape(
         axs[0],
@@ -329,7 +363,7 @@ def plot_1(nrow, rho, phi0, phi1):
     plot_modeshape(
         axs[1],
         rho[0],
-        phi=phi0[0] * 0.1,
+        phi0[0] * 0.1,
         levels=50,
     )
     plot_modeshape(
@@ -623,7 +657,8 @@ def plot_2_1(omega, BLF_ks, vol, compliance, dis):
 
 if __name__ == "__main__":
     # dir_result1 = "output/final_results/beam/compliance-buckling/0.2/"
-    dir_result1 = "output/final_results/beam/displacement/mode1/0,1,d=4.0/"
+    # dir_result1 = "output/final_results/beam/displacement/mode1/0,1,d=0.0/"
+    dir_result1 = "output/final_results/beam/displacement/mode1/0,1,frac=0.4/"
     # dir_result1 = "output/final_results/beam/displacement/mode3/0,0,w=0.4,d=5.0/"
     # dir_result1 = "output/final_results/beam/compliance-buckling/0.2/"
 
@@ -653,13 +688,22 @@ if __name__ == "__main__":
         #     dpi=1000,
         # )
 
-        plot_1(3, rho, phi0, phi1)
+        plot_1(rho, phi1)
+        # plot_1_1(3, rho, phi1, phi0)
         plt.savefig(
-            "output/final_results/beam/4_2.png",
+            "output/final_results/beam/frac=4_2.png",
             bbox_inches="tight",
             dpi=1000,
             pad_inches=0.0,
         )
+
+        # plot_1_1(3, rho, phi0, phi1)
+        # plt.savefig(
+        #     "output/final_results/beam/4_2.png",
+        #     bbox_inches="tight",
+        #     dpi=1000,
+        #     pad_inches=0.0,
+        # )
 
         # plot_1(1, rho, phi1)
         # plot_2(omega, BLF_ks, vol, compliance, dis)

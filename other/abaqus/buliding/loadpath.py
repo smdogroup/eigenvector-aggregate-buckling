@@ -1,14 +1,15 @@
 from icecream import ic
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scienceplots
-
 
 plt.rcParams.update(
     {
         "text.usetex": True,
         "font.family": "sans-serif",
         "font.sans-serif": "Helvetica",
+        "mathtext.fontset": "custom",
     }
 )
 
@@ -16,47 +17,60 @@ plt.rcParams.update(
 def plot_rpd(a, b, ax, twinx=False):
 
     rpd = np.abs(np.subtract(a, b)) / np.add(a, b) * 100
-
-    ax.plot(
-        np.arange(1, 7),
-        a,
-        marker="o",
-        color="r",
-        label="Topology Optimization",
-        markersize=2,
-        linewidth=0.75,
-    )
     ax.plot(
         np.arange(1, 7),
         b,
         marker="s",
-        color="b",
+        color="r",
         label="Abaqus",
         markersize=2,
         linewidth=0.75,
     )
+    ax.plot(
+        np.arange(1, 7),
+        a,
+        marker="o",
+        color="b",
+        label="Topology Optimization",
+        markersize=2,
+        linewidth=0.75,
+    )
+
     if ax.get_subplotspec().colspan.start == 0:
         ax.set_ylabel(r"$\lambda$", fontsize=6)
         # ax.yaxis.set_label_coords(-0.11, 0.5)
 
-    ax.legend(frameon=False, fontsize=5)
-    ax.set_ylim([0, 22])
-    ax.set_xlabel("Mode Number", fontsize=6)
+    ax.tick_params(axis="both", labelsize=5.5)
+    ax.legend(frameon=False, fontsize=5.5)
+    ax.set_ylim([0, 25])
+    ax.set_xlabel("Mode Number", fontsize=5.5)
 
     ax.spines["top"].set_visible(False)
     ax.tick_params(direction="out")
     ax.tick_params(which="minor", direction="out")
     ax.tick_params(which="minor", left=False)
     # ax.legend(frameon=False, fontsize=5, loc=[0.1, 0.8])
-    ax.legend(frameon=False, fontsize=5, loc="upper left")
+    ax.legend(
+        frameon=False,
+        fontsize=5.5,
+        loc="upper left",
+        ncol=2,
+        columnspacing=1.0,
+        handletextpad=0.0,
+    )
+
+    ax.tick_params(axis="y", which="major", length=2, direction="in")
+    ax.tick_params(axis="x", which="major", length=2, direction="out")
 
     ax2 = ax.twinx()
     ax2.spines.right.set_position(("axes", 1.0))
 
     p1 = ax2.bar(np.arange(1, 7), rpd, color="gray", alpha=0.5)
-    if ax.get_subplotspec().colspan.start == 2:
+    if ax.get_subplotspec().colspan.start == 3:
         ax2.set_ylabel(r"$RPD(\%)$", color="gray", fontsize=6)
-        ax2.yaxis.set_label_coords(1.12, 0.5)
+        ax2.yaxis.set_label_coords(1.1, 0.5)
+
+    ax2.tick_params(axis="both", labelsize=5.5)
     ax2.set_xticks(np.arange(1, 7))
     ax2.set_ylim([0, 25])
     ax2.spines["top"].set_visible(False)
@@ -66,6 +80,9 @@ def plot_rpd(a, b, ax, twinx=False):
     ax2.tick_params(which="minor", direction="out")
     ax2.yaxis.label.set_color("gray")
     ax2.tick_params(axis="y", colors="gray")
+
+    ax2.tick_params(axis="y", which="major", length=2, direction="in")
+    ax2.tick_params(axis="x", which="major", length=2, direction="out")
 
     for i, v in enumerate(rpd):
         ax2.text(i + 1, v + 0.25, f"{v:.2f}", color="gray", fontsize=6, ha="center")
@@ -96,15 +113,17 @@ def read_data(filename, n, p_cr):
     return force, arc_length, max_slope
 
 
-def plot_loadpath(f1, d1, n1, f2, d2, n2, f3, d3, n3, slope, offset, ax):
+def plot_loadpath(f1, d1, n1, f2, d2, n2, f3, d3, n3, slope, offset, ds, ax):
     c = plt.colormaps["bwr"]
-    mkz = 1.25
-    lw = 0.5
+    mkz = 1.75
+    lw = 0.75
     mk = ["o", "s", "^"]
     ax.spines["top"].set_visible(False)
     ax.tick_params(direction="out")
     ax.tick_params(which="minor", direction="out")
     ax.tick_params(which="minor", left=False)
+    ax.tick_params(axis="y", which="major", length=2, direction="in")
+    ax.tick_params(axis="x", which="major", length=2, direction="out")
 
     # check d1, d2, d3 which have larger length
     xvalue = np.arange(0, 15, 0.1)
@@ -157,94 +176,32 @@ def plot_loadpath(f1, d1, n1, f2, d2, n2, f3, d3, n3, slope, offset, ax):
 
     ax.legend(
         frameon=False,
-        fontsize=5,
-        title="Load Path with Initial Imperfection",
-        title_fontsize="5.5",
-        bbox_to_anchor=(0.995, 0.15),
+        fontsize=5.5,
+        title=f"Initial Imperfection for Design \\textbf{{{ds}}}",
+        title_fontsize="6",
+        bbox_to_anchor=(1.0, 0.18),
         loc="upper right",
         ncol=3,
-        columnspacing=1.0,
+        columnspacing=0.5,
+        handletextpad=0.0,  # reduce the space
     )
-
-    ax.set_xlabel("Arc Length", fontsize=6)
-    ax.set_ylim([-0.05, 1.05])
+    ax.tick_params(axis="both", labelsize=5.5)
+    ax.set_xlabel("Arc Length", fontsize=5.5)
+    ax.set_ylim([-0.05, 1.02])
     if ax.get_subplotspec().colspan.start == 0:
-        ax.set_ylabel(r"$\lambda/\lambda_{cr}$", fontsize=6)
+        ax.set_ylabel(r"$\lambda / \lambda_{cr}$", fontsize=6)
+        ax.yaxis.set_label_coords(-0.11, 0.5)
 
     ax.text(
         0.25 / slope,
         0.25 + offset,
         "Fundamental Path",
-        fontsize=5,
+        fontsize=5.5,
         rotation=np.arctan(slope) * 180 / np.pi,
         transform_rotates_text=True,
         rotation_mode="anchor",
     )
     return
-
-
-a1 = [12.50, 14.19, 14.78, 15.04, 15.61, 15.66]
-b1 = [13.749, 14.057, 14.303, 15.164, 15.802, 16.634]
-
-a2 = [12.68, 13.47, 13.70, 13.86, 14.72, 14.90]
-# b2 = [13.213, 13.50, 13.872, 14.346, 14.617, 15.319]
-# b2 = [12.601, 12.789, 13.479, 13.812, 14.226, 15.021]
-b2 = [13.529, 13.724, 13.942, 14.193, 14.875, 14.924]
-
-a3 = [10.89, 11.79, 12.30, 12.40, 12.88, 12.90]
-b3 = [11.603, 11.802, 12.619, 12.764, 13.316, 13.957]
-
-# rpd = np.mean(
-#     [
-#         np.abs(np.subtract(a1, b1)) / np.add(a1, b1) * 100,
-#         np.abs(np.subtract(a2, b2)) / np.add(a2, b2) * 100,
-#         np.abs(np.subtract(a3, b3)) / np.add(a3, b3) * 100,
-#     ]
-# )
-# ic(rpd)
-
-# f11, d11, slope1 = read_data("column-a-0001.txt", 100, b1[0])
-# f12, d12, _ = read_data("column-a-001.txt", 100, b1[0])
-# f13, d13, _ = read_data("column-a-003.txt", 60, b1[0])
-
-# f21, d21, slope2 = read_data("c-b-0001.txt", 60, b2[0])
-# f22, d22, _ = read_data("c-b-001.txt", 30, b2[0])
-# f23, d23, _ = read_data("c-b-002.txt", 30, b2[0])
-
-# f31, d31, slope3 = read_data("loadpath-c-0001.txt", 50, b3[0])
-# f32, d32, _ = read_data("loadpath-c-002.txt", 32, b3[0])
-# f33, d33, _ = read_data("loadpath-c-005.txt", 26, b3[0])
-
-# with plt.style.context(["nature"]):
-#     fig, ax = plt.subplots(
-#         2,
-#         3,
-#         figsize=(7.0, 3.6),
-#         gridspec_kw={"height_ratios": [1, 2.3]},
-#         tight_layout=True,
-#         sharey="row",
-#     )
-
-#     for i in range(3):
-#         a = [a1, a2, a3][i]
-#         b = [b1, b2, b3][i]
-#         twinx = [False, False, True][i]
-
-#         plot_rpd(a, b, ax[0, i], twinx)
-
-#         f1 = [f11, f21, f31][i]
-#         d1 = [d11, d21, d31][i]
-#         slope = [slope1, slope2, slope3][i]
-#         f2 = [f12, f22, f32][i]
-#         d2 = [d12, d22, d32][i]
-#         f3 = [f13, f23, f33][i]
-#         d3 = [d13, d23, d33][i]
-#         offset = [0.08, 0.04, 0.05][i]
-#         n = [[0.1, 1.0, 3.0], [0.1, 1.0, 2.0], [0.1, 2.0, 5.0]][i]
-#         plot_loadpath(f1, d1, n[0], f2, d2, n[1], f3, d3, n[2], slope, offset, ax[1, i])
-
-#     plt.subplots_adjust(wspace=0.45)
-#     plt.savefig("column.png", dpi=1000, bbox_inches="tight", pad_inches=0.0)
 
 
 def read_xlsx():
@@ -260,9 +217,9 @@ def read_xlsx():
     dispx = data[:, 0::3]
     dispy = data[:, 1::3]
     force = data[:, 2::3]
-    
+
     dispx[:, 0] = -dispx[:, 0]
-    
+
     disp = np.abs(dispx)
     disp = dispx
 
@@ -274,20 +231,25 @@ def read_xlsx():
 
 
 def plot_loaddis(force, disp, slope, ax):
-
-    c = ["k", "b", "r", "m", "c", "y"]
+    cw = plt.colormaps["coolwarm"](np.linspace(0, 1, 10))
+    c = ["k", "#e29400ff", cw[0], cw[-1], "m", "c", "y"]
     mkz = 2.0
     lw = 0.75
     mk = ["o", "s", "^", "v", "D", "P"]
-    ds = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
-    end = [100, 60, 50]
+    ds = [
+        r"$\bar{h}=\text{N/A}$",
+        r"$\bar{h}=0.7h_{KS}$",
+        r"$\bar{h}=10$",
+        r"$\bar{h}=0$",
+    ]
+    end = [60, 60, 60, 50]
 
     for i in range(force.shape[1]):
         ax.plot(
             disp[: end[i], i],
             force[: end[i], i],
             marker=mk[i],
-            label=f"design \\textbf{{{ds[i]}}}",
+            label=ds[i],
             color=c[i],
             markersize=mkz,
             linewidth=lw,
@@ -295,31 +257,116 @@ def plot_loaddis(force, disp, slope, ax):
         )
 
     ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    # ax.spines["right"].set_visible(False)
     ax.tick_params(direction="out")
     ax.tick_params(which="minor", direction="out")
     ax.tick_params(which="minor", left=False)
-
+    ax.tick_params(axis="y", which="major", length=2, direction="in")
     ax.legend(
         frameon=False,
-        fontsize=6,
-        title=r"Load Path with Initial Imperfection $0.1\% \phi_1$",
+        fontsize=7,
+        title=r"Initial Imperfection $0.1\% \phi_1$",
         title_fontsize="7",
         # bbox_to_anchor=(0.995, 0.15),
-        # loc="upper right",
-        ncol=3,
-        columnspacing=1.0,
+        loc="upper left",
+        ncol=2,
+        # columnspacing=1.0,
     )
+    ax.set_ylim(ymax=13.9)
+    ax.set_xlim(xmax=0.18)
 
-    ax.set_xlabel(r"Horizontal Displacement $d_x$ for the Top-Middle Node", fontsize=8)
-    ax.set_ylabel(r"$\lambda$", fontsize=8)
-    ax.tick_params(axis="both", labelsize=8)
+    ax.set_xlabel(r"Horizontal Displacement $d_x$ for the Top-Middle Node", fontsize=7)
+    ax.set_ylabel(r"$\lambda$", fontsize=7)
+    ax.yaxis.set_label_coords(-0.025, 0.5)
+    ax.tick_params(axis="both", which="major", length=2, labelsize=6)
 
     return
 
 
+a1 = [12.50, 14.19, 14.78, 15.04, 15.61, 15.66]
+b1 = [13.749, 14.057, 14.303, 15.164, 15.802, 16.634]
+
+a2 = [12.823, 13.728, 13.909, 13.909, 14.424, 14.508]
+b2 = [12.820, 13.331, 13.434, 13.649, 13.762, 14.134]
+
+a3 = [12.68, 13.47, 13.70, 13.86, 14.72, 14.90]
+# b2 = [13.213, 13.50, 13.872, 14.346, 14.617, 15.319]
+# b2 = [12.601, 12.789, 13.479, 13.812, 14.226, 15.021]
+b3 = [13.529, 13.724, 13.942, 14.193, 14.875, 14.924]
+
+a4 = [10.89, 11.79, 12.30, 12.40, 12.88, 12.90]
+b4 = [11.603, 11.802, 12.619, 12.764, 13.316, 13.957]
+
+rpd = np.mean(
+    [
+        np.abs(np.subtract(a1, b1)) / np.add(a1, b1) * 100,
+        np.abs(np.subtract(a2, b2)) / np.add(a2, b2) * 100,
+        np.abs(np.subtract(a3, b3)) / np.add(a3, b3) * 100,
+        np.abs(np.subtract(a4, b4)) / np.add(a4, b4) * 100,
+    ]
+)
+ic(rpd)
+
+f11, d11, slope1 = read_data("column-a-0001.txt", 100, b1[0])
+f12, d12, _ = read_data("column-a-001.txt", 100, b1[0])
+f13, d13, _ = read_data("column-a-003.txt", 60, b1[0])
+
+f21, d21, slope2 = read_data("c-d-0001.txt", 60, b2[0])
+f22, d22, _ = read_data("c-d-002.txt", 60, b2[0])
+f23, d23, _ = read_data("c-d-003.txt", 50, b2[0])
+
+f31, d31, slope3 = read_data("c-b-0001.txt", 60, b3[0])
+f32, d32, _ = read_data("c-b-001.txt", 30, b3[0])
+f33, d33, _ = read_data("c-b-002.txt", 30, b3[0])
+
+f41, d41, slope4 = read_data("loadpath-c-0001.txt", 50, b4[0])
+f42, d42, _ = read_data("loadpath-c-002.txt", 32, b4[0])
+f43, d43, _ = read_data("loadpath-c-005.txt", 26, b4[0])
+
 with plt.style.context(["nature"]):
-    fig, ax = plt.subplots(1, 1, figsize=(7.0, 3.6), tight_layout=True)
+    fig = plt.subplots(
+        figsize=(7.5, 5.5),
+        tight_layout=True,
+    )
+    row_ratio = [2, 4, 5]
+    total_rows = sum(row_ratio)
+
+    for i in range(4):
+        a = [a1, a2, a3, a4][i]
+        b = [b1, b2, b3, b4][i]
+        twinx = [False, False, False, True][i]
+
+        ax0 = plt.subplot2grid((total_rows, 4), (0, i), rowspan=row_ratio[0])
+        plot_rpd(a, b, ax0, twinx)
+
+        f1 = [f11, f21, f31, f41][i]
+        d1 = [d11, d21, d31, d41][i]
+        slope = [slope1, slope2, slope3, slope4][i]
+        f2 = [f12, f22, f32, f42][i]
+        d2 = [d12, d22, d32, d42][i]
+        f3 = [f13, f23, f33, f43][i]
+        d3 = [d13, d23, d33, d43][i]
+        offset = [0.08, 0.05, 0.05, 0.05][i]
+        n = [[0.1, 1.0, 3.0], [0.1, 2.0, 3.0], [0.1, 1.0, 2.0], [0.1, 2.0, 5.0]][i]
+        ds = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
+        ax1 = plt.subplot2grid((total_rows, 4), (row_ratio[0], i), rowspan=row_ratio[1])
+        plot_loadpath(
+            f1, d1, n[0], f2, d2, n[1], f3, d3, n[2], slope, offset, ds[i], ax1
+        )
+
+        if i != 0:
+            ax0.set_yticklabels([])
+            ax1.set_yticklabels([])
+
+    plt.subplots_adjust(wspace=-0.5)
+
+    ax = plt.subplot2grid(
+        (total_rows, 4),
+        (row_ratio[0] + row_ratio[1], 0),
+        colspan=4,
+        rowspan=row_ratio[2],
+    )
     force, disp, slope = read_xlsx()
     plot_loaddis(force, disp, slope, ax)
-    plt.savefig("building.png", dpi=1000, bbox_inches="tight", pad_inches=0.05)
+    fig[0].delaxes(fig[1])
+    plt.savefig("column.png", dpi=500, bbox_inches="tight", pad_inches=0.0)

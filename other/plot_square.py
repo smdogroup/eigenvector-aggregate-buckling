@@ -866,7 +866,7 @@ def plot_6(omega, BLF_ks, vol, compliance, dis):
 if __name__ == "__main__":
     # dir_result1 = "output/final_results/square/v=0.25,w=0.4/"
     dir_result1 = (
-        "output/final_results/square/v=0.25,w=0.4,d=4.5/"  # vtk/it_960.vtk for d=4.5
+        "output/final_results/square/v=0.25,w=0.4,d=6.5/"  
     )
 
     (
@@ -884,7 +884,9 @@ if __name__ == "__main__":
         phi3,
         phi4,
         phi5,
-    ) = assmble_data(1, 1000)
+    ) = assmble_data(
+        1, 900
+    )  # vtk/it_960.vtk for d=4.5, vtk/it_900.vtk for d=6.5
 
     with plt.style.context(["nature"]):
         # plot_1(1, rho, phi1, stress)
@@ -907,20 +909,20 @@ if __name__ == "__main__":
         #     pad_inches=0.02,
         # )
 
-        # plot_3(1, rho, phi0)
-        # plt.savefig(
-        #     "output/final_results/square/11.png",
-        #     bbox_inches="tight",
-        #     dpi=500,
-        #     pad_inches=0.0,
-        # )
-        # plot_3(1, rho, phi1)
-        # plt.savefig(
-        #     "output/final_results/square/12.png",
-        #     bbox_inches="tight",
-        #     dpi=500,
-        #     pad_inches=0.0,
-        # )
+        plot_3(1, rho, phi2)
+        plt.savefig(
+            "output/final_results/square/23.png",
+            bbox_inches="tight",
+            dpi=500,
+            pad_inches=0.0,
+        )
+        plot_3(1, rho, phi3)
+        plt.savefig(
+            "output/final_results/square/24.png",
+            bbox_inches="tight",
+            dpi=500,
+            pad_inches=0.0,
+        )
 
         # plot_2(omega, BLF_ks, vol, compliance, dis)
         # plt.savefig(
@@ -930,10 +932,10 @@ if __name__ == "__main__":
         #     pad_inches=0.05,
         # )
 
-        plot_6(omega, BLF_ks, vol, compliance, dis)
-        plt.savefig(
-            "output/final_results/square/dot2.png",
-            bbox_inches="tight",
-            dpi=1000,
-            pad_inches=0.0,
-        )
+        # plot_6(omega, BLF_ks, vol, compliance, dis)
+        # plt.savefig(
+        #     "output/final_results/square/dot2.png",
+        #     bbox_inches="tight",
+        #     dpi=1000,
+        #     pad_inches=0.0,
+        # )
