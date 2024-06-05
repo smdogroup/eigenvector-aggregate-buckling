@@ -3432,6 +3432,7 @@ def gradient_check(topo, problem):
     dis_grad = topo.eigenvector_displacement_deriv(x) @ px
     stress_grad = topo.eigenvector_stress_derivative(x, ks_rho_stress) @ px
     dis_max_grad = topo.eigenvector_displacement_max_deriv(x) @ px
+    c_grad = topo.compliance_gradient(x) @ px
 
     # s = topo.get_stress_values(rho, topo.eta, topo.Q)
     # eta_stress = np.exp(ks_rho_stress * (s - np.max(s)))
@@ -3449,6 +3450,7 @@ def gradient_check(topo, problem):
     dis1 = topo.eigenvector_displacement()
     stress1 = topo.eigenvector_stress(x + dh * px, ks_rho_stress)
     dis_max1 = topo.eigenvector_displacement_max()
+    c1 = topo.compliance(x + dh * px)
     # s1 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     init(x - dh * px)
@@ -3461,29 +3463,36 @@ def gradient_check(topo, problem):
     dis2 = topo.eigenvector_displacement()
     stress2 = topo.eigenvector_stress(x - dh * px, ks_rho_stress)
     dis_max2 = topo.eigenvector_displacement_max()
+    c2 = topo.compliance(x - dh * px)
     # s2 = topo.get_stress_values(topo.rho, topo.eta, topo.Q)
 
     dis_grad_cf = (dis1 - dis2) / (2 * dh)
     stress_grad_cf = (stress1 - stress2) / (2 * dh)
     omega_grad_cf = (omega1 - omega2) / (2 * dh)
     dis_max_grad_cf = (dis_max1 - dis_max2) / (2 * dh)
+    c_grad_cf = (c1 - c2) / (2 * dh)
     # s_grad_cf = (s1 - s2) / (2 * dh)
     ic(dis_grad_cf)
     ic(dis_grad)
     ic(dis_max_grad_cf)
     ic(dis_max_grad)
+    ic(c_grad)
+    ic(c_grad_cf)
+
     error_d_dis_cf = np.abs(dis_grad_cf - dis_grad) / np.abs(dis_grad_cf)
     error_d_stress_cf = np.abs(stress_grad_cf - stress_grad) / np.abs(stress_grad_cf)
     error_d_omega_cf = np.abs(omega_grad_cf - d_omega) / np.abs(omega_grad_cf)
     error_d_dis_max_cf = np.abs(dis_max_grad_cf - dis_max_grad) / np.abs(
         dis_max_grad_cf
     )
+    error_d_c_cf = np.abs(c_grad_cf - c_grad) / np.abs(c_grad_cf)
     # error_s_cf = np.abs(s_grad_cf - ds) / np.abs(s_grad_cf)
 
     ic(error_d_dis_cf)
     ic(error_d_stress_cf)
     ic(error_d_omega_cf)
     ic(error_d_dis_max_cf)
+    ic(error_d_c_cf)
     # ic(error_s_cf)
 
     # dh = 1e-15
@@ -3777,7 +3786,7 @@ def main(args):
         from mpi4py import MPI
 
         paroptprob = ParOptProb(MPI.COMM_SELF, topo)
-        dh = [1e-5]
+        dh = [1e-6]
         if args.check_gradient:
             for i in range(len(dh)):
                 # Note: the accuracy highly depends on the value N_a and N_b
